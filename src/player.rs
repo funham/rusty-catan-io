@@ -2,9 +2,8 @@ use std::collections::BTreeSet;
 
 use crate::topology::*;
 
-
 pub struct Build {
-    pos: VertexId,
+    pos: Vertex,
     btype: BuildType,
 }
 
@@ -14,7 +13,7 @@ pub enum BuildType {
 }
 
 pub struct Road {
-    pos: EdgeId,
+    pos: Edge,
 }
 
 pub type PlayerId = usize;

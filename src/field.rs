@@ -1,4 +1,4 @@
-use crate::HexCoord;
+use crate::Hex;
 use crate::common::*;
 use crate::player::*;
 use crate::topology::*;
@@ -43,27 +43,28 @@ impl<const P_COUNT: usize> Field<P_COUNT> {
 
 enum EdgeContextCreationError {}
 
-impl EdgeContext {
-    pub fn try_new<const P_COUNT: usize>(
-        field: &Field<P_COUNT>,
-        from: VertexId,
-        to: VertexId,
-    ) -> Result<Self, EdgeContextCreationError> {
-        let hexes_from = field.vertices.get(from).unwrap().hexes;
-        let hexes_to = field.vertices.get(to).unwrap().hexes;
-        let intersection = hexes_from
-            .intersection(&hexes_to)
-            .cloned()
-            .collect::<BTreeSet<_>>();
+// impl EdgeContext {
+//     pub fn try_new<const P_COUNT: usize>(
+//         field: &Field<P_COUNT>,
+//         from: VertexId,
+//         to: VertexId,
+//     ) -> Result<Self, EdgeContextCreationError> {
+//         let hexes_from = field.vertices.get(from).unwrap().hexes;
+//         let hexes_to = field.vertices.get(to).unwrap().hexes;
+//         let intersection = hexes_from
+//             .intersection(&hexes_to)
+//             .cloned()
+//             .collect::<BTreeSet<_>>();
 
-        let x_hexes_from = hexes_from
-            .difference(&intersection)
-            .cloned()
-            .collect::<BTreeSet<_>>();
-        let x_hexes_to = hexes_to
-            .difference(&intersection)
-            .cloned()
-            .collect::<BTreeSet<_>>();
+//         let x_hexes_from = hexes_from
+//             .difference(&intersection)
+//             .cloned()
+//             .collect::<BTreeSet<_>>();
+//         let x_hexes_to = hexes_to
+//             .difference(&intersection)
+//             .cloned()
+//             .collect::<BTreeSet<_>>();
 
-    }
-}
+        
+//     }
+// }
