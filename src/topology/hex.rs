@@ -1,9 +1,4 @@
-use std::{
-    collections::BTreeSet,
-    ffi::os_str::Display,
-    fmt::write,
-    hash::{Hash, Hasher},
-};
+use std::hash::Hash;
 
 use itertools::Itertools;
 
@@ -25,6 +20,12 @@ impl From<(i32, i32)> for Hex {
 impl Into<(i32, i32)> for Hex {
     fn into(self) -> (i32, i32) {
         (self.q, self.r)
+    }
+}
+
+impl Into<(i32, i32, i32)> for Hex {
+    fn into(self) -> (i32, i32, i32) {
+        (self.q, self.r, self.get_s())
     }
 }
 
@@ -61,6 +62,13 @@ impl Hex {
 impl std::fmt::Display for Hex {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "q:{}, r:{}, s:{}", self.q, self.r, self.get_s())
+    }
+}
+
+impl Hash for Hex {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.q.hash(state);
+        self.r.hash(state);
     }
 }
 
