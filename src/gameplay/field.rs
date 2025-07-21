@@ -7,7 +7,7 @@ type HexArrangement = BTreeMap<Hex, HexInfo>;
 
 pub struct Field {
     hexes: HexArrangement, // (q, r) |-> HexInfo
-    players: Box<[Player]>,
+    players: Box<[PlayerData]>,
     player_count: usize,
     field_radius: usize,
 }
@@ -56,7 +56,7 @@ impl Field {
         }
     }
 
-    fn make_players() -> Box<[Player]> {
+    fn make_players() -> Box<[PlayerData]> {
         todo!()
     }
 }

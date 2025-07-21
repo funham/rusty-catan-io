@@ -1,5 +1,7 @@
 use std::collections::BTreeSet;
 
+use crate::gameplay::field::Field;
+use crate::gameplay::player_move::{Move, MoveRascals};
 use crate::topology::*;
 
 pub struct Build {
@@ -18,7 +20,12 @@ pub struct Road {
 
 pub type PlayerId = usize;
 
-pub struct Player {
+pub struct PlayerData {
     builds: BTreeSet<Build>,
     roads: BTreeSet<Road>,
+}
+
+pub trait GameActor {
+    fn make_move(&self, field: &Field) -> Move;
+    fn move_rascals(&self, field: &Field) -> MoveRascals;
 }
