@@ -10,8 +10,8 @@ pub struct Build {
 }
 
 pub enum BuildType {
-    SETTLEMENT,
-    CITY,
+    Settlement,
+    City,
 }
 
 pub struct Road {
@@ -20,12 +20,8 @@ pub struct Road {
 
 pub type PlayerId = usize;
 
-pub struct PlayerData {
+pub struct PlayerBuildData {
     builds: BTreeSet<Build>,
     roads: BTreeSet<Road>,
 }
 
-pub trait GameActor {
-    fn make_move(&self, field: &Field) -> Move;
-    fn move_rascals(&self, field: &Field) -> MoveRascals;
-}

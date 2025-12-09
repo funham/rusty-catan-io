@@ -1,43 +1,21 @@
-use std::{io::stdin, rc::Rc};
-
 use rand::{Rng, SeedableRng, rngs::SmallRng};
 
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
-pub struct Probability(f32);
+use crate::math::probability::{Probability, Probable};
 
-impl TryFrom<f32> for Probability {
-    type Error = ();
-    fn try_from(value: f32) -> Result<Self, Self::Error> {
-        if 0.0 < value || value > 1.0 {
-            Err(())
-        } else {
-            Ok(Self { 0: value })
-        }
-    }
-}
-
-impl Into<f32> for Probability {
-    fn into(self) -> f32 {
-        self.0
-    }
-}
-
-impl Probability {
-    pub fn zero() -> Self {
-        Self::try_from(0.0).unwrap()
-    }
-
-    pub fn one() -> Self {
-        Self::try_from(1.0).unwrap()
-    }
-
-    pub fn half() -> Self {
-        Self::try_from(0.5).unwrap()
-    }
-}
-
+/// Value that can be produced by rolling two D6's
+/// `DiceVal \in [2..12]` (11 possible states)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct DiceVal(pub u8);
+pub struct DiceVal(u8);
+
+impl Probable for DiceVal {
+    fn prob(&self) -> Probability {
+        let val = Into::<u8>::into(*self) as i32;
+        let ncomb = 6 - i32::abs(val - 7);
+        let prob = ncomb as f32 / 36.0;
+
+        prob.try_into().expect("check math")
+    }
+}
 
 impl TryFrom<u8> for DiceVal {
     type Error = ();
@@ -58,7 +36,6 @@ impl Into<u8> for DiceVal {
 
 pub trait DiceRoller {
     fn roll(&mut self) -> DiceVal;
-    fn pdf(&self, val: DiceVal) -> Probability;
 }
 
 pub struct RandomDiceRoller {
@@ -79,12 +56,6 @@ impl DiceRoller for RandomDiceRoller {
             .try_into()
             .unwrap()
     }
-
-    fn pdf(&self, val: DiceVal) -> Probability {
-        ((6 - (val.0 as i32 - 7)) as f32 / 36.0)
-            .try_into()
-            .unwrap_or(Probability::zero())
-    }
 }
 
 pub struct ConsoleDiceRoller {
@@ -93,11 +64,11 @@ pub struct ConsoleDiceRoller {
 
 impl DiceRoller for ConsoleDiceRoller {
     fn roll(&mut self) -> DiceVal {
-        for _ in (0..10) {
+        for _ in 0..10 {
             let mut input_line = String::new();
             self.stream
                 .read_line(&mut input_line)
-                .expect("Failed to read line");
+                .expect("IO error: Failed to read line");
 
             if let Ok(x) = input_line.trim().parse::<u8>() {
                 if let Ok(dv) = DiceVal::try_from(x) {
@@ -113,44 +84,123 @@ impl DiceRoller for ConsoleDiceRoller {
             }
         }
 
-        panic!("Type an actual integer, you bitch!")
-    }
-    fn pdf(&self, val: DiceVal) -> Probability {
-        ((6 - (val.0 as i32 - 7)) as f32 / 36.0)
-            .try_into()
-            .unwrap_or(Probability::zero())
+        panic!("Type an actual integer next time, you bitch!")
     }
 }
 
-pub struct Dice {
-    roller: Box<dyn DiceRoller>,
-    state: DiceVal,
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::math::probability::{Sequence, Variant};
+    use rand::SeedableRng;
+    use std::io::{BufReader, Cursor};
 
-impl Dice {
-    pub fn new(roller: Box<dyn DiceRoller>) -> Self {
-        Self {
-            roller,
-            state: DiceVal::try_from(0).unwrap(),
+    // ===== DiceRoller Tests =====
+    #[test]
+    fn random_dice_roller_distribution() {
+        let mut roller = RandomDiceRoller::new();
+        let mut counts = [0u32; 13]; // indices 0-12, we'll use 2-12
+
+        // Roll many times and check distribution
+        for _ in 0..10000 {
+            let val = roller.roll();
+            counts[val.0 as usize] += 1;
         }
+
+        // Check all values in range are generated
+        for i in 2..=12 {
+            assert!(counts[i] > 0, "Value {} never rolled", i);
+        }
+
+        // Check 7 is most common (statistical test)
+        assert!(
+            counts[7] > counts[2] && counts[7] > counts[12],
+            "7 should be more common than extremes"
+        );
     }
 
-    pub fn roll(&mut self) -> DiceVal {
-        self.state = self.roller.roll();
-        self.state
+    #[test]
+    fn random_dice_roller_deterministic_with_seed() {
+        // Create deterministic RNG
+        let seed = [42; 32];
+        let rng = SmallRng::from_seed(seed);
+        let mut roller = RandomDiceRoller { rng };
+
+        // Get sequence of rolls
+        let rolls: Vec<u8> = (0..10).map(|_| roller.roll().into()).collect();
+
+        // Create another roller with same seed
+        let rng2 = SmallRng::from_seed(seed);
+        let mut roller2 = RandomDiceRoller { rng: rng2 };
+        let rolls2: Vec<u8> = (0..10).map(|_| roller2.roll().into()).collect();
+
+        assert_eq!(rolls, rolls2, "Same seed should produce same sequence");
     }
 
-    pub fn state(&self) -> DiceVal {
-        self.state
+    #[test]
+    fn console_dice_roller_valid_input() {
+        let input = "7\n"; // Simulate user typing "7"
+        let cursor = Cursor::new(input);
+        let reader = BufReader::new(cursor);
+
+        let mut roller = ConsoleDiceRoller {
+            stream: Box::new(reader),
+        };
+
+        let result = roller.roll();
+        assert_eq!(result.0, 7);
     }
 
-    pub fn pdf(&self, val: DiceVal) -> Probability {
-        self.roller.pdf(val)
-    }
-}
+    #[test]
+    fn console_dice_roller_retry_on_invalid() {
+        // Test with invalid input followed by valid input
+        let input = "invalid\n15\n8\n";
+        let cursor = Cursor::new(input);
+        let reader = BufReader::new(cursor);
 
-impl Default for Dice {
-    fn default() -> Self {
-        Dice::new(Box::new(RandomDiceRoller::new()))
+        let mut roller = ConsoleDiceRoller {
+            stream: Box::new(reader),
+        };
+
+        let result = roller.roll();
+        assert_eq!(result.0, 8);
+    }
+
+    #[test]
+    #[should_panic(expected = "Type an actual integer next time")]
+    fn console_dice_roller_panic_after_max_attempts() {
+        // 10 lines of invalid input
+        let input = "invalid\n".repeat(10);
+        let cursor = Cursor::new(input);
+        let reader = BufReader::new(cursor);
+
+        let mut roller = ConsoleDiceRoller {
+            stream: Box::new(reader),
+        };
+
+        roller.roll(); // Should panic
+    }
+
+    // ===== Integration Tests =====
+    #[test]
+    fn complete_workflow() {
+        // Create some dice values
+        let low_values = vec![DiceVal::try_from(2).unwrap(), DiceVal::try_from(3).unwrap()];
+
+        let high_values = vec![
+            DiceVal::try_from(11).unwrap(),
+            DiceVal::try_from(12).unwrap(),
+        ];
+
+        // Create variants
+        let low_variant = Variant::new(low_values).unwrap();
+        let high_variant = Variant::new(high_values).unwrap();
+
+        // Create sequence
+        let sequence = Sequence::new(vec![low_variant, high_variant]);
+
+        // Calculate probability
+        let prob = sequence.prob();
+        assert!(prob.to_float() > 0.0 && prob.to_float() < 1.0);
     }
 }

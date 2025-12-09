@@ -4,17 +4,20 @@ use crate::gameplay::{hex::*, player::*, resource::*};
 use crate::topology::*;
 
 type HexArrangement = BTreeMap<Hex, HexInfo>;
+type PortArrangement = BTreeMap<Vertex, PortType>;
 
 pub struct Field {
-    hexes: HexArrangement, // (q, r) |-> HexInfo
-    players: Box<[PlayerData]>,
-    player_count: usize,
+    hexes: HexArrangement,  // (q, r) |-> HexInfo
+    ports: PortArrangement, // v |-> PortType
     field_radius: usize,
+    player_builds: Vec<PlayerBuildData>,
+    robber_pos: Hex,
 }
 
 pub struct FieldBuildParam {
     field_radius: usize,
     hex_arrangement: HexArrangement,
+    port_arrangement: PortArrangement,
 }
 
 pub enum FieldBuildError {
@@ -25,6 +28,7 @@ impl FieldBuildParam {
     pub fn try_new(
         field_radius: usize,
         hex_arrangement: HexArrangement,
+        port_arrangement: PortArrangement,
     ) -> Result<Self, FieldBuildError> {
         if hex_arrangement.len() != Field::field_size_by_radius(field_radius) {
             return Err(FieldBuildError::WrongAmountOfHexesProvided);
@@ -33,6 +37,7 @@ impl FieldBuildParam {
         Ok(Self {
             field_radius,
             hex_arrangement,
+            port_arrangement,
         })
     }
 }
@@ -43,20 +48,26 @@ impl Field {
     }
 
     pub fn new(param: FieldBuildParam) -> Self {
-        let players = Self::make_players();
-        let player_count = players.len();
-        let hexes = param.hex_arrangement;
-        let field_radius = param.field_radius;
+        let robber_pos = Self::find_desert_pos(&param.hex_arrangement);
 
         Self {
-            hexes,
-            players,
-            player_count,
-            field_radius,
+            hexes: param.hex_arrangement,
+            ports: param.port_arrangement,
+            field_radius: param.field_radius,
+            player_builds: Vec::new(),
+            robber_pos,
         }
     }
 
-    fn make_players() -> Box<[PlayerData]> {
-        todo!()
+    fn find_desert_pos(hexes: &HexArrangement) -> Hex {
+        hexes
+            .iter()
+            .filter_map(|(k, v)| match v.hex_type {
+                HexType::Desert => Some(k),
+                _ => None,
+            })
+            .next()
+            .unwrap()
+            .clone()
     }
 }

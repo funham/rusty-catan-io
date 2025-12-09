@@ -7,6 +7,6 @@ pub enum HexType {
 }
 
 pub struct HexInfo {
-    hex_type: HexType,
-    number: u8,
+    pub hex_type: HexType,
+    pub number: u8,
 }
