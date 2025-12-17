@@ -8,6 +8,14 @@ type HexArrangement = BTreeMap<Hex, HexInfo>;
 type PortArrangement = BTreeMap<Edge, PortType>;
 type HexesByNum = BTreeMap<DiceVal, Vec<Hex>>;
 type PortsByPlayer = BTreeMap<PlayerId, Vec<PortType>>;
+type GameInitPlayerBuilds = ((Hex, Edge), (Hex, Edge));
+
+pub struct GameInitField {
+    pub field_radius: usize,
+    pub hexes: HexArrangement,             // (q, r) -> HexInfo
+    pub ports: PortArrangement,            // e -> PortType
+    pub builds: Vec<GameInitPlayerBuilds>, // id -> InitialBuids
+}
 
 struct FieldCache {
     desert_pos: Hex,
@@ -16,10 +24,10 @@ struct FieldCache {
 }
 
 pub struct Field {
+    pub field_radius: usize,
     pub hexes: HexArrangement,        // (q, r) -> HexInfo
     pub ports: PortArrangement,       // e -> PortType
     pub builds: Vec<PlayerBuildData>, // id -> BuildData
-    pub field_radius: usize,
     pub robber_pos: Hex,
     cache_: FieldCache,
 }
@@ -55,6 +63,24 @@ impl FieldBuildParam {
             hex_arrangement,
             port_arrangement,
         })
+    }
+}
+
+impl GameInitField {
+    pub fn new() -> Self {
+        todo!()
+    }
+}
+
+pub enum FieldPromotingError {
+    NotEnoughBuilds,
+}
+
+impl TryInto<Field> for GameInitField {
+    type Error = FieldPromotingError;
+
+    fn try_into(self) -> Result<Field, Self::Error> {
+        todo!()
     }
 }
 

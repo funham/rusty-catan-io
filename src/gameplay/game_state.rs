@@ -1,9 +1,11 @@
-use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::default;
 use std::rc::Rc;
+use std::{cell::RefCell, marker::PhantomData};
 
 use num::Integer;
 
+use crate::gameplay::field::GameInitField;
 use crate::{
     gameplay::{
         dev_card::DevCardKind,
@@ -17,29 +19,56 @@ use crate::{
     topology::Edge,
 };
 
-pub struct GameTurn {
+pub struct RegularCycle;
+pub struct BackAndForthCycle;
+pub struct GameTurn<CycleType = RegularCycle> {
     n_players: u8, // in [0..=4]
     rounds_played: u16,
     turn_index: u8, // in [0..=n_players]
+    _p: PhantomData<CycleType>,
 }
 
-impl GameTurn {
+impl<CycleType> GameTurn<CycleType> {
     /// Create `GameTurn` object with specified number of players
     pub fn new(n_players: u8) -> Self {
         Self {
             n_players,
             rounds_played: 0,
             turn_index: 0,
+            _p: PhantomData::default(),
         }
     }
 
+    pub fn new_with_initial_index(n_players: u8, initial_index: u8) -> Option<Self> {
+        if initial_index >= n_players {
+            return None;
+        }
+
+        Some(Self {
+            n_players,
+            rounds_played: 0,
+            turn_index: initial_index,
+            _p: PhantomData::default(),
+        })
+    }
+
+    pub fn get_rounds_played(&self) -> u16 {
+        self.rounds_played
+    }
+
+    pub fn get_turn_index(&self) -> usize {
+        self.turn_index as usize
+    }
+}
+
+impl GameTurn<RegularCycle> {
     /// Pass to the next player
     ///
     /// # Examples
     /// ~~~
-    /// use catan_bot::gameplay::game::GameTurn;
+    /// use rusty_catan_io::gameplay::game_state::*;
     ///
-    /// let mut turn = GameTurn::new(3);
+    /// let mut turn = GameTurn::<RegularCycle>::new(3);
     /// turn.next();
     /// turn.next();
     /// assert_eq!(turn.get_turn_index(), 2);
@@ -55,17 +84,49 @@ impl GameTurn {
         self.rounds_played += round_played as u16;
         self.turn_index = index_truncated;
     }
+}
 
-    pub fn get_rounds_played(&self) -> u16 {
-        self.rounds_played
-    }
+impl GameTurn<BackAndForthCycle> {
+    /// Pass to the next player
+    ///
+    /// # Examples
+    /// ~~~
+    /// use rusty_catan_io::gameplay::game_state::*;
+    ///
+    /// let mut turn = GameTurn::<BackAndForthCycle>::new(3);
+    /// turn.next();
+    /// turn.next();
+    /// assert_eq!(turn.get_turn_index(), 2);
+    /// assert_eq!(turn.get_rounds_played(), 0);
+    /// turn.next();
+    /// assert_eq!(turn.get_turn_index(), 2);
+    /// assert_eq!(turn.get_rounds_played(), 1);
+    /// turn.next();
+    /// assert_eq!(turn.get_turn_index(), 1);
+    /// assert_eq!(turn.get_rounds_played(), 1);
+    /// turn.next();
+    /// assert_eq!(turn.get_turn_index(), 0);
+    /// assert_eq!(turn.get_rounds_played(), 1);
+    /// turn.next();
+    /// assert_eq!(turn.get_turn_index(), 0);
+    /// assert_eq!(turn.get_rounds_played(), 2);
+    /// ~~~
+    pub fn next(&mut self) {
+        let incremented = self.turn_index as i32
+            + match self.rounds_played {
+                even if even.is_even() => 1,
+                _ => -1,
+            };
 
-    pub fn get_turn_index(&self) -> usize {
-        self.turn_index as usize
+        if (0..self.n_players as i32).contains(&incremented) {
+            self.turn_index = incremented as u8;
+        } else {
+            self.rounds_played.inc();
+        }
     }
 }
 
-impl Into<PlayerId> for GameTurn {
+impl<T> Into<PlayerId> for GameTurn<T> {
     fn into(self) -> PlayerId {
         self.get_turn_index() as PlayerId
     }
@@ -135,6 +196,12 @@ impl PlayerTrade {
     }
 }
 
+pub struct GameInitializationState {
+    pub field: GameInitField,
+    pub turn: GameTurn<BackAndForthCycle>,
+    pub strats: Vec<Rc<RefCell<dyn Strategy>>>,
+}
+
 pub struct GameState {
     pub(super) field: Field,
     pub(super) dice: Box<dyn DiceRoller>,
@@ -160,10 +227,9 @@ pub struct TurnHandlingParams {
     pub(super) strategy: Rc<RefCell<dyn Strategy>>,
 }
 
+impl GameInitializationState {}
+
 impl GameState {
-    pub fn new() -> Self {
-        todo!()
-    }
     pub fn get_perspective(&self, player_id: PlayerId) -> Perspective {
         let opponents = self
             .players

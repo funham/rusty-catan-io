@@ -191,7 +191,7 @@ impl GameController {
             for hex in hexes_to_harvest {
                 match game.field.hexes[hex].hex_type {
                     HexType::Some(resource) => {
-                        game.pay_to_player((resource, amount_to_harvest).into(), player_id);
+                        let _ = game.pay_to_player((resource, amount_to_harvest).into(), player_id);
                     }
                     HexType::Desert => todo!(),
                 }
