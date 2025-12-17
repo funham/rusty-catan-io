@@ -1,10 +1,8 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
-    convert::Infallible,
+    collections::{BTreeMap},
     ops::{Index, IndexMut},
 };
 
-use num::Integer;
 use rand::Rng;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

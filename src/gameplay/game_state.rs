@@ -1,29 +1,20 @@
-use std::cell::{RefCell, RefMut};
-use std::collections::{BTreeMap, BTreeSet};
+use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use num::Integer;
 
-use crate::gameplay::hex::HexInfo;
-use crate::gameplay::move_request::{
-    BankTrade, Buildable, PersonalTradeOffer, PublicTradeOffer, RobRequest,
-};
-use crate::gameplay::player::HasPos;
-use crate::gameplay::strategy::strategy_answers::{
-    self, MoveRequestAfterDiceThrow, MoveRequestAfterDiceThrowAndDevCard,
-};
-use crate::gameplay::{hex, resource};
-use crate::topology::{Edge, Hex, Vertex};
 use crate::{
     gameplay::{
         dev_card::DevCardKind,
         field::Field,
-        move_request::DevCardUsage,
+        move_request::{DevCardUsage, RobRequest},
         player::{OpponentData, Player, PlayerData, PlayerId},
-        resource::{HasCost, Resource, ResourceCollection},
+        resource::{Resource, ResourceCollection},
         strategy::Strategy,
     },
-    math::dice::{DiceRoller, DiceVal},
+    math::dice::DiceRoller,
+    topology::Edge,
 };
 
 pub struct GameTurn {

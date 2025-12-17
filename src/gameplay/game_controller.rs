@@ -1,29 +1,18 @@
-use std::cell::{RefCell, RefMut};
-use std::collections::{BTreeMap, BTreeSet};
-use std::rc::Rc;
+use std::collections::BTreeSet;
 
-use num::Integer;
-
-use crate::gameplay::hex::HexInfo;
-use crate::gameplay::move_request::{
-    BankTrade, Buildable, PersonalTradeOffer, PublicTradeOffer, RobRequest,
-};
-use crate::gameplay::player::HasPos;
-use crate::gameplay::strategy::strategy_answers::{
-    self, MoveRequestAfterDiceThrow, MoveRequestAfterDiceThrowAndDevCard,
-};
-use crate::gameplay::{hex, resource};
-use crate::topology::{Edge, Hex, Vertex};
 use crate::{
     gameplay::{
-        dev_card::DevCardKind,
-        field::Field,
-        move_request::DevCardUsage,
-        player::{OpponentData, Player, PlayerData, PlayerId},
-        resource::{HasCost, Resource, ResourceCollection},
-        strategy::Strategy,
+        hex::HexType,
+        move_request::{
+            BankTrade, Buildable, DevCardUsage, PersonalTradeOffer, PublicTradeOffer, RobRequest,
+        },
+        player::{HasPos, PlayerId},
+        strategy::strategy_answers::{
+            self, MoveRequestAfterDiceThrow, MoveRequestAfterDiceThrowAndDevCard,
+        },
     },
-    math::dice::{DiceRoller, DiceVal},
+    math::dice::DiceVal,
+    topology::{Hex, Vertex},
 };
 
 use crate::gameplay::game_state::{GameState, TurnHandlingParams};
@@ -201,10 +190,10 @@ impl GameController {
 
             for hex in hexes_to_harvest {
                 match game.field.hexes[hex].hex_type {
-                    hex::HexType::Some(resource) => {
+                    HexType::Some(resource) => {
                         game.pay_to_player((resource, amount_to_harvest).into(), player_id);
                     }
-                    hex::HexType::Desert => todo!(),
+                    HexType::Desert => todo!(),
                 }
             }
         }
