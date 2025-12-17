@@ -7,6 +7,64 @@ use crate::math::probability::{Probability, Probable};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct DiceVal(u8);
 
+impl DiceVal {
+    pub unsafe fn new_uncheked(val: u8) -> Self {
+        Self { 0: val }
+    }
+
+    pub fn new(value: u8) -> Option<Self> {
+        if (2..=12).contains(&value) {
+            Some(Self { 0: value })
+        } else {
+            None
+        }
+    }
+
+    pub fn two() -> Self {
+        Self::new(2).expect("2 is a valid dice value")
+    }
+
+    pub fn three() -> Self {
+        Self::new(3).expect("3 is a valid dice value")
+    }
+
+    pub fn four() -> Self {
+        Self::new(4).expect("4 is a valid dice value")
+    }
+
+    pub fn five() -> Self {
+        Self::new(5).expect("5 is a valid dice value")
+    }
+
+    pub fn six() -> Self {
+        Self::new(6).expect("6 is a valid dice value")
+    }
+
+    pub fn seven() -> Self {
+        Self::new(7).expect("7 is a valid dice value")
+    }
+
+    pub fn eight() -> Self {
+        Self::new(8).expect("8 is a valid dice value")
+    }
+
+    pub fn nine() -> Self {
+        Self::new(9).expect("9 is a valid dice value")
+    }
+
+    pub fn ten() -> Self {
+        Self::new(10).expect("10 is a valid dice value")
+    }
+
+    pub fn eleven() -> Self {
+        Self::new(11).expect("11 is a valid dice value")
+    }
+
+    pub fn twelve() -> Self {
+        Self::new(12).expect("12 is a valid dice value")
+    }
+}
+
 impl Probable for DiceVal {
     fn prob(&self) -> Probability {
         let val = Into::<u8>::into(*self) as i32;
@@ -20,10 +78,9 @@ impl Probable for DiceVal {
 impl TryFrom<u8> for DiceVal {
     type Error = ();
     fn try_from(value: u8) -> Result<Self, Self::Error> {
-        if (2..=12).contains(&value) {
-            Ok(Self { 0: value })
-        } else {
-            Err(())
+        match Self::new(value) {
+            Some(x) => Ok(x),
+            None => Err(()),
         }
     }
 }

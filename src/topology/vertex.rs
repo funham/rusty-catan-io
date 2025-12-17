@@ -1,10 +1,10 @@
 use itertools::Itertools;
 use std::collections::BTreeSet;
 
-use crate::topology::hex::*;
 use crate::topology::edge::*;
+use crate::topology::hex::*;
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct Vertex(Hex, Hex, Hex);
 
 #[derive(Debug)]
@@ -40,7 +40,7 @@ impl TryFrom<(Hex, Hex, Hex)> for Vertex {
 }
 
 impl Vertex {
-    pub fn set(&self) -> BTreeSet<Hex> {
+    pub fn as_set(&self) -> BTreeSet<Hex> {
         BTreeSet::from([self.0, self.1, self.2])
     }
 
@@ -56,7 +56,7 @@ impl Vertex {
             let vertices = e
                 .dual()
                 .set()
-                .difference(&self.set().union(&e.set()).cloned().collect())
+                .difference(&self.as_set().union(&e.set()).cloned().collect())
                 .sorted()
                 .cloned()
                 .collect::<Vec<_>>();

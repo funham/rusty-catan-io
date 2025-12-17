@@ -1,17 +1,33 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::gameplay::{hex::*, player::*, resource::*};
+use crate::math::dice::DiceVal;
 use crate::topology::*;
 
 type HexArrangement = BTreeMap<Hex, HexInfo>;
-type PortArrangement = BTreeMap<Vertex, PortType>;
+type PortArrangement = BTreeMap<Edge, PortType>;
+type HexesByNum = BTreeMap<DiceVal, Vec<Hex>>;
+type PortsByPlayer = BTreeMap<PlayerId, Vec<PortType>>;
+
+struct FieldCache {
+    desert_pos: Hex,
+    hex_by_num: HexesByNum,
+    ports_by_player: PortsByPlayer, // may be moved to PlayerData later
+}
 
 pub struct Field {
-    hexes: HexArrangement,  // (q, r) |-> HexInfo
-    ports: PortArrangement, // v |-> PortType
-    field_radius: usize,
-    player_builds: Vec<PlayerBuildData>,
-    robber_pos: Hex,
+    pub hexes: HexArrangement,        // (q, r) -> HexInfo
+    pub ports: PortArrangement,       // e -> PortType
+    pub builds: Vec<PlayerBuildData>, // id -> BuildData
+    pub field_radius: usize,
+    pub robber_pos: Hex,
+    cache_: FieldCache,
+}
+
+impl FieldCache {
+    fn new(hexes: &HexArrangement, ports: &PortArrangement) -> Self {
+        todo!()
+    }
 }
 
 pub struct FieldBuildParam {
@@ -48,18 +64,29 @@ impl Field {
     }
 
     pub fn new(param: FieldBuildParam) -> Self {
-        let robber_pos = Self::find_desert_pos(&param.hex_arrangement);
+        let desert_pos = Self::find_desert_pos_static(&param.hex_arrangement);
+
+        let cache = FieldCache::new(&param.hex_arrangement, &param.port_arrangement);
 
         Self {
             hexes: param.hex_arrangement,
             ports: param.port_arrangement,
             field_radius: param.field_radius,
-            player_builds: Vec::new(),
-            robber_pos,
+            builds: Vec::new(),
+            robber_pos: desert_pos,
+            cache_: cache,
         }
     }
 
-    fn find_desert_pos(hexes: &HexArrangement) -> Hex {
+    pub fn get_desert_pos(&self) -> Hex {
+        self.cache_.desert_pos
+    }
+
+    pub fn hexes_by_num(&self, num: DiceVal) -> BTreeSet<Hex> {
+        todo!()
+    }
+
+    fn find_desert_pos_static(hexes: &HexArrangement) -> Hex {
         hexes
             .iter()
             .filter_map(|(k, v)| match v.hex_type {

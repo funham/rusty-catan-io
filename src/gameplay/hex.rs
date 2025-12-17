@@ -6,6 +6,7 @@ pub enum HexType {
     Desert,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct HexInfo {
     pub hex_type: HexType,
     pub number: u8,

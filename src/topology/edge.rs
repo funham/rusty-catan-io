@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use crate::topology::hex::*;
 use crate::topology::vertex::*;
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct Edge(Hex, Hex);
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -36,8 +36,8 @@ impl TryFrom<(Vertex, Vertex)> for Edge {
     fn try_from(value: (Vertex, Vertex)) -> Result<Self, Self::Error> {
         let inter = value
             .0
-            .set()
-            .intersection(&value.1.set())
+            .as_set()
+            .intersection(&value.1.as_set())
             .cloned()
             .collect::<Vec<_>>();
 
@@ -64,8 +64,8 @@ impl TryFrom<(Vertex, Vertex)> for EdgeDual {
     fn try_from(value: (Vertex, Vertex)) -> Result<Self, Self::Error> {
         let inter = value
             .0
-            .set()
-            .symmetric_difference(&value.1.set())
+            .as_set()
+            .symmetric_difference(&value.1.as_set())
             .cloned()
             .collect::<Vec<_>>();
 
