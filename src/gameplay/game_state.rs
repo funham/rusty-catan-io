@@ -353,7 +353,7 @@ impl GameState {
             }
         }
 
-        self.players[user]
+        let _ = self.players[user]
             .data
             .dev_cards
             .move_to_played(usage.card());
