@@ -3,9 +3,12 @@ use std::default;
 use std::rc::Rc;
 use std::{cell::RefCell, marker::PhantomData};
 
+use itertools::Itertools;
 use num::Integer;
+use num::traits::identities;
 
-use crate::gameplay::field::GameInitField;
+use crate::gameplay::dev_card::UsableDevCardKind;
+use crate::gameplay::field::{self, GameInitField};
 use crate::{
     gameplay::{
         dev_card::DevCardKind,
@@ -208,6 +211,8 @@ pub struct GameState {
     pub(super) bank: Bank,
     pub(super) players: Vec<Player>,
     pub(super) turn: GameTurn,
+    pub(super) longest_tract: Option<PlayerId>,
+    pub(super) largest_army: Option<PlayerId>,
 }
 
 /// player's perspective on a game, used in `Strategy`
@@ -228,6 +233,13 @@ pub struct TurnHandlingParams {
 }
 
 impl GameInitializationState {}
+
+#[derive(Debug)]
+pub enum DevCardUsageError {
+    CardNotFoundInInventory,
+    InvalidHex,
+    InvalidEdge,
+}
 
 impl GameState {
     pub fn get_perspective(&self, player_id: PlayerId) -> Perspective {
@@ -302,81 +314,156 @@ impl GameState {
             .collect::<Vec<_>>()
     }
 
-    // TODO: add validation (return Result<(), ...>)
-    pub fn move_robbers(&mut self, pos: crate::topology::hex::Hex) {
-        self.field.robber_pos = pos;
-    }
-
-    // TODO: add validation
-    pub fn rob(&mut self, rob_request: RobRequest, robber_id: PlayerId) {
-        if let Some(robbed_id) = rob_request.player {
-            let (left, right) = self.players.split_at_mut(robbed_id.max(robber_id));
-            let left_len = left.len();
-            let ((robbed_half, robbed_id), (robber_half, robber_id)) = match robbed_id
-                .cmp(&robber_id)
-            {
-                std::cmp::Ordering::Equal => unreachable!("you can't rob yourself"),
-                std::cmp::Ordering::Less => ((left, robbed_id), (right, robber_id - left_len)),
-                std::cmp::Ordering::Greater => ((right, robbed_id - left_len), (left, robber_id)),
-            };
-
-            let robbed_account = &mut robbed_half[robbed_id].data.resources;
-            let robber_account = &mut robber_half[robber_id].data.resources;
-
-            // let player_to_rob = &mut self.players[id];
-            let stolen = robbed_account.peek_random();
-            if let Some(card) = stolen {
-                Transfer::new(robbed_account, robber_account, card.into());
-            }
-        }
+    pub fn count_max_tract_length(&self, player_id: PlayerId) -> u16 {
+        todo!("implement some graph algorithm (maybe store graphs for each player in `PlayerBuildData`")
     }
 
     /// goes through the players and if one have >9 vp returns it
     pub fn check_win_condition(&self) -> Option<PlayerId> {
-        todo!()
-    }
+        const VP_TO_WIN: u8 = 10; // TODO: move outside to config
+        for player_id in self.player_ids_starting_from(0) {
+            let pure_vp = self.count_vp_without_track_and_army(player_id);
+            let tract_pts = match self.longest_tract {
+                Some(id) if id == player_id => 2,
+                _ => 0,
+            };
+            let army_pts = match self.largest_army {
+                Some(id) if id == player_id => 2,
+                _ => 0,
+            };
 
-    // TODO: add validation
-    pub fn use_dev_card(&mut self, usage: DevCardUsage, user: PlayerId) {
-        match usage {
-            DevCardUsage::Knight(rob_request) => {
-                self.rob(rob_request, user);
-            }
-            DevCardUsage::YearOfPlenty(list) => {
-                self.use_year_of_plenty(list, user);
-            }
-            DevCardUsage::RoadBuild(x) => {
-                self.use_roadbuild(x, user);
-            }
-            DevCardUsage::Monopoly(resource) => {
-                self.use_monopoly(resource, user);
+            if pure_vp + tract_pts + army_pts > VP_TO_WIN as u16 {
+                return Some(player_id);
             }
         }
 
-        let _ = self.players[user]
-            .data
-            .dev_cards
-            .move_to_played(usage.card());
+        None
     }
 
-    /* helper functions used only by `use_dev_card` */
+    pub fn count_vp_without_track_and_army(&self, player_id: PlayerId) -> u16 {
+        let mut score = 0;
+        score += self.players[player_id].data.dev_cards.victory_pts;
+        score += self.field.builds[player_id].settlements.len() as u16;
+        score += self.field.builds[player_id].cities.len() as u16 * 2;
+        score
+    }
 
-    // TODO: add validation
+    /// no, not in that way
+    pub fn execute_robbers(
+        &mut self,
+        rob_request: RobRequest,
+        robber_id: PlayerId,
+    ) -> Result<(), DevCardUsageError> {
+        // move robbers
+        if (self.field.field_radius as i32) < rob_request.hex.len() {
+            return Err(DevCardUsageError::InvalidHex);
+        }
+
+        self.field.robber_pos = rob_request.hex;
+
+        // steal card
+        if let Some(robbed_id) = rob_request.player {
+            self.rob(robbed_id, robber_id);
+        }
+        Ok(())
+    }
+
+    pub fn use_dev_card(
+        &mut self,
+        usage: DevCardUsage,
+        user: PlayerId,
+    ) -> Result<(), DevCardUsageError> {
+        match usage {
+            DevCardUsage::Knight(rob_request) => {
+                self.use_knight(rob_request, user)?;
+            }
+            DevCardUsage::YearOfPlenty(list) => {
+                self.use_year_of_plenty(list, user)?;
+            }
+            DevCardUsage::RoadBuild(x) => {
+                self.use_roadbuild(x, user)?;
+            }
+            DevCardUsage::Monopoly(resource) => {
+                self.use_monopoly(resource, user)?;
+            }
+        }
+
+        if let Err(_) = self.players[user]
+            .data
+            .dev_cards
+            .move_to_played(usage.card())
+        {
+            return Err(DevCardUsageError::CardNotFoundInInventory);
+        }
+
+        Ok(())
+    }
+
+    /* private helper functions */
+    
+    /// steal random card from another player (surprisingly complex logic)
+    fn rob(&mut self, robbed_id: PlayerId, robber_id: PlayerId) {
+        let (left, right) = self.players.split_at_mut(robbed_id.max(robber_id));
+        let left_len = left.len();
+        let ((robbed_half, robbed_id), (robber_half, robber_id)) = match robbed_id.cmp(&robber_id) {
+            std::cmp::Ordering::Equal => unreachable!("you can't rob yourself"),
+            std::cmp::Ordering::Less => ((left, robbed_id), (right, robber_id - left_len)),
+            std::cmp::Ordering::Greater => ((right, robbed_id - left_len), (left, robber_id)),
+        };
+
+        let robbed_account = &mut robbed_half[robbed_id].data.resources;
+        let robber_account = &mut robber_half[robber_id].data.resources;
+
+        let stolen = robbed_account.peek_random();
+        if let Some(card) = stolen {
+            Transfer::new(robbed_account, robber_account, card.into()).execute();
+        }
+    }
+
+    fn use_knight(
+        &mut self,
+        rob_request: RobRequest,
+        robber_id: PlayerId,
+    ) -> Result<(), DevCardUsageError> {
+        self.execute_robbers(rob_request, robber_id)?;
+
+        // update largest army logic
+        let knight_count =
+            self.players[robber_id].data.dev_cards.played[UsableDevCardKind::Knight] + 1;
+
+        let curr_best_count = match self.largest_army {
+            Some(id) => self.players[id].data.dev_cards.played[UsableDevCardKind::Knight],
+            None => 2, // a bit dangerous hack
+        };
+
+        if knight_count > curr_best_count {
+            self.largest_army = Some(robber_id);
+        }
+
+        Ok(())
+    }
+
     fn use_year_of_plenty(
         &mut self,
         list: (Resource, Resource),
         player: PlayerId,
-    ) -> ResourceCollection {
+    ) -> Result<(), DevCardUsageError> {
         todo!()
     }
 
-    // TODO: add validation
-    fn use_roadbuild(&mut self, poses: (Edge, Edge), player: PlayerId) {
+    fn use_roadbuild(
+        &mut self,
+        poses: (Edge, Edge),
+        player: PlayerId,
+    ) -> Result<(), DevCardUsageError> {
         todo!()
     }
 
-    // TODO: add validation
-    fn use_monopoly(&mut self, resource: Resource, player: PlayerId) {
+    fn use_monopoly(
+        &mut self,
+        resource: Resource,
+        player: PlayerId,
+    ) -> Result<(), DevCardUsageError> {
         todo!()
     }
 }

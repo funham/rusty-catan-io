@@ -225,12 +225,20 @@ impl GameController {
     }
 
     fn execute_seven(game: &mut GameState, params: &mut TurnHandlingParams) {
-        for player in &mut game.players {
-            player.strategy.borrow_mut().drop_half(todo!());
+        for player in &game.players {
+            player
+                .strategy
+                .borrow_mut()
+                .drop_half(&game.get_perspective(params.player_id));
         }
 
-        let rob_request: RobRequest = params.strategy.borrow_mut().rob(todo!());
-        game.rob(rob_request, params.player_id);
+        let rob_request: RobRequest = params
+            .strategy
+            .borrow_mut()
+            .rob(&game.get_perspective(params.player_id));
+
+        game.execute_robbers(rob_request, params.player_id)
+            .expect("bruuh");
     }
 
     /// Roll dice, asks strategy if 7, harvest resources for all players otherwise

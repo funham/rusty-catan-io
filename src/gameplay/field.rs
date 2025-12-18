@@ -107,7 +107,7 @@ impl Field {
     pub fn get_desert_pos(&self) -> Hex {
         self.cache_.desert_pos
     }
-
+    
     pub fn hexes_by_num(&self, num: DiceVal) -> BTreeSet<Hex> {
         todo!()
     }

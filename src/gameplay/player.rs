@@ -5,6 +5,7 @@ use std::rc::Rc;
 use crate::gameplay::dev_card::{DevCardData, OpponentDevCardData};
 use crate::gameplay::resource::{HasCost, ResourceCollection};
 use crate::gameplay::strategy;
+use crate::math::graph::Graph;
 use crate::topology::*;
 
 pub trait HasPos {
@@ -68,6 +69,7 @@ pub struct PlayerBuildData {
     pub settlements: BTreeSet<Settlement>,
     pub cities: BTreeSet<City>,
     pub roads: BTreeSet<Road>,
+    pub road_graph: Graph,
 }
 
 pub struct PlayerData {
