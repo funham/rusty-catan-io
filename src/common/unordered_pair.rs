@@ -1,5 +1,5 @@
 /// An unordered pair of two distinct values
-#[derive(Debug)]
+#[derive(Debug, Eq)]
 pub struct UnorderedPair<T: PartialEq>(T, T);
 
 impl<T: PartialEq> PartialEq for UnorderedPair<T> {
