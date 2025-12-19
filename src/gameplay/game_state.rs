@@ -1,14 +1,10 @@
 use std::collections::BTreeMap;
-use std::default;
-use std::rc::Rc;
-use std::{cell::RefCell, marker::PhantomData};
+use std::marker::PhantomData;
 
-use itertools::Itertools;
 use num::Integer;
-use num::traits::identities;
 
 use crate::gameplay::dev_card::UsableDevCardKind;
-use crate::gameplay::field::{self, GameInitField};
+use crate::gameplay::field::GameInitField;
 use crate::{
     gameplay::{
         dev_card::DevCardKind,
@@ -207,7 +203,6 @@ impl PlayerTrade {
 pub struct GameInitializationState {
     pub field: GameInitField,
     pub turn: GameTurn<BackAndForthCycle>,
-    pub strats: Vec<Rc<RefCell<dyn Strategy>>>,
 }
 
 #[derive(Debug)]

@@ -1,13 +1,10 @@
-use std::{default, marker::PhantomData};
-
 use crate::{
     gameplay::{
         dev_card::UsableDevCardKind,
-        field::Field,
         player::*,
-        resource::{self, HasCost, Resource, ResourceCollection},
+        resource::{HasCost, Resource, ResourceCollection},
     },
-    topology::{Path, Hex},
+    topology::{Hex, Path},
 };
 
 #[derive(Debug, Clone, Copy)]
