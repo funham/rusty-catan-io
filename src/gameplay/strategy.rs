@@ -83,14 +83,14 @@ impl Strategy for LazyAssStrategy {
         &mut self,
         perspective: &Perspective,
     ) -> MoveRequestAfterDiceThrow {
-        todo!()
+        MoveRequestAfterDiceThrow::EndMove
     }
 
     fn move_request_after_dice_throw_and_dev_card(
         &mut self,
         perspective: &Perspective,
     ) -> MoveRequestAfterDiceThrowAndDevCard {
-        todo!()
+        MoveRequestAfterDiceThrowAndDevCard::EndMove
     }
 }
 

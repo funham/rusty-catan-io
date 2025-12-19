@@ -29,7 +29,6 @@ pub enum GameResult {
 #[derive(Debug, Default)]
 pub struct GameController {}
 
-// TODO: add GUI calls (View as in MVC pattern)
 impl GameController {
     // execute game untill it's over
     pub fn run<'a>(
@@ -61,7 +60,7 @@ impl GameController {
 
     /// Requests current player's strategy, handles it's answers
     /// Leads to recursion in `handle_rest()`
-    fn handle_turn(params: &mut TurnHandlingParams) -> Result<(), bool> {
+    fn handle_turn(params: &mut TurnHandlingParams) -> Result<(), ()> {
         params.game.players[params.player_id]
             .dev_cards
             .reset_queue();
@@ -70,13 +69,15 @@ impl GameController {
         GameController::handle_move_init(params);
         // end of the move; cant't send request to a strategy
         // ... move ending routines
-        todo!()
+        Ok(())
     }
 
     /* Turn handling methods; Kind of a procedural state machine */
 
     fn handle_move_init(params: &mut TurnHandlingParams) {
-        match params.strategies[params.player_id].move_init(todo!()) {
+        match params.strategies[params.player_id]
+            .move_init(&params.game.get_perspective(params.player_id))
+        {
             MoveRequestInit::ThrowDice => {
                 Self::execute_dice_trow(params);
                 Self::handle_dice_thrown(params);
@@ -117,7 +118,7 @@ impl GameController {
     }
 
     fn handle_dev_card_used(params: &mut TurnHandlingParams, usage: DevCardUsage) {
-        let _ = params.game.use_dev_card(usage, params.player_id); // todo: handle errors
+        let _ = params.game.use_dev_card(usage, params.player_id);
         let _ = params.strategies[params.player_id]
             .move_request_after_knight(&params.game.get_perspective(params.player_id)); // dice throw (must be manual for players)
         Self::handle_rest(params);
@@ -194,7 +195,7 @@ impl GameController {
                             .game
                             .pay_to_player((resource, amount_to_harvest).into(), params.player_id);
                     }
-                    HexType::Desert => todo!(),
+                    HexType::Desert => (),
                 }
             }
         }

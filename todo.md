@@ -1,0 +1,24 @@
+# TODO list for this project
+ - [ ] Game loop pipeline
+    - [ ] Add game initialization logic
+    - [ ] Add interruption support
+    - [ ] populate `main.rs`
+    - [ ] Add integration tests
+ - [ ] Strategy
+    - [ ] Finish `LazyAssStrategy` implementation
+    - [ ] Implement console input strategy
+    - [ ] Implement baseline unmanned strategy
+ - [ ] GameState implementation
+    - [ ] DeckFullnessLevel
+    - [ ] Transfer
+    - [ ] use yop
+    - [ ] use roadbuild
+    - [ ] use monopoly
+ - [ ] GameController
+    - [ ] error handling
+    - execute_* methods
+    - golden river support
+ - [ ] Field
+ - [ ] move_request (RobRequest::with_robbing)
+ - [ ] CLI
+ - [ ] UI
