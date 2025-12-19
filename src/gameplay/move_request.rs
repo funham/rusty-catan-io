@@ -29,7 +29,7 @@ impl DevCardUsage {
 #[derive(Debug, Clone, Copy)]
 pub struct RobRequest {
     pub hex: Hex,
-    pub player: Option<PlayerId>,
+    pub robbed: Option<PlayerId>,
 }
 
 impl RobRequest {
@@ -38,7 +38,7 @@ impl RobRequest {
     }
 
     pub fn without_robbing(hex: Hex) -> Self {
-        Self { hex, player: None }
+        Self { hex, robbed: None }
     }
 }
 
@@ -81,4 +81,28 @@ impl HasCost for Buildable {
 pub enum TradeAnswer {
     Accepted,
     Declined,
+}
+pub enum MoveRequestInit {
+    ThrowDice,
+    UseKnight(RobRequest),
+}
+pub enum MoveRequestAfterDevCard {
+    ThrowDice,
+}
+
+pub enum MoveRequestAfterDiceThrow {
+    UseDevCard(DevCardUsage),
+    OfferPublicTrade(PublicTradeOffer),
+    OfferPersonalTrade(PersonalTradeOffer),
+    TradeWithBank(BankTrade),
+    Build(Buildable),
+    EndMove,
+}
+
+pub enum MoveRequestAfterDiceThrowAndDevCard {
+    OfferPublicTrade(PublicTradeOffer),
+    OfferPersonalTrade(PersonalTradeOffer),
+    TradeWithBank(BankTrade),
+    Build(Buildable),
+    EndMove,
 }

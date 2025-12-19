@@ -1,17 +1,18 @@
 use std::collections::BTreeSet;
 
+use log::error;
+
 use crate::{
     gameplay::{
-        game_state::BankResourceExchange,
+        game_state::{BankResourceExchange, DevCardUsageError},
         hex::HexType,
         move_request::{
-            BankTrade, Buildable, DevCardUsage, PersonalTradeOffer, PublicTradeOffer, RobRequest,
+            BankTrade, Buildable, DevCardUsage, MoveRequestAfterDiceThrow,
+            MoveRequestAfterDiceThrowAndDevCard, MoveRequestInit, PersonalTradeOffer,
+            PublicTradeOffer, RobRequest,
         },
         player::{City, HasPos, PlayerId, Settlement},
         resource::ResourceCollection,
-        strategy::strategy_answers::{
-            self, MoveRequestAfterDiceThrow, MoveRequestAfterDiceThrowAndDevCard,
-        },
     },
     math::dice::DiceVal,
     strategy::Strategy,
@@ -76,12 +77,12 @@ impl GameController {
 
     fn handle_move_init(params: &mut TurnHandlingParams) {
         match params.strategies[params.player_id].move_init(todo!()) {
-            strategy_answers::MoveRequestInit::ThrowDice => {
+            MoveRequestInit::ThrowDice => {
                 Self::execute_dice_trow(params);
                 Self::handle_dice_thrown(params);
             }
-            strategy_answers::MoveRequestInit::UseDevCard(dev_card_usage) => {
-                Self::handle_dev_card_used(params, dev_card_usage);
+            MoveRequestInit::UseKnight(rob_request) => {
+                Self::handle_dev_card_used(params, DevCardUsage::Knight(rob_request));
             }
         }
     }
@@ -118,7 +119,7 @@ impl GameController {
     fn handle_dev_card_used(params: &mut TurnHandlingParams, usage: DevCardUsage) {
         let _ = params.game.use_dev_card(usage, params.player_id); // todo: handle errors
         let _ = params.strategies[params.player_id]
-            .move_request_after_dev_card(&params.game.get_perspective(params.player_id)); // dice throw (must be manual for players)
+            .move_request_after_knight(&params.game.get_perspective(params.player_id)); // dice throw (must be manual for players)
         Self::handle_rest(params);
     }
 
@@ -202,7 +203,11 @@ impl GameController {
     // TODO: add support for golded river
     // (harvest normally for normal hexes + count wildcards + ask strategy for choosing n random cards)
     fn execute_harvesting(params: &mut TurnHandlingParams, num: DiceVal) {
-        assert_ne!(num, DiceVal::seven());
+        if num == DiceVal::seven() {
+            error!("harvesting shouldn't be called if 7 is rolled");
+            return;
+        }
+
         let hexes_with_num = params.game.field.hexes_by_num(num);
 
         for player_id in params.game.player_ids_starting_from(params.player_id) {
@@ -224,7 +229,23 @@ impl GameController {
 
     fn execute_seven(params: &mut TurnHandlingParams) {
         for (id, strategy) in params.strategies.iter_mut().enumerate() {
+            if params.game.players[params.player_id].resources.total() <= 7 {
+                continue;
+            }
+
+            // in more than 7 cards
             let to_drop = strategy.drop_half(&params.game.get_perspective(params.player_id));
+
+            if to_drop.total() != params.game.players[params.player_id].resources.total() / 2 {
+                error!(
+                    "wrong number of cards dropped; {} instead of {}",
+                    to_drop.total(),
+                    params.game.players[params.player_id].resources.total() / 2
+                );
+
+                return;
+            }
+
             let _ = params.game.bank_resource_exchange(BankResourceExchange {
                 to_bank: to_drop,
                 from_bank: ResourceCollection::default(),
@@ -235,10 +256,10 @@ impl GameController {
         let rob_request: RobRequest =
             params.strategies[params.player_id].rob(&params.game.get_perspective(params.player_id));
 
-        params
-            .game
-            .execute_robbers(rob_request, params.player_id)
-            .expect("bruuh");
+        match params.game.execute_robbers(rob_request, params.player_id) {
+            Ok(_) => (),
+            Err(e) => error!("strategy sent invalid rob request: {:?}", e),
+        }
     }
 
     /// Roll dice, asks strategy if 7, harvest resources for all players otherwise

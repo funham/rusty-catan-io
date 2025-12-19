@@ -1,59 +1,30 @@
+use log::error;
+
 use crate::gameplay::{
     game_state::{Perspective, PlayerTrade},
-    move_request::{RobRequest, TradeAnswer},
+    move_request::{
+        MoveRequestAfterDevCard, MoveRequestAfterDiceThrow, MoveRequestAfterDiceThrowAndDevCard,
+        MoveRequestInit, RobRequest, TradeAnswer,
+    },
     player::Road,
     resource::{Resource, ResourceCollection},
 };
 
-pub mod strategy_answers {
-    use crate::gameplay::move_request::{
-        BankTrade, Buildable, DevCardUsage, PersonalTradeOffer, PublicTradeOffer,
-    };
-
-    pub enum MoveRequestInit {
-        ThrowDice,
-        UseDevCard(DevCardUsage),
-    }
-    pub enum MoveRequestAfterDevCard {
-        ThrowDice,
-    }
-
-    pub enum MoveRequestAfterDiceThrow {
-        UseDevCard(DevCardUsage),
-        OfferPublicTrade(PublicTradeOffer),
-        OfferPersonalTrade(PersonalTradeOffer),
-        TradeWithBank(BankTrade),
-        Build(Buildable),
-        EndMove,
-    }
-
-    pub enum MoveRequestAfterDiceThrowAndDevCard {
-        OfferPublicTrade(PublicTradeOffer),
-        OfferPersonalTrade(PersonalTradeOffer),
-        TradeWithBank(BankTrade),
-        Build(Buildable),
-        EndMove,
-    }
-}
-
 pub trait Strategy: std::fmt::Debug {
-    fn move_init(&mut self, perspective: &Perspective) -> strategy_answers::MoveRequestInit;
-    fn move_request_after_dev_card(
-        &mut self,
-        perspective: &Perspective,
-    ) -> strategy_answers::MoveRequestAfterDevCard {
-        strategy_answers::MoveRequestAfterDevCard::ThrowDice
+    fn move_init(&mut self, perspective: &Perspective) -> MoveRequestInit;
+    fn move_request_after_knight(&mut self, perspective: &Perspective) -> MoveRequestAfterDevCard {
+        MoveRequestAfterDevCard::ThrowDice
     }
     fn move_request_after_dice_throw(
         &mut self,
         perspective: &Perspective,
-    ) -> strategy_answers::MoveRequestAfterDiceThrow;
+    ) -> MoveRequestAfterDiceThrow;
     fn move_request_after_dice_throw_and_dev_card(
         &mut self,
         perspective: &Perspective,
-    ) -> strategy_answers::MoveRequestAfterDiceThrowAndDevCard;
+    ) -> MoveRequestAfterDiceThrowAndDevCard;
 
-    fn answer_to_trade(&mut self, trade: &PlayerTrade) -> TradeAnswer;
+    fn answer_to_trade(&mut self, perspective: &Perspective, trade: &PlayerTrade) -> TradeAnswer;
     fn rob(&mut self, perspective: &Perspective) -> RobRequest;
     fn drop_half(&mut self, perspective: &Perspective) -> ResourceCollection;
     fn use_roadbuild(&mut self, perspective: &Perspective) -> [Road; 2];
@@ -65,11 +36,11 @@ pub trait Strategy: std::fmt::Debug {
 pub struct LazyAssStrategy;
 
 impl Strategy for LazyAssStrategy {
-    fn move_init(&mut self, _: &Perspective) -> strategy_answers::MoveRequestInit {
-        strategy_answers::MoveRequestInit::ThrowDice
+    fn move_init(&mut self, _: &Perspective) -> MoveRequestInit {
+        MoveRequestInit::ThrowDice
     }
 
-    fn answer_to_trade(&mut self, _: &PlayerTrade) -> TradeAnswer {
+    fn answer_to_trade(&mut self, _: &Perspective, _: &PlayerTrade) -> TradeAnswer {
         TradeAnswer::Declined
     }
 
@@ -78,7 +49,10 @@ impl Strategy for LazyAssStrategy {
     }
 
     fn drop_half(&mut self, perspective: &Perspective) -> ResourceCollection {
-        assert!(perspective.player_data.resources.total() > 7);
+        if perspective.player_data.resources.total() <= 7 {
+            error!("Should not drop cards");
+        }
+
         let number_to_drop = perspective.player_data.resources.total() / 2;
         let mut to_drop = ResourceCollection::default();
         for (resource, number) in perspective.player_data.resources.unroll() {
@@ -108,14 +82,14 @@ impl Strategy for LazyAssStrategy {
     fn move_request_after_dice_throw(
         &mut self,
         perspective: &Perspective,
-    ) -> strategy_answers::MoveRequestAfterDiceThrow {
+    ) -> MoveRequestAfterDiceThrow {
         todo!()
     }
 
     fn move_request_after_dice_throw_and_dev_card(
         &mut self,
         perspective: &Perspective,
-    ) -> strategy_answers::MoveRequestAfterDiceThrowAndDevCard {
+    ) -> MoveRequestAfterDiceThrowAndDevCard {
         todo!()
     }
 }

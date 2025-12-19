@@ -1,10 +1,13 @@
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
 
+use log::{error, warn};
 use num::Integer;
+use rand::distr::slice::Empty;
 
 use crate::gameplay::dev_card::UsableDevCardKind;
 use crate::gameplay::field::GameInitField;
+use crate::gameplay::resource;
 use crate::{
     gameplay::{
         dev_card::DevCardKind,
@@ -136,18 +139,70 @@ impl<T> Into<PlayerId> for GameTurn<T> {
 }
 
 #[derive(Debug)]
+pub enum DeckFullnessLevel {
+    Empty,
+    Low,
+    Medium,
+    High,
+}
+
+impl DeckFullnessLevel {
+    // none if n > max possible amount of cards of one resource
+    pub fn new(n: u16) -> Option<Self> {
+        for lvl in [Self::Empty, Self::Low, Self::High, Self::High] {
+            if lvl.range().contains(&n) {
+                return Some(lvl);
+            }
+        }
+
+        None
+    }
+
+    pub fn new_or_panic(n: u16) -> Self {
+        for lvl in [Self::Empty, Self::Low, Self::High, Self::High] {
+            if n <= lvl.max() {
+                return lvl;
+            }
+        }
+
+        unreachable!("too much cards")
+    }
+
+    /// min possible number of cards that a deck with this level can contain
+    pub fn min(&self) -> u16 {
+        match self {
+            DeckFullnessLevel::Empty => 0,
+            DeckFullnessLevel::Low => 1,
+            DeckFullnessLevel::Medium => todo!(),
+            DeckFullnessLevel::High => todo!(),
+        }
+    }
+
+    /// max possible number of cards that a deck with this level can contain
+    pub fn max(&self) -> u16 {
+        match self {
+            DeckFullnessLevel::Empty => 0,
+            DeckFullnessLevel::Low => todo!(),
+            DeckFullnessLevel::Medium => todo!(),
+            DeckFullnessLevel::High => todo!(),
+        }
+    }
+
+    /// possible range in which number of cards can a deck with this level can contain
+    pub fn range(&self) -> std::ops::RangeInclusive<u16> {
+        self.min()..=self.max()
+    }
+}
+
+#[derive(Debug)]
 pub struct Bank {
     resources: ResourceCollection,
     dev_cards: Vec<DevCardKind>,
 }
 
 impl Bank {
-    pub fn buy_dev_card(&mut self, account: &mut ResourceCollection) -> Option<DevCardKind> {
-        if self.dev_cards.is_empty() {
-            return None;
-        }
-        todo!();
-        self.dev_cards.pop()
+    pub fn view(&self) -> BankView {
+        BankView { bank: self }
     }
 }
 
@@ -160,6 +215,31 @@ pub struct BankResourceExchange {
 pub enum BankResourceExchangeError {
     BankIsShort,
     AccountIsShort,
+}
+
+#[derive(Debug)]
+pub struct BankView<'a> {
+    bank: &'a Bank,
+}
+
+impl<'a> BankView<'a> {
+    pub fn fullness(&self, resource: Resource) -> DeckFullnessLevel {
+        match DeckFullnessLevel::new(self.bank.resources[resource]) {
+            Some(lvl) => lvl,
+            None => {
+                error!(
+                    "too much cards in the bank: {}, where max is {}",
+                    self.bank.resources[resource],
+                    DeckFullnessLevel::High.max()
+                );
+                DeckFullnessLevel::High
+            }
+        }
+    }
+
+    pub fn dev_cards_fullness(&self) -> u16 {
+        self.bank.dev_cards.len() as u16
+    }
 }
 
 struct Transfer<'a> {
@@ -218,13 +298,20 @@ pub struct GameState {
 
 /// player's perspective on a game, used in `Strategy`
 pub struct Perspective<'a> {
+    pub player_id: PlayerId,
     pub player_data: &'a PlayerData,
     pub field: &'a Field,
-    pub bank: &'a Bank,
+    pub bank: BankView<'a>,
     pub opponents: BTreeMap<PlayerId, OpponentData>,
 }
 
-impl<'a> Perspective<'a> {}
+impl<'a> Perspective<'a> {
+    /// hint: you can call .cycle() on it
+    pub fn turn_ids_from_next(&self) -> impl Iterator<Item = PlayerId> {
+        let n_players = self.opponents.len() + 1;
+        (self.player_id + 1..n_players).chain(0..=self.player_id)
+    }
+}
 
 /// convinient struct with neccessary info about player who's turn it currently is
 #[derive(Debug)]
@@ -254,9 +341,10 @@ impl GameState {
             .collect::<BTreeMap<PlayerId, OpponentData>>();
 
         Perspective {
+            player_id,
             player_data: &self.players[player_id],
             field: &self.field,
-            bank: &self.bank,
+            bank: self.bank.view(),
             opponents,
         }
     }
@@ -360,7 +448,7 @@ impl GameState {
         self.field.robber_pos = rob_request.hex;
 
         // steal card
-        if let Some(robbed_id) = rob_request.player {
+        if let Some(robbed_id) = rob_request.robbed {
             self.rob(robbed_id, robber_id);
         }
         Ok(())
