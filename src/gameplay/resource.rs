@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap},
+    collections::BTreeMap,
     ops::{Index, IndexMut},
 };
 
@@ -58,6 +58,21 @@ pub enum ResourceCollectionSubstractionError {
 }
 
 impl ResourceCollection {
+    pub fn transfer<E>(
+        from: &mut ResourceCollection,
+        to: &mut ResourceCollection,
+        resources: ResourceCollection,
+        on_error: E,
+    ) -> Result<(), E> {
+        match *from - &resources {
+            Some(remainder) => Ok({
+                *from = remainder;
+                *to += &resources;
+            }),
+            None => Err(on_error),
+        }
+    }
+
     pub fn new(brick: u16, wood: u16, wheat: u16, sheep: u16, ore: u16) -> Self {
         Self {
             brick,

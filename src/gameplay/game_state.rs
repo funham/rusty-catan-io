@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
 
-use log::{error, warn};
 use num::Integer;
 use rand::distr::slice::Empty;
 
@@ -206,15 +205,15 @@ impl Bank {
     }
 }
 
-pub struct BankResourceExchange {
-    pub to_bank: ResourceCollection,
-    pub from_bank: ResourceCollection,
-    pub player_id: PlayerId,
-}
-
+#[derive(Debug)]
 pub enum BankResourceExchangeError {
     BankIsShort,
-    AccountIsShort,
+    AccountIsShort { id: PlayerId },
+}
+
+#[derive(Debug)]
+pub enum PlayerResourceExchangeError {
+    AccountIsShort { id: PlayerId },
 }
 
 #[derive(Debug)]
@@ -227,7 +226,7 @@ impl<'a> BankView<'a> {
         match DeckFullnessLevel::new(self.bank.resources[resource]) {
             Some(lvl) => lvl,
             None => {
-                error!(
+                log::error!(
                     "too much cards in the bank: {}, where max is {}",
                     self.bank.resources[resource],
                     DeckFullnessLevel::High.max()
@@ -243,30 +242,6 @@ impl<'a> BankView<'a> {
         //  - 6 Progress Cards (2 of each type: Year of Plenty, Monopoly, Road Building)
         //  - 5 Victory Point Cards
         self.bank.dev_cards.len() as u16
-    }
-}
-
-struct Transfer<'a> {
-    from: &'a mut ResourceCollection,
-    to: &'a mut ResourceCollection,
-    resources: ResourceCollection,
-}
-
-impl<'a> Transfer<'a> {
-    fn new(
-        from: &'a mut ResourceCollection,
-        to: &'a mut ResourceCollection,
-        resources: ResourceCollection,
-    ) -> Self {
-        Self {
-            from,
-            to,
-            resources,
-        }
-    }
-
-    fn execute(self) {
-        todo!()
     }
 }
 
@@ -354,44 +329,55 @@ impl GameState {
         }
     }
 
-    pub fn bank_resource_exchange<'a>(
+    pub fn bank_resource_exchange(
         &mut self,
-        exhange: BankResourceExchange,
+        player_id: PlayerId,
+        to_bank: ResourceCollection,
+        from_bank: ResourceCollection,
     ) -> Result<(), BankResourceExchangeError> {
-        let account = &mut self.players[exhange.player_id].resources;
-        match (
-            self.bank.resources - &exhange.from_bank,
-            *account - &exhange.to_bank,
-        ) {
-            (None, _) => Err(BankResourceExchangeError::BankIsShort),
-            (_, None) => Err(BankResourceExchangeError::AccountIsShort),
-            (Some(bank_res), Some(acc_res)) => Ok({
-                self.bank.resources = bank_res;
-                *account = acc_res;
-            }),
-        }
+        self.transfer_to_bank(to_bank, player_id)?;
+        self.transfer_from_bank(from_bank, player_id)
     }
+
     pub fn transfer_to_bank(
         &mut self,
         resources: ResourceCollection,
         player_id: PlayerId,
     ) -> Result<(), BankResourceExchangeError> {
-        self.bank_resource_exchange(BankResourceExchange {
-            to_bank: resources,
-            from_bank: ResourceCollection::default(),
-            player_id,
-        })
+        ResourceCollection::transfer(
+            &mut self.players[player_id].resources,
+            &mut self.bank.resources,
+            resources,
+            BankResourceExchangeError::AccountIsShort { id: player_id },
+        )
     }
-    pub fn pay_to_player(
+
+    pub fn transfer_from_bank(
         &mut self,
         resources: ResourceCollection,
         player_id: PlayerId,
     ) -> Result<(), BankResourceExchangeError> {
-        self.bank_resource_exchange(BankResourceExchange {
-            to_bank: ResourceCollection::default(),
-            from_bank: resources,
-            player_id,
-        })
+        ResourceCollection::transfer(
+            &mut self.bank.resources,
+            &mut self.players[player_id].resources,
+            resources,
+            BankResourceExchangeError::BankIsShort,
+        )
+    }
+
+    pub fn players_resource_transfer(
+        &mut self,
+        from_id: PlayerId,
+        to_id: PlayerId,
+        resources: ResourceCollection,
+    ) -> Result<(), PlayerResourceExchangeError> {
+        let (from, to) = self.get_mut_players(from_id, to_id);
+        ResourceCollection::transfer(
+            &mut from.resources,
+            &mut to.resources,
+            resources,
+            PlayerResourceExchangeError::AccountIsShort { id: from_id },
+        )
     }
 
     pub fn player_ids_starting_from(
@@ -493,34 +479,43 @@ impl GameState {
 
     /* private helper functions */
 
-    /// steal random card from another player (surprisingly complex logic)
-    fn rob(&mut self, robbed_id: PlayerId, robber_id: PlayerId) {
-        let (left, right) = self.players.split_at_mut(robbed_id.max(robber_id));
+    // get mutable view of two players
+    fn get_mut_players(
+        &mut self,
+        player1: PlayerId,
+        player2: PlayerId,
+    ) -> (&mut PlayerData, &mut PlayerData) {
+        let (left, right) = self.players.split_at_mut(player1.max(player2));
         let left_len = left.len();
-        let ((robbed_half, robbed_id), (robber_half, robber_id)) = match robbed_id.cmp(&robber_id) {
+        let ((half1, p1), (half2, p2)) = match player1.cmp(&player2) {
             std::cmp::Ordering::Equal => unreachable!("you can't rob yourself"),
-            std::cmp::Ordering::Less => ((left, robbed_id), (right, robber_id - left_len)),
-            std::cmp::Ordering::Greater => ((right, robbed_id - left_len), (left, robber_id)),
+            std::cmp::Ordering::Less => ((left, player1), (right, player2 - left_len)),
+            std::cmp::Ordering::Greater => ((right, player1 - left_len), (left, player2)),
         };
 
-        let robbed_account = &mut robbed_half[robbed_id].resources;
-        let robber_account = &mut robber_half[robber_id].resources;
+        (&mut half1[p1], &mut half2[p2])
+    }
 
+    /// steal random card from another player
+    fn rob(&mut self, robbed_id: PlayerId, robber_id: PlayerId) {
+        let robbed_account = &self.players[robbed_id].resources;
         let stolen = robbed_account.peek_random();
         if let Some(card) = stolen {
-            Transfer::new(robbed_account, robber_account, card.into()).execute();
+            if let Err(e) = self.players_resource_transfer(robbed_id, robber_id, card.into()) {
+                log::error!("stealing non-existent card: {:?}", e)
+            }
         }
     }
 
     fn use_knight(
         &mut self,
         rob_request: RobRequest,
-        robber_id: PlayerId,
+        user: PlayerId,
     ) -> Result<(), DevCardUsageError> {
-        self.execute_robbers(rob_request, robber_id)?;
+        self.execute_robbers(rob_request, user)?;
 
         // update largest army logic
-        let knight_count = self.players[robber_id].dev_cards.played[UsableDevCardKind::Knight] + 1;
+        let knight_count = self.players[user].dev_cards.played[UsableDevCardKind::Knight] + 1;
 
         let curr_best_count = match self.largest_army {
             Some(id) => self.players[id].dev_cards.played[UsableDevCardKind::Knight],
@@ -528,7 +523,7 @@ impl GameState {
         };
 
         if knight_count > curr_best_count {
-            self.largest_army = Some(robber_id);
+            self.largest_army = Some(user);
         }
 
         Ok(())
@@ -537,7 +532,7 @@ impl GameState {
     fn use_year_of_plenty(
         &mut self,
         list: (Resource, Resource),
-        player: PlayerId,
+        user: PlayerId,
     ) -> Result<(), DevCardUsageError> {
         todo!()
     }
@@ -545,7 +540,7 @@ impl GameState {
     fn use_roadbuild(
         &mut self,
         poses: (Path, Path),
-        player: PlayerId,
+        user: PlayerId,
     ) -> Result<(), DevCardUsageError> {
         todo!()
     }
@@ -553,8 +548,19 @@ impl GameState {
     fn use_monopoly(
         &mut self,
         resource: Resource,
-        player: PlayerId,
+        user: PlayerId,
     ) -> Result<(), DevCardUsageError> {
-        todo!()
+        for id in self
+            .player_ids_starting_from(0)
+            .into_iter()
+            .filter(|id| *id != user)
+        {
+            let resources = (resource, self.players[id].resources[resource]).into();
+            if let Err(e) = self.players_resource_transfer(id, user, resources) {
+                log::error!("somehow took more cards than a player has: {:?}", e);
+            }
+        }
+
+        Ok(())
     }
 }

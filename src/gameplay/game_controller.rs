@@ -1,10 +1,7 @@
 use std::collections::BTreeSet;
 
-use log::error;
-
 use crate::{
     gameplay::{
-        game_state::{BankResourceExchange, DevCardUsageError},
         hex::HexType,
         move_request::{
             BankTrade, Buildable, DevCardUsage, MoveRequestAfterDiceThrow,
@@ -93,7 +90,9 @@ impl GameController {
             .move_request_after_dice_throw(&params.game.get_perspective(params.player_id))
         {
             MoveRequestAfterDiceThrow::UseDevCard(dev_card_usage) => {
-                let _ = params.game.use_dev_card(dev_card_usage, params.player_id);
+                if let Err(e) = params.game.use_dev_card(dev_card_usage, params.player_id) {
+                    log::error!("{:?}", e);
+                }
                 Self::handle_rest(params);
                 return;
             }
@@ -118,7 +117,9 @@ impl GameController {
     }
 
     fn handle_dev_card_used(params: &mut TurnHandlingParams, usage: DevCardUsage) {
-        let _ = params.game.use_dev_card(usage, params.player_id);
+        if let Err(e) = params.game.use_dev_card(usage, params.player_id) {
+            log::error!("{:?}", e);
+        }
         let _ = params.strategies[params.player_id]
             .move_request_after_knight(&params.game.get_perspective(params.player_id)); // dice throw (must be manual for players)
         Self::handle_rest(params);
@@ -191,9 +192,12 @@ impl GameController {
             for hex in hexes_to_harvest {
                 match params.game.field.hexes[hex].hex_type {
                     HexType::Some(resource) => {
-                        let _ = params
-                            .game
-                            .pay_to_player((resource, amount_to_harvest).into(), params.player_id);
+                        if let Err(e) = params.game.transfer_from_bank(
+                            (resource, amount_to_harvest).into(),
+                            params.player_id,
+                        ) {
+                            log::error!("{:?}", e);
+                        }
                     }
                     HexType::Desert => (),
                 }
@@ -205,7 +209,7 @@ impl GameController {
     // (harvest normally for normal hexes + count wildcards + ask strategy for choosing n random cards)
     fn execute_harvesting(params: &mut TurnHandlingParams, num: DiceVal) {
         if num == DiceVal::seven() {
-            error!("harvesting shouldn't be called if 7 is rolled");
+            log::error!("harvesting shouldn't be called if 7 is rolled");
             return;
         }
 
@@ -238,7 +242,7 @@ impl GameController {
             let to_drop = strategy.drop_half(&params.game.get_perspective(params.player_id));
 
             if to_drop.total() != params.game.players[params.player_id].resources.total() / 2 {
-                error!(
+                log::error!(
                     "wrong number of cards dropped; {} instead of {}",
                     to_drop.total(),
                     params.game.players[params.player_id].resources.total() / 2
@@ -247,11 +251,13 @@ impl GameController {
                 return;
             }
 
-            let _ = params.game.bank_resource_exchange(BankResourceExchange {
-                to_bank: to_drop,
-                from_bank: ResourceCollection::default(),
-                player_id: id,
-            });
+            if let Err(e) =
+                params
+                    .game
+                    .bank_resource_exchange(id, to_drop, ResourceCollection::default())
+            {
+                log::error!("{:?}", e);
+            }
         }
 
         let rob_request: RobRequest =
@@ -259,7 +265,7 @@ impl GameController {
 
         match params.game.execute_robbers(rob_request, params.player_id) {
             Ok(_) => (),
-            Err(e) => error!("strategy sent invalid rob request: {:?}", e),
+            Err(e) => log::error!("strategy sent invalid rob request: {:?}", e),
         }
     }
 

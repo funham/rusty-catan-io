@@ -10,10 +10,10 @@
     - [ ] Implement baseline unmanned strategy
  - [ ] GameState implementation
     - [x] DeckFullnessLevel
-    - [ ] Transfer
+    - [x] Transfer
     - [ ] use yop
     - [ ] use roadbuild
-    - [ ] use monopoly
+    - [x] use monopoly
  - [ ] GameController
     - [ ] error handling
     - execute_* methods
