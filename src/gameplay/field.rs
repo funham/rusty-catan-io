@@ -5,10 +5,10 @@ use crate::math::dice::DiceVal;
 use crate::topology::*;
 
 type HexArrangement = BTreeMap<Hex, HexInfo>;
-type PortArrangement = BTreeMap<Edge, PortType>;
+type PortArrangement = BTreeMap<Path, PortType>;
 type HexesByNum = BTreeMap<DiceVal, Vec<Hex>>;
 type PortsByPlayer = BTreeMap<PlayerId, Vec<PortType>>;
-type GameInitPlayerBuilds = ((Hex, Edge), (Hex, Edge));
+type GameInitPlayerBuilds = ((Hex, Path), (Hex, Path));
 
 pub struct GameInitField {
     pub field_radius: usize,
@@ -107,7 +107,7 @@ impl Field {
     pub fn get_desert_pos(&self) -> Hex {
         self.cache_.desert_pos
     }
-    
+
     pub fn hexes_by_num(&self, num: DiceVal) -> BTreeSet<Hex> {
         todo!()
     }

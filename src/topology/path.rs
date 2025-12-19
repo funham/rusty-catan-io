@@ -1,10 +1,10 @@
 use std::collections::BTreeSet;
 
 use crate::topology::hex::*;
-use crate::topology::vertex::*;
+use crate::topology::intersection::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub struct Edge(Hex, Hex);
+pub struct Path(Hex, Hex);
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct EdgeDual(Hex, Hex);
@@ -15,7 +15,7 @@ pub enum EdgeConstructError {
     NotNeighboringVertices,
 }
 
-impl TryFrom<(Hex, Hex)> for Edge {
+impl TryFrom<(Hex, Hex)> for Path {
     type Error = EdgeConstructError;
 
     fn try_from(value: (Hex, Hex)) -> Result<Self, Self::Error> {
@@ -30,10 +30,10 @@ impl TryFrom<(Hex, Hex)> for Edge {
     }
 }
 
-impl TryFrom<(Vertex, Vertex)> for Edge {
+impl TryFrom<(Intersection, Intersection)> for Path {
     type Error = EdgeConstructError;
 
-    fn try_from(value: (Vertex, Vertex)) -> Result<Self, Self::Error> {
+    fn try_from(value: (Intersection, Intersection)) -> Result<Self, Self::Error> {
         let inter = value
             .0
             .as_set()
@@ -58,10 +58,10 @@ pub enum EdgeDualConstructError {
     NotNeighboringVertices,
 }
 
-impl TryFrom<(Vertex, Vertex)> for EdgeDual {
+impl TryFrom<(Intersection, Intersection)> for EdgeDual {
     type Error = EdgeDualConstructError;
 
-    fn try_from(value: (Vertex, Vertex)) -> Result<Self, Self::Error> {
+    fn try_from(value: (Intersection, Intersection)) -> Result<Self, Self::Error> {
         let inter = value
             .0
             .as_set()
@@ -99,13 +99,13 @@ impl EdgeDual {
     pub fn set(&self) -> BTreeSet<Hex> {
         BTreeSet::from([self.0, self.1])
     }
-    pub fn canon(&self) -> Edge {
+    pub fn canon(&self) -> Path {
         let n0 = self.0.neighbors().collect::<BTreeSet<_>>();
         let n1 = self.1.neighbors().collect();
 
         let inter = n0.intersection(&n1).cloned().collect::<BTreeSet<Hex>>();
 
-        Edge::try_from((
+        Path::try_from((
             inter.first().unwrap().clone(),
             inter.last().unwrap().clone(),
         ))
@@ -113,8 +113,8 @@ impl EdgeDual {
     }
 }
 
-impl Edge {
-    pub fn set(&self) -> BTreeSet<Hex> {
+impl Path {
+    pub fn as_set(&self) -> BTreeSet<Hex> {
         BTreeSet::from([self.0, self.1])
     }
 
@@ -131,7 +131,7 @@ impl Edge {
         .unwrap()
     }
 
-    pub fn vertices(&self) -> (Vertex, Vertex) {
+    pub fn intersections(&self) -> (Intersection, Intersection) {
         let n0 = self.0.neighbors().collect::<BTreeSet<_>>();
         let n1 = self.1.neighbors().collect::<BTreeSet<_>>();
         let dual = self.dual();
@@ -142,8 +142,26 @@ impl Edge {
         let h2 = h2.clone();
 
         (
-            Vertex::try_from((dual.0, h1, h2)).unwrap(),
-            Vertex::try_from((dual.1, h1, h2)).unwrap(),
+            Intersection::try_from((dual.0, h1, h2)).unwrap(),
+            Intersection::try_from((dual.1, h1, h2)).unwrap(),
         )
+    }
+
+    pub fn intersections_iter(&self) -> impl Iterator<Item = Intersection> {
+        let vs = self.intersections();
+        [vs.0, vs.1].into_iter()
+    }
+
+    /// Err if `v` is not a part of a path
+    pub fn opposite(&self, v: Intersection) -> Result<Intersection, ()> {
+        match self.intersections() {
+            (v1, v2) if v1 == v => Ok(v2),
+            (v1, v2) if v2 == v => Ok(v1),
+            _ => Err(()),
+        }
+    }
+    
+    pub fn opposite_or_panic(&self, v: Intersection) -> Intersection {
+        self.opposite(v).expect("too cocky")
     }
 }

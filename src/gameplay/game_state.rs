@@ -19,7 +19,7 @@ use crate::{
         strategy::Strategy,
     },
     math::dice::DiceRoller,
-    topology::Edge,
+    topology::Path,
 };
 
 pub struct RegularCycle;
@@ -453,7 +453,7 @@ impl GameState {
 
     fn use_roadbuild(
         &mut self,
-        poses: (Edge, Edge),
+        poses: (Path, Path),
         player: PlayerId,
     ) -> Result<(), DevCardUsageError> {
         todo!()

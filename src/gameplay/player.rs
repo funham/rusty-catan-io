@@ -1,11 +1,11 @@
 use std::cell::RefCell;
 use std::collections::BTreeSet;
+use std::convert::Infallible;
 use std::rc::Rc;
 
 use crate::gameplay::dev_card::{DevCardData, OpponentDevCardData};
 use crate::gameplay::resource::{HasCost, ResourceCollection};
 use crate::gameplay::strategy;
-use crate::math::graph::Graph;
 use crate::topology::*;
 
 pub trait HasPos {
@@ -15,18 +15,24 @@ pub trait HasPos {
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub struct Settlement {
-    pub pos: Vertex,
+    pub pos: Intersection,
+}
+
+impl Settlement {
+    pub const fn harvesting_rate() -> u16 {
+        1
+    }
 }
 
 impl HasPos for Settlement {
-    type Pos = Vertex;
+    type Pos = Intersection;
     fn get_pos(&self) -> Self::Pos {
         self.pos
     }
 }
 
 impl HasPos for &Settlement {
-    type Pos = Vertex;
+    type Pos = Intersection;
     fn get_pos(&self) -> Self::Pos {
         self.pos
     }
@@ -34,18 +40,24 @@ impl HasPos for &Settlement {
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub struct City {
-    pub pos: Vertex,
+    pub pos: Intersection,
+}
+
+impl City {
+    pub const fn harvesting_rate() -> u16 {
+        2
+    }
 }
 
 impl HasPos for City {
-    type Pos = Vertex;
+    type Pos = Intersection;
     fn get_pos(&self) -> Self::Pos {
         self.pos
     }
 }
 
 impl HasPos for &City {
-    type Pos = Vertex;
+    type Pos = Intersection;
     fn get_pos(&self) -> Self::Pos {
         self.pos
     }
@@ -53,11 +65,11 @@ impl HasPos for &City {
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Road {
-    pub pos: Edge,
+    pub pos: Path,
 }
 
 impl HasPos for Road {
-    type Pos = Edge;
+    type Pos = Path;
     fn get_pos(&self) -> Self::Pos {
         self.pos
     }
@@ -68,8 +80,21 @@ pub type PlayerId = usize;
 pub struct PlayerBuildData {
     pub settlements: BTreeSet<Settlement>,
     pub cities: BTreeSet<City>,
-    pub roads: BTreeSet<Road>,
-    pub road_graph: Graph,
+    pub roads: graph::RoadGraph, // derives default
+}
+
+impl PlayerBuildData {
+    pub fn builds_occupancy(&self) -> BTreeSet<Intersection> {
+        self.settlements
+            .iter()
+            .map(|s| s.pos)
+            .chain(self.cities.iter().map(|c| c.pos))
+            .collect()
+    }
+
+    pub fn roads_occupancy(&self) -> BTreeSet<Path> {
+        self.roads.roads_occupancy().clone()
+    }
 }
 
 pub struct PlayerData {

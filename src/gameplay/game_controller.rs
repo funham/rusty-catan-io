@@ -6,13 +6,13 @@ use crate::{
         move_request::{
             BankTrade, Buildable, DevCardUsage, PersonalTradeOffer, PublicTradeOffer, RobRequest,
         },
-        player::{HasPos, PlayerId},
+        player::{City, HasPos, PlayerId, Settlement},
         strategy::strategy_answers::{
             self, MoveRequestAfterDiceThrow, MoveRequestAfterDiceThrowAndDevCard,
         },
     },
     math::dice::DiceVal,
-    topology::{Hex, Vertex},
+    topology::{Hex, Intersection},
 };
 
 use crate::gameplay::game_state::{GameState, TurnHandlingParams};
@@ -78,7 +78,7 @@ impl GameController {
             .move_request_after_dice_throw(todo!())
         {
             MoveRequestAfterDiceThrow::UseDevCard(dev_card_usage) => {
-                game.use_dev_card(dev_card_usage, params.player_id);
+                let _ = game.use_dev_card(dev_card_usage, params.player_id);
                 Self::handle_rest(game, params);
                 return;
             }
@@ -107,7 +107,7 @@ impl GameController {
         params: &mut TurnHandlingParams,
         usage: DevCardUsage,
     ) -> strategy_answers::MoveRequestAfterDevCard {
-        game.use_dev_card(usage, params.player_id); // todo: handle errors
+        let _ = game.use_dev_card(usage, params.player_id); // todo: handle errors
         let _ = params
             .strategy
             .borrow_mut()
@@ -176,7 +176,7 @@ impl GameController {
         game: &mut GameState,
         player_id: PlayerId,
         bounding_set: &BTreeSet<Hex>,
-        buildings: impl IntoIterator<Item = impl HasPos<Pos = Vertex>>,
+        buildings: impl IntoIterator<Item = impl HasPos<Pos = Intersection>>,
         amount_to_harvest: u16,
     ) {
         for build_pos in buildings
@@ -211,7 +211,7 @@ impl GameController {
                 player_id,
                 &hexes_with_num,
                 game.field.builds[player_id].settlements.clone(),
-                1,
+                Settlement::harvesting_rate(),
             );
 
             Self::execute_harvesting_for_one_player(
@@ -219,7 +219,7 @@ impl GameController {
                 player_id,
                 &hexes_with_num,
                 game.field.builds[player_id].cities.clone(),
-                2,
+                City::harvesting_rate(),
             );
         }
     }

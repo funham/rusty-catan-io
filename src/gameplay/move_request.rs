@@ -7,14 +7,14 @@ use crate::{
         player::*,
         resource::{self, HasCost, Resource, ResourceCollection},
     },
-    topology::{Edge, Hex},
+    topology::{Path, Hex},
 };
 
 #[derive(Debug, Clone, Copy)]
 pub enum DevCardUsage {
     Knight(RobRequest),
     YearOfPlenty((Resource, Resource)),
-    RoadBuild((Edge, Edge)),
+    RoadBuild((Path, Path)),
     Monopoly(Resource),
 }
 

@@ -1,7 +1,8 @@
-pub mod edge;
+pub mod path;
 pub mod hex;
-pub mod vertex;
+pub mod intersection;
+pub mod graph;
 
-pub use edge::*;
+pub use path::*;
 pub use hex::*;
-pub use vertex::*;
+pub use intersection::*;
