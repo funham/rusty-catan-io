@@ -328,6 +328,7 @@ pub enum DevCardUsageError {
     CardNotFoundInInventory,
     InvalidHex,
     InvalidEdge,
+    InvalidRobbery,
 }
 
 impl GameState {
@@ -449,7 +450,12 @@ impl GameState {
 
         // steal card
         if let Some(robbed_id) = rob_request.robbed {
-            self.rob(robbed_id, robber_id);
+            match self.field.builds_on_hex(rob_request.hex).get(&robbed_id) {
+                Some(v) if !v.settlements.is_empty() || !v.cities.is_empty() => {
+                    self.rob(robbed_id, robber_id)
+                }
+                _ => return Err(DevCardUsageError::InvalidRobbery),
+            }
         }
         Ok(())
     }

@@ -19,6 +19,6 @@
     - execute_* methods
     - golden river support
  - [ ] Field
- - [ ] move_request (RobRequest::with_robbing)
+ - [x] move_request (RobRequest::with_robbing)
  - [ ] CLI
  - [ ] UI

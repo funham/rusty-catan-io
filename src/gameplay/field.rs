@@ -86,6 +86,12 @@ impl TryInto<Field> for GameInitField {
     }
 }
 
+pub struct BuildCollection {
+    pub settlements: Vec<Settlement>,
+    pub cities: Vec<City>,
+    pub roads: Vec<Road>,
+}
+
 impl Field {
     pub const fn field_size_by_radius(radius: usize) -> usize {
         1 + 3 * radius * (radius + 1)
@@ -111,6 +117,10 @@ impl Field {
     }
 
     pub fn hexes_by_num(&self, num: DiceVal) -> BTreeSet<Hex> {
+        todo!()
+    }
+
+    pub fn builds_on_hex(&self, hex: Hex) -> BTreeMap<PlayerId, BuildCollection> {
         todo!()
     }
 

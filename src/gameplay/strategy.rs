@@ -45,7 +45,7 @@ impl Strategy for LazyAssStrategy {
     }
 
     fn rob(&mut self, perspective: &Perspective) -> RobRequest {
-        RobRequest::without_robbing(perspective.field.get_desert_pos())
+        RobRequest::just_move(perspective.field.get_desert_pos())
     }
 
     fn drop_half(&mut self, perspective: &Perspective) -> ResourceCollection {

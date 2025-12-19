@@ -33,11 +33,7 @@ pub struct RobRequest {
 }
 
 impl RobRequest {
-    pub fn with_robbing(hex: Hex, player: PlayerId) -> Option<Self> {
-        todo!()
-    }
-
-    pub fn without_robbing(hex: Hex) -> Self {
+    pub fn just_move(hex: Hex) -> Self {
         Self { hex, robbed: None }
     }
 }
