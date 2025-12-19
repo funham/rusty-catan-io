@@ -9,7 +9,7 @@
     - [ ] Implement console input strategy
     - [ ] Implement baseline unmanned strategy
  - [ ] GameState implementation
-    - [ ] DeckFullnessLevel
+    - [x] DeckFullnessLevel
     - [ ] Transfer
     - [ ] use yop
     - [ ] use roadbuild

@@ -172,9 +172,9 @@ impl DeckFullnessLevel {
     pub fn min(&self) -> u16 {
         match self {
             DeckFullnessLevel::Empty => 0,
-            DeckFullnessLevel::Low => 1,
-            DeckFullnessLevel::Medium => todo!(),
-            DeckFullnessLevel::High => todo!(),
+            DeckFullnessLevel::Low => DeckFullnessLevel::Empty.max() + 1,
+            DeckFullnessLevel::Medium => DeckFullnessLevel::Low.max() + 1,
+            DeckFullnessLevel::High => DeckFullnessLevel::Medium.max() + 1,
         }
     }
 
@@ -182,9 +182,9 @@ impl DeckFullnessLevel {
     pub fn max(&self) -> u16 {
         match self {
             DeckFullnessLevel::Empty => 0,
-            DeckFullnessLevel::Low => todo!(),
-            DeckFullnessLevel::Medium => todo!(),
-            DeckFullnessLevel::High => todo!(),
+            DeckFullnessLevel::Low => 7,
+            DeckFullnessLevel::Medium => 13,
+            DeckFullnessLevel::High => 19,
         }
     }
 
@@ -238,6 +238,10 @@ impl<'a> BankView<'a> {
     }
 
     pub fn dev_cards_fullness(&self) -> u16 {
+        // Development Cards: The deck contains 25 cards:
+        //  - 14 Knight Cards
+        //  - 6 Progress Cards (2 of each type: Year of Plenty, Monopoly, Road Building)
+        //  - 5 Victory Point Cards
         self.bank.dev_cards.len() as u16
     }
 }
