@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use rand::{Rng, SeedableRng, rngs::SmallRng};
 
 use crate::math::probability::{Probability, Probable};
@@ -91,10 +93,11 @@ impl Into<u8> for DiceVal {
     }
 }
 
-pub trait DiceRoller {
+pub trait DiceRoller: core::fmt::Debug {
     fn roll(&mut self) -> DiceVal;
 }
 
+#[derive(Debug)]
 pub struct RandomDiceRoller {
     rng: SmallRng,
 }
@@ -117,6 +120,12 @@ impl DiceRoller for RandomDiceRoller {
 
 pub struct ConsoleDiceRoller {
     stream: Box<dyn std::io::BufRead>,
+}
+
+impl Debug for ConsoleDiceRoller {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConsoleDiceRoller").finish()
+    }
 }
 
 impl DiceRoller for ConsoleDiceRoller {

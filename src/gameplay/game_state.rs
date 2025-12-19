@@ -14,7 +14,7 @@ use crate::{
         dev_card::DevCardKind,
         field::Field,
         move_request::{DevCardUsage, RobRequest},
-        player::{OpponentData, Player, PlayerData, PlayerId},
+        player::{OpponentData, PlayerData, PlayerId},
         resource::{Resource, ResourceCollection},
         strategy::Strategy,
     },
@@ -22,8 +22,12 @@ use crate::{
     topology::Path,
 };
 
+#[derive(Debug)]
 pub struct RegularCycle;
+#[derive(Debug)]
 pub struct BackAndForthCycle;
+
+#[derive(Debug)]
 pub struct GameTurn<CycleType = RegularCycle> {
     n_players: u8, // in [0..=4]
     rounds_played: u16,
@@ -135,6 +139,7 @@ impl<T> Into<PlayerId> for GameTurn<T> {
     }
 }
 
+#[derive(Debug)]
 pub struct Bank {
     resources: ResourceCollection,
     dev_cards: Vec<DevCardKind>,
@@ -205,11 +210,12 @@ pub struct GameInitializationState {
     pub strats: Vec<Rc<RefCell<dyn Strategy>>>,
 }
 
+#[derive(Debug)]
 pub struct GameState {
     pub(super) field: Field,
     pub(super) dice: Box<dyn DiceRoller>,
     pub(super) bank: Bank,
-    pub(super) players: Vec<Player>,
+    pub(super) players: Vec<PlayerData>,
     pub(super) turn: GameTurn,
     pub(super) longest_tract: Option<PlayerId>,
     pub(super) largest_army: Option<PlayerId>,
@@ -227,9 +233,10 @@ impl<'a> Perspective<'a> {}
 
 /// convinient struct with neccessary info about player who's turn it currently is
 #[derive(Debug)]
-pub struct TurnHandlingParams {
+pub struct TurnHandlingParams<'a, 'b> {
     pub(super) player_id: PlayerId,
-    pub(super) strategy: Rc<RefCell<dyn Strategy>>,
+    pub(super) game: &'a mut GameState,
+    pub(super) strategies: &'b mut Vec<&'b mut dyn Strategy>,
 }
 
 impl GameInitializationState {}
@@ -248,28 +255,22 @@ impl GameState {
             .iter()
             .enumerate()
             .filter(|(i, _)| i != &player_id)
-            .map(|(i, p)| (i, OpponentData::from(&p.data)))
+            .map(|(i, p)| (i, OpponentData::from(p)))
             .collect::<BTreeMap<PlayerId, OpponentData>>();
 
         Perspective {
-            player_data: &self.players[player_id].data,
+            player_data: &self.players[player_id],
             field: &self.field,
             bank: &self.bank,
             opponents,
         }
     }
-    pub fn get_params(&self) -> TurnHandlingParams {
-        let player_id = self.turn.get_turn_index();
-        TurnHandlingParams {
-            player_id,
-            strategy: self.players[player_id].strategy.clone(),
-        }
-    }
+
     pub fn bank_resource_exchange<'a>(
         &mut self,
         exhange: BankResourceExchange,
     ) -> Result<(), BankResourceExchangeError> {
-        let account = &mut self.players[exhange.player_id].data.resources;
+        let account = &mut self.players[exhange.player_id].resources;
         match (
             self.bank.resources - &exhange.from_bank,
             *account - &exhange.to_bank,
@@ -315,7 +316,9 @@ impl GameState {
     }
 
     pub fn count_max_tract_length(&self, player_id: PlayerId) -> u16 {
-        todo!("implement some graph algorithm (maybe store graphs for each player in `PlayerBuildData`")
+        todo!(
+            "implement some graph algorithm (maybe store graphs for each player in `PlayerBuildData`"
+        )
     }
 
     /// goes through the players and if one have >9 vp returns it
@@ -342,7 +345,7 @@ impl GameState {
 
     pub fn count_vp_without_track_and_army(&self, player_id: PlayerId) -> u16 {
         let mut score = 0;
-        score += self.players[player_id].data.dev_cards.victory_pts;
+        score += self.players[player_id].dev_cards.victory_pts;
         score += self.field.builds[player_id].settlements.len() as u16;
         score += self.field.builds[player_id].cities.len() as u16 * 2;
         score
@@ -388,11 +391,7 @@ impl GameState {
             }
         }
 
-        if let Err(_) = self.players[user]
-            .data
-            .dev_cards
-            .move_to_played(usage.card())
-        {
+        if let Err(_) = self.players[user].dev_cards.move_to_played(usage.card()) {
             return Err(DevCardUsageError::CardNotFoundInInventory);
         }
 
@@ -400,7 +399,7 @@ impl GameState {
     }
 
     /* private helper functions */
-    
+
     /// steal random card from another player (surprisingly complex logic)
     fn rob(&mut self, robbed_id: PlayerId, robber_id: PlayerId) {
         let (left, right) = self.players.split_at_mut(robbed_id.max(robber_id));
@@ -411,8 +410,8 @@ impl GameState {
             std::cmp::Ordering::Greater => ((right, robbed_id - left_len), (left, robber_id)),
         };
 
-        let robbed_account = &mut robbed_half[robbed_id].data.resources;
-        let robber_account = &mut robber_half[robber_id].data.resources;
+        let robbed_account = &mut robbed_half[robbed_id].resources;
+        let robber_account = &mut robber_half[robber_id].resources;
 
         let stolen = robbed_account.peek_random();
         if let Some(card) = stolen {
@@ -428,11 +427,10 @@ impl GameState {
         self.execute_robbers(rob_request, robber_id)?;
 
         // update largest army logic
-        let knight_count =
-            self.players[robber_id].data.dev_cards.played[UsableDevCardKind::Knight] + 1;
+        let knight_count = self.players[robber_id].dev_cards.played[UsableDevCardKind::Knight] + 1;
 
         let curr_best_count = match self.largest_army {
-            Some(id) => self.players[id].data.dev_cards.played[UsableDevCardKind::Knight],
+            Some(id) => self.players[id].dev_cards.played[UsableDevCardKind::Knight],
             None => 2, // a bit dangerous hack
         };
 

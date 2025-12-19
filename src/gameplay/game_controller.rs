@@ -2,16 +2,19 @@ use std::collections::BTreeSet;
 
 use crate::{
     gameplay::{
+        game_state::BankResourceExchange,
         hex::HexType,
         move_request::{
             BankTrade, Buildable, DevCardUsage, PersonalTradeOffer, PublicTradeOffer, RobRequest,
         },
         player::{City, HasPos, PlayerId, Settlement},
+        resource::ResourceCollection,
         strategy::strategy_answers::{
             self, MoveRequestAfterDiceThrow, MoveRequestAfterDiceThrowAndDevCard,
         },
     },
     math::dice::DiceVal,
+    strategy::Strategy,
     topology::{Hex, Intersection},
 };
 
@@ -28,14 +31,26 @@ pub struct GameController {}
 // TODO: add GUI calls (View as in MVC pattern)
 impl GameController {
     // execute game untill it's over
-    pub fn run(game: &mut GameState) -> GameResult {
+    pub fn run<'a>(
+        game: &mut GameState,
+        strategies: &'a mut Vec<&'a mut dyn Strategy>,
+    ) -> GameResult {
+        let mut params = TurnHandlingParams {
+            player_id: 0,
+            game,
+            strategies: strategies,
+        };
+
         loop {
-            if let Some(winner_id) = game.check_win_condition() {
+            if let Some(winner_id) = params.game.check_win_condition() {
                 return GameResult::Win(winner_id);
             };
 
-            match Self::handle_turn(game) {
-                Ok(_) => game.turn.next(),
+            let player_id = params.game.turn.get_turn_index();
+            params.player_id = player_id;
+
+            match Self::handle_turn(&mut params) {
+                Ok(_) => params.game.turn.next(),
                 Err(_) => break,
             }
         }
@@ -45,13 +60,13 @@ impl GameController {
 
     /// Requests current player's strategy, handles it's answers
     /// Leads to recursion in `handle_rest()`
-    fn handle_turn(game: &mut GameState) -> Result<(), bool> {
-        let mut params = game.get_params();
-
-        game.players[params.player_id].data.dev_cards.reset_queue();
+    fn handle_turn(params: &mut TurnHandlingParams) -> Result<(), bool> {
+        params.game.players[params.player_id]
+            .dev_cards
+            .reset_queue();
 
         // functional state machine handling
-        GameController::handle_move_init(game, &mut params);
+        GameController::handle_move_init(params);
         // end of the move; cant't send request to a strategy
         // ... move ending routines
         todo!()
@@ -59,79 +74,69 @@ impl GameController {
 
     /* Turn handling methods; Kind of a procedural state machine */
 
-    fn handle_move_init(game: &mut GameState, params: &mut TurnHandlingParams) {
-        match params.strategy.borrow_mut().move_init(todo!()) {
+    fn handle_move_init(params: &mut TurnHandlingParams) {
+        match params.strategies[params.player_id].move_init(todo!()) {
             strategy_answers::MoveRequestInit::ThrowDice => {
-                Self::execute_dice_trow(game, &mut params);
-                Self::handle_dice_thrown(game, &mut params);
+                Self::execute_dice_trow(params);
+                Self::handle_dice_thrown(params);
             }
             strategy_answers::MoveRequestInit::UseDevCard(dev_card_usage) => {
-                Self::handle_dev_card_used(game, &mut params, dev_card_usage);
+                Self::handle_dev_card_used(params, dev_card_usage);
             }
         }
     }
 
-    fn handle_dice_thrown(game: &mut GameState, params: &mut TurnHandlingParams) {
-        match params
-            .strategy
-            .borrow_mut()
-            .move_request_after_dice_throw(todo!())
+    fn handle_dice_thrown(params: &mut TurnHandlingParams) {
+        match params.strategies[params.player_id]
+            .move_request_after_dice_throw(&params.game.get_perspective(params.player_id))
         {
             MoveRequestAfterDiceThrow::UseDevCard(dev_card_usage) => {
-                let _ = game.use_dev_card(dev_card_usage, params.player_id);
-                Self::handle_rest(game, params);
+                let _ = params.game.use_dev_card(dev_card_usage, params.player_id);
+                Self::handle_rest(params);
                 return;
             }
             MoveRequestAfterDiceThrow::OfferPublicTrade(public_trade_offer) => {
-                Self::execute_public_trade_offer(game, params, public_trade_offer)
+                Self::execute_public_trade_offer(params, public_trade_offer)
             }
             MoveRequestAfterDiceThrow::OfferPersonalTrade(personal_trade_offer) => {
-                Self::execute_personal_trade_offer(game, params, personal_trade_offer)
+                Self::execute_personal_trade_offer(params, personal_trade_offer)
             }
             MoveRequestAfterDiceThrow::TradeWithBank(bank_trade) => {
-                Self::execute_bank_trade(game, params, bank_trade);
+                Self::execute_bank_trade(params, bank_trade);
             }
             MoveRequestAfterDiceThrow::Build(buildable) => {
-                Self::execute_build(game, params, buildable);
+                Self::execute_build(params, buildable);
             }
             MoveRequestAfterDiceThrow::EndMove => {
                 return;
             }
         }
 
-        Self::handle_dice_thrown(game, params);
+        Self::handle_dice_thrown(params);
     }
 
-    fn handle_dev_card_used(
-        game: &mut GameState,
-        params: &mut TurnHandlingParams,
-        usage: DevCardUsage,
-    ) -> strategy_answers::MoveRequestAfterDevCard {
-        let _ = game.use_dev_card(usage, params.player_id); // todo: handle errors
-        let _ = params
-            .strategy
-            .borrow_mut()
-            .move_request_after_dev_card(todo!()); // dice throw (must be manual for players)
-        Self::handle_rest(game, params);
+    fn handle_dev_card_used(params: &mut TurnHandlingParams, usage: DevCardUsage) {
+        let _ = params.game.use_dev_card(usage, params.player_id); // todo: handle errors
+        let _ = params.strategies[params.player_id]
+            .move_request_after_dev_card(&params.game.get_perspective(params.player_id)); // dice throw (must be manual for players)
+        Self::handle_rest(params);
     }
 
-    fn handle_rest(game: &mut GameState, params: &mut TurnHandlingParams) {
-        match params
-            .strategy
-            .borrow_mut()
-            .move_request_after_dice_throw_and_dev_card(todo!())
-        {
+    fn handle_rest(params: &mut TurnHandlingParams) {
+        match params.strategies[params.player_id].move_request_after_dice_throw_and_dev_card(
+            &params.game.get_perspective(params.player_id),
+        ) {
             MoveRequestAfterDiceThrowAndDevCard::OfferPublicTrade(public_trade_offer) => {
-                Self::execute_public_trade_offer(game, params, public_trade_offer)
+                Self::execute_public_trade_offer(params, public_trade_offer)
             }
             MoveRequestAfterDiceThrowAndDevCard::OfferPersonalTrade(personal_trade_offer) => {
-                Self::execute_personal_trade_offer(game, params, personal_trade_offer);
+                Self::execute_personal_trade_offer(params, personal_trade_offer);
             }
             MoveRequestAfterDiceThrowAndDevCard::TradeWithBank(bank_trade) => {
-                Self::execute_bank_trade(game, params, bank_trade)
+                Self::execute_bank_trade(params, bank_trade)
             }
             MoveRequestAfterDiceThrowAndDevCard::Build(buildable) => {
-                Self::execute_build(game, params, buildable)
+                Self::execute_build(params, buildable)
             }
             MoveRequestAfterDiceThrowAndDevCard::EndMove => {
                 return;
@@ -139,13 +144,12 @@ impl GameController {
         }
 
         // !warning! recursion
-        Self::handle_rest(game, params);
+        Self::handle_rest(params);
     }
 
     /* Helper methods, to reduce clutter, no calls to `handle*` methods allowed */
 
     fn execute_public_trade_offer(
-        game: &mut GameState,
         params: &mut TurnHandlingParams,
         public_trade_offer: PublicTradeOffer,
     ) {
@@ -153,28 +157,22 @@ impl GameController {
     }
 
     fn execute_personal_trade_offer(
-        game: &mut GameState,
         params: &mut TurnHandlingParams,
         personal_trade_offer: PersonalTradeOffer,
     ) {
         todo!()
     }
 
-    fn execute_bank_trade(
-        game: &mut GameState,
-        params: &mut TurnHandlingParams,
-        bank_trade: BankTrade,
-    ) {
+    fn execute_bank_trade(params: &mut TurnHandlingParams, bank_trade: BankTrade) {
         todo!()
     }
 
-    fn execute_build(game: &mut GameState, params: &mut TurnHandlingParams, buildable: Buildable) {
+    fn execute_build(params: &mut TurnHandlingParams, buildable: Buildable) {
         todo!()
     }
 
     fn execute_harvesting_for_one_player(
-        game: &mut GameState,
-        player_id: PlayerId,
+        params: &mut TurnHandlingParams,
         bounding_set: &BTreeSet<Hex>,
         buildings: impl IntoIterator<Item = impl HasPos<Pos = Intersection>>,
         amount_to_harvest: u16,
@@ -189,9 +187,11 @@ impl GameController {
             let hexes_to_harvest = coincidential_hexes.intersection(&bounding_set);
 
             for hex in hexes_to_harvest {
-                match game.field.hexes[hex].hex_type {
+                match params.game.field.hexes[hex].hex_type {
                     HexType::Some(resource) => {
-                        let _ = game.pay_to_player((resource, amount_to_harvest).into(), player_id);
+                        let _ = params
+                            .game
+                            .pay_to_player((resource, amount_to_harvest).into(), params.player_id);
                     }
                     HexType::Desert => todo!(),
                 }
@@ -201,51 +201,51 @@ impl GameController {
 
     // TODO: add support for golded river
     // (harvest normally for normal hexes + count wildcards + ask strategy for choosing n random cards)
-    fn execute_harvesting(game: &mut GameState, params: &mut TurnHandlingParams, num: DiceVal) {
+    fn execute_harvesting(params: &mut TurnHandlingParams, num: DiceVal) {
         assert_ne!(num, DiceVal::seven());
-        let hexes_with_num = game.field.hexes_by_num(num);
+        let hexes_with_num = params.game.field.hexes_by_num(num);
 
-        for player_id in game.player_ids_starting_from(params.player_id) {
+        for player_id in params.game.player_ids_starting_from(params.player_id) {
             Self::execute_harvesting_for_one_player(
-                game,
-                player_id,
+                params,
                 &hexes_with_num,
-                game.field.builds[player_id].settlements.clone(),
+                params.game.field.builds[player_id].settlements.clone(),
                 Settlement::harvesting_rate(),
             );
 
             Self::execute_harvesting_for_one_player(
-                game,
-                player_id,
+                params,
                 &hexes_with_num,
-                game.field.builds[player_id].cities.clone(),
+                params.game.field.builds[player_id].cities.clone(),
                 City::harvesting_rate(),
             );
         }
     }
 
-    fn execute_seven(game: &mut GameState, params: &mut TurnHandlingParams) {
-        for player in &game.players {
-            player
-                .strategy
-                .borrow_mut()
-                .drop_half(&game.get_perspective(params.player_id));
+    fn execute_seven(params: &mut TurnHandlingParams) {
+        for (id, strategy) in params.strategies.iter_mut().enumerate() {
+            let to_drop = strategy.drop_half(&params.game.get_perspective(params.player_id));
+            let _ = params.game.bank_resource_exchange(BankResourceExchange {
+                to_bank: to_drop,
+                from_bank: ResourceCollection::default(),
+                player_id: id,
+            });
         }
 
-        let rob_request: RobRequest = params
-            .strategy
-            .borrow_mut()
-            .rob(&game.get_perspective(params.player_id));
+        let rob_request: RobRequest =
+            params.strategies[params.player_id].rob(&params.game.get_perspective(params.player_id));
 
-        game.execute_robbers(rob_request, params.player_id)
+        params
+            .game
+            .execute_robbers(rob_request, params.player_id)
             .expect("bruuh");
     }
 
     /// Roll dice, asks strategy if 7, harvest resources for all players otherwise
-    fn execute_dice_trow(game: &mut GameState, params: &mut TurnHandlingParams) {
-        match game.dice.roll() {
-            seven if seven == DiceVal::seven() => Self::execute_seven(game, params),
-            other => Self::execute_harvesting(game, params, other),
+    fn execute_dice_trow(params: &mut TurnHandlingParams) {
+        match params.game.dice.roll() {
+            seven if seven == DiceVal::seven() => Self::execute_seven(params),
+            other => Self::execute_harvesting(params, other),
         }
     }
 }

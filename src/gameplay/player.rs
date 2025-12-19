@@ -76,7 +76,7 @@ impl HasPos for Road {
 }
 
 pub type PlayerId = usize;
-
+#[derive(Debug)]
 pub struct PlayerBuildData {
     pub settlements: BTreeSet<Settlement>,
     pub cities: BTreeSet<City>,
@@ -97,14 +97,10 @@ impl PlayerBuildData {
     }
 }
 
+#[derive(Debug)]
 pub struct PlayerData {
     pub resources: ResourceCollection,
     pub dev_cards: DevCardData,
-}
-
-pub struct Player {
-    pub data: PlayerData,
-    pub strategy: Rc<RefCell<dyn strategy::Strategy>>,
 }
 
 pub struct OpponentData {

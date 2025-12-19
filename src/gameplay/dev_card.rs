@@ -15,6 +15,8 @@ pub enum UsableDevCardKind {
     RoadBuild,
     Monopoly,
 }
+
+#[derive(Debug)]
 pub enum DevCardKind {
     Usable(UsableDevCardKind),
     VictoryPoint,

@@ -17,12 +17,14 @@ pub struct GameInitField {
     pub builds: Vec<GameInitPlayerBuilds>, // id -> InitialBuids
 }
 
+#[derive(Debug)]
 struct FieldCache {
     desert_pos: Hex,
     hex_by_num: HexesByNum,
     ports_by_player: PortsByPlayer, // may be moved to PlayerData later
 }
 
+#[derive(Debug)]
 pub struct Field {
     pub field_radius: usize,
     pub hexes: HexArrangement,        // (q, r) -> HexInfo
