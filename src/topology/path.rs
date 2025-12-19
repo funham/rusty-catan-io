@@ -7,7 +7,7 @@ use crate::topology::intersection::*;
 pub struct Path(Hex, Hex);
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct EdgeDual(Hex, Hex);
+pub struct PathDual(Hex, Hex);
 
 #[derive(Debug)]
 pub enum EdgeConstructError {
@@ -58,7 +58,7 @@ pub enum EdgeDualConstructError {
     NotNeighboringVertices,
 }
 
-impl TryFrom<(Intersection, Intersection)> for EdgeDual {
+impl TryFrom<(Intersection, Intersection)> for PathDual {
     type Error = EdgeDualConstructError;
 
     fn try_from(value: (Intersection, Intersection)) -> Result<Self, Self::Error> {
@@ -80,7 +80,7 @@ impl TryFrom<(Intersection, Intersection)> for EdgeDual {
     }
 }
 
-impl TryFrom<(Hex, Hex)> for EdgeDual {
+impl TryFrom<(Hex, Hex)> for PathDual {
     type Error = EdgeDualConstructError;
 
     fn try_from(value: (Hex, Hex)) -> Result<Self, Self::Error> {
@@ -95,7 +95,7 @@ impl TryFrom<(Hex, Hex)> for EdgeDual {
     }
 }
 
-impl EdgeDual {
+impl PathDual {
     pub fn set(&self) -> BTreeSet<Hex> {
         BTreeSet::from([self.0, self.1])
     }
@@ -118,13 +118,13 @@ impl Path {
         BTreeSet::from([self.0, self.1])
     }
 
-    pub fn dual(&self) -> EdgeDual {
+    pub fn dual(&self) -> PathDual {
         let n0 = self.0.neighbors().collect::<BTreeSet<_>>();
         let n1 = self.1.neighbors().collect();
 
         let inter = n0.intersection(&n1).cloned().collect::<BTreeSet<Hex>>();
 
-        EdgeDual::try_from((
+        PathDual::try_from((
             inter.first().unwrap().clone(),
             inter.last().unwrap().clone(),
         ))

@@ -28,7 +28,7 @@ pub struct GameController {}
 // TODO: add GUI calls (View as in MVC pattern)
 impl GameController {
     // execute game untill it's over
-    pub fn run(&self, game: &mut GameState) -> GameResult {
+    pub fn run(game: &mut GameState) -> GameResult {
         loop {
             if let Some(winner_id) = game.check_win_condition() {
                 return GameResult::Win(winner_id);
