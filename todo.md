@@ -16,6 +16,8 @@
     - [x] use monopoly
  - [ ] GameController
     - [ ] error handling
+      - [x] logging
+      - [ ] handling
     - [ ] execute_* methods
     - [ ] golden river support
  - [ ] Field
