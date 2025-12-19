@@ -531,17 +531,13 @@ impl GameState {
 
     fn use_year_of_plenty(
         &mut self,
-        list: (Resource, Resource),
+        list: [Resource; 2],
         user: PlayerId,
     ) -> Result<(), DevCardUsageError> {
         todo!()
     }
 
-    fn use_roadbuild(
-        &mut self,
-        poses: (Path, Path),
-        user: PlayerId,
-    ) -> Result<(), DevCardUsageError> {
+    fn use_roadbuild(&mut self, poses: [Path; 2], user: PlayerId) -> Result<(), DevCardUsageError> {
         todo!()
     }
 

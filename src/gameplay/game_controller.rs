@@ -73,7 +73,7 @@ impl GameController {
 
     fn handle_move_init(params: &mut TurnHandlingParams) {
         match params.strategies[params.player_id]
-            .move_init(&params.game.get_perspective(params.player_id))
+            .move_request_init(&params.game.get_perspective(params.player_id))
         {
             MoveRequestInit::ThrowDice => {
                 Self::execute_dice_trow(params);

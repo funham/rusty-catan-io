@@ -5,9 +5,10 @@
     - [ ] populate `main.rs`
     - [ ] Add integration tests
  - [ ] Strategy
-    - [ ] Finish `LazyAssStrategy` implementation
+    - [x] Finish `LazyAssStrategy` implementation
     - [ ] Implement console input strategy
     - [ ] Implement baseline unmanned strategy
+    - [ ] Get rid of Debug trait derivation for Strategy
  - [ ] GameState implementation
     - [x] DeckFullnessLevel
     - [x] Transfer

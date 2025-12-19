@@ -10,8 +10,8 @@ use crate::{
 #[derive(Debug, Clone, Copy)]
 pub enum DevCardUsage {
     Knight(RobRequest),
-    YearOfPlenty((Resource, Resource)),
-    RoadBuild((Path, Path)),
+    YearOfPlenty([Resource; 2]),
+    RoadBuild([Path; 2]),
     Monopoly(Resource),
 }
 
