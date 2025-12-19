@@ -16,8 +16,8 @@
     - [x] use monopoly
  - [ ] GameController
     - [ ] error handling
-    - execute_* methods
-    - golden river support
+    - [ ] execute_* methods
+    - [ ] golden river support
  - [ ] Field
  - [x] move_request (RobRequest::with_robbing)
  - [ ] CLI
