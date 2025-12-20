@@ -21,13 +21,13 @@ impl Strategy for LazyAssStrategy {
     }
 
     fn drop_half(&mut self, perspective: &Perspective) -> ResourceCollection {
-        if perspective.player_data.resources.total() <= 7 {
+        if perspective.player_view.resources.total() <= 7 {
             log::error!("Should not drop cards");
         }
 
-        let number_to_drop = perspective.player_data.resources.total() / 2;
+        let number_to_drop = perspective.player_view.resources.total() / 2;
         let mut to_drop = ResourceCollection::default();
-        for (resource, number) in perspective.player_data.resources.unroll() {
+        for (resource, number) in perspective.player_view.resources.unroll() {
             let remaining = number_to_drop - to_drop.total();
 
             if remaining == 0 {

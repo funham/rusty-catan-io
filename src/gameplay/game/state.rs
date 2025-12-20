@@ -1,43 +1,39 @@
-use std::collections::BTreeMap;
-
-use crate::gameplay::dev_card::UsableDevCardKind;
-use crate::{
-    gameplay::{
-        bank::{Bank, BankResourceExchangeError, BankView, PlayerResourceExchangeError},
-        field::state::Field,
-        player::{OpponentData, PlayerData, PlayerId},
-        primitives::*,
-        resource::{Resource, ResourceCollection},
-        turn::GameTurn,
-    },
-    math::dice::DiceRoller,
-    topology::Path,
+use crate::gameplay::primitives::{
+    Robbery,
+    bank::{Bank, BankResourceExchangeError, BankView, PlayerResourceExchangeError},
+    build::GameBuildData,
+    dev_card::DevCardUsage,
+    player::{PlayerDataContainer, PlayerDataProxy, PlayerId, SecuredPlayerData},
+    resource::{Resource, ResourceCollection},
+    turn::GameTurn,
 };
+
+use crate::{gameplay::field::state::FieldState, math::dice::DiceRoller, topology::Path};
 
 #[derive(Debug)]
 pub struct GameState {
-    pub(super) field: Field,
+    pub(super) field: FieldState,
     pub(super) dice: Box<dyn DiceRoller>,
     pub(super) bank: Bank,
-    pub(super) players: Vec<PlayerData>,
     pub(super) turn: GameTurn,
+    pub(super) players: PlayerDataContainer,
+    pub(super) builds: GameBuildData,
     pub(super) longest_tract: Option<PlayerId>,
-    pub(super) largest_army: Option<PlayerId>,
 }
 
 /// player's perspective on a game, used in `Strategy`
 pub struct Perspective<'a> {
     pub player_id: PlayerId,
-    pub player_data: &'a PlayerData,
-    pub field: &'a Field,
+    pub player_view: PlayerDataProxy<'a>,
+    pub field: &'a FieldState,
     pub bank: BankView<'a>,
-    pub opponents: BTreeMap<PlayerId, OpponentData>,
+    pub secured_players_info: Vec<SecuredPlayerData>,
 }
 
 impl<'a> Perspective<'a> {
     /// hint: you can call .cycle() on it
     pub fn turn_ids_from_next(&self) -> impl Iterator<Item = PlayerId> {
-        let n_players = self.opponents.len() + 1;
+        let n_players = self.secured_players_info.len() + 1;
         (self.player_id + 1..n_players).chain(0..=self.player_id)
     }
 }
@@ -56,17 +52,15 @@ impl GameState {
         let opponents = self
             .players
             .iter()
-            .enumerate()
-            .filter(|(i, _)| i != &player_id)
-            .map(|(i, p)| (i, OpponentData::from(p)))
-            .collect::<BTreeMap<PlayerId, OpponentData>>();
+            .map(|p| SecuredPlayerData::from(&p))
+            .collect::<Vec<_>>();
 
         Perspective {
             player_id,
-            player_data: &self.players[player_id],
+            player_view: self.players.get(player_id),
             field: &self.field,
             bank: self.bank.view(),
-            opponents,
+            secured_players_info: opponents,
         }
     }
 
@@ -86,7 +80,7 @@ impl GameState {
         player_id: PlayerId,
     ) -> Result<(), BankResourceExchangeError> {
         ResourceCollection::transfer(
-            &mut self.players[player_id].resources,
+            &mut self.players.get_mut(player_id).resources(),
             &mut self.bank.resources,
             resources,
             BankResourceExchangeError::AccountIsShort { id: player_id },
@@ -100,7 +94,7 @@ impl GameState {
     ) -> Result<(), BankResourceExchangeError> {
         ResourceCollection::transfer(
             &mut self.bank.resources,
-            &mut self.players[player_id].resources,
+            &mut self.players.get_mut(player_id).resources(),
             resources,
             BankResourceExchangeError::BankIsShort,
         )
@@ -112,7 +106,8 @@ impl GameState {
         to_id: PlayerId,
         resources: ResourceCollection,
     ) -> Result<(), PlayerResourceExchangeError> {
-        let (from, to) = self.get_mut_players(from_id, to_id);
+        let (from, to) = self.players.get_mut_both_raw((from_id, to_id));
+
         ResourceCollection::transfer(
             &mut from.resources,
             &mut to.resources,
@@ -125,13 +120,13 @@ impl GameState {
         &self,
         start_id: PlayerId,
     ) -> impl IntoIterator<Item = PlayerId> + use<> {
-        (start_id..self.players.len())
+        (start_id..self.players.count())
             .chain(0..start_id)
             .collect::<Vec<_>>()
     }
 
     pub fn count_max_tract_length(&self, player_id: PlayerId) -> u16 {
-        self.field.builds[player_id].roads.calculate_diameter() as u16
+        self.builds[player_id].roads.calculate_diameter() as u16
     }
 
     /// goes through the players and if one have >9 vp returns it
@@ -143,11 +138,11 @@ impl GameState {
                 Some(id) if id == player_id => 2,
                 _ => 0,
             };
-            let army_pts = match self.largest_army {
-                Some(id) if id == player_id => 2,
-                _ => 0,
+            let army_pts = if self.players.get(player_id).has_largest_army() {
+                3
+            } else {
+                0
             };
-
             if pure_vp + tract_pts + army_pts > VP_TO_WIN as u16 {
                 return Some(player_id);
             }
@@ -158,14 +153,14 @@ impl GameState {
 
     pub fn count_vp_without_track_and_army(&self, player_id: PlayerId) -> u16 {
         let mut score = 0;
-        score += self.players[player_id].dev_cards.victory_pts;
-        score += self.field.builds[player_id].settlements.len() as u16;
-        score += self.field.builds[player_id].cities.len() as u16 * 2;
+        score += self.players.get(player_id).dev_cards().victory_pts;
+        score += self.builds[player_id].settlements.len() as u16;
+        score += self.builds[player_id].cities.len() as u16 * 2;
         score
     }
 
     /// no, not in that way
-    pub fn execute_robbers(
+    pub fn use_robbers(
         &mut self,
         rob_request: Robbery,
         robber_id: PlayerId,
@@ -179,9 +174,9 @@ impl GameState {
 
         // steal card
         if let Some(robbed_id) = rob_request.robbed {
-            match self.field.builds_on_hex(rob_request.hex).get(&robbed_id) {
+            match self.builds.builds_on_hex(rob_request.hex).get(&robbed_id) {
                 Some(v) if !v.settlements.is_empty() || !v.cities.is_empty() => {
-                    self.rob(robbed_id, robber_id)
+                    self.steal(robbed_id, robber_id)
                 }
                 _ => return Err(DevCardUsageError::InvalidRobbery),
             }
@@ -196,7 +191,7 @@ impl GameState {
     ) -> Result<(), DevCardUsageError> {
         match usage {
             DevCardUsage::Knight(rob_request) => {
-                self.use_knight(rob_request, user)?;
+                self.use_robbers(rob_request, user)?;
             }
             DevCardUsage::YearOfPlenty(list) => {
                 self.use_year_of_plenty(list, user)?;
@@ -209,7 +204,11 @@ impl GameState {
             }
         }
 
-        if let Err(_) = self.players[user].dev_cards.move_to_played(usage.card()) {
+        if let Err(_) = self
+            .players
+            .get_mut(user)
+            .dev_cards_move_to_used(usage.card_kind())
+        {
             return Err(DevCardUsageError::CardNotFoundInInventory);
         }
 
@@ -218,54 +217,15 @@ impl GameState {
 
     /* private helper functions */
 
-    // get mutable view of two players
-    fn get_mut_players(
-        &mut self,
-        player1: PlayerId,
-        player2: PlayerId,
-    ) -> (&mut PlayerData, &mut PlayerData) {
-        let (left, right) = self.players.split_at_mut(player1.max(player2));
-        let left_len = left.len();
-        let ((half1, p1), (half2, p2)) = match player1.cmp(&player2) {
-            std::cmp::Ordering::Equal => unreachable!("you can't rob yourself"),
-            std::cmp::Ordering::Less => ((left, player1), (right, player2 - left_len)),
-            std::cmp::Ordering::Greater => ((right, player1 - left_len), (left, player2)),
-        };
-
-        (&mut half1[p1], &mut half2[p2])
-    }
-
     /// steal random card from another player
-    fn rob(&mut self, robbed_id: PlayerId, robber_id: PlayerId) {
-        let robbed_account = &self.players[robbed_id].resources;
+    fn steal(&mut self, robbed_id: PlayerId, robber_id: PlayerId) {
+        let robbed_account = self.players.get(robbed_id).resources();
         let stolen = robbed_account.peek_random();
         if let Some(card) = stolen {
             if let Err(e) = self.players_resource_transfer(robbed_id, robber_id, card.into()) {
                 log::error!("stealing non-existent card: {:?}", e)
             }
         }
-    }
-
-    fn use_knight(
-        &mut self,
-        rob_request: Robbery,
-        user: PlayerId,
-    ) -> Result<(), DevCardUsageError> {
-        self.execute_robbers(rob_request, user)?;
-
-        // update largest army logic
-        let knight_count = self.players[user].dev_cards.played[UsableDevCardKind::Knight] + 1;
-
-        let curr_best_count = match self.largest_army {
-            Some(id) => self.players[id].dev_cards.played[UsableDevCardKind::Knight],
-            None => 2, // a bit dangerous hack
-        };
-
-        if knight_count > curr_best_count {
-            self.largest_army = Some(user);
-        }
-
-        Ok(())
     }
 
     fn use_year_of_plenty(
@@ -296,7 +256,7 @@ impl GameState {
             .into_iter()
             .filter(|id| *id != user)
         {
-            let resources = (resource, self.players[id].resources[resource]).into();
+            let resources = (resource, self.players.get(id).resources()[resource]).into();
             if let Err(e) = self.players_resource_transfer(id, user, resources) {
                 log::error!("somehow took more cards than a player has: {:?}", e);
             }

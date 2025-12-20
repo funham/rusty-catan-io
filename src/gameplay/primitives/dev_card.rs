@@ -1,12 +1,8 @@
 use std::ops::{Index, IndexMut};
 
+use super::{Robbery, resource::Resource};
+use crate::topology::Path;
 use num::Integer;
-
-pub enum DevCardStatus {
-    NotReady,
-    Ready,
-    Played,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum UsableDevCardKind {
@@ -68,7 +64,7 @@ impl IndexMut<UsableDevCardKind> for UsableDevCardCollection {
 pub struct DevCardData {
     pub queued: UsableDevCardCollection, // unavailable in current round
     pub active: UsableDevCardCollection, // ready to be played
-    pub played: UsableDevCardCollection, // played cards
+    pub used: UsableDevCardCollection,   // used cards
     pub victory_pts: u16,
 }
 
@@ -91,14 +87,14 @@ impl DevCardData {
         }
     }
 
-    pub fn move_to_played(
+    pub fn move_to_used(
         &mut self,
         card: UsableDevCardKind,
     ) -> Result<(), DevCardDataPlayingError> {
         match self.active.contains(card) {
             true => Ok({
                 self.active[card].dec();
-                self.played[card].inc();
+                self.used[card].inc();
             }),
             false => Err(DevCardDataPlayingError),
         }
@@ -114,5 +110,24 @@ pub struct OpponentDevCardData {
 impl OpponentDevCardData {
     pub fn max_potential_vp(&self) -> u16 {
         self.queued + self.active
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum DevCardUsage {
+    Knight(Robbery),
+    YearOfPlenty([Resource; 2]),
+    RoadBuild([Path; 2]),
+    Monopoly(Resource),
+}
+
+impl DevCardUsage {
+    pub fn card_kind(&self) -> UsableDevCardKind {
+        match self {
+            DevCardUsage::Knight(_) => UsableDevCardKind::Knight,
+            DevCardUsage::YearOfPlenty(_) => UsableDevCardKind::YearOfPlenty,
+            DevCardUsage::RoadBuild(_) => UsableDevCardKind::YearOfPlenty,
+            DevCardUsage::Monopoly(_) => UsableDevCardKind::Monopoly,
+        }
     }
 }

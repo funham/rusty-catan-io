@@ -1,4 +1,4 @@
-use crate::gameplay::{
+use crate::gameplay::primitives::{
     dev_card::DevCardKind,
     player::PlayerId,
     resource::{Resource, ResourceCollection},

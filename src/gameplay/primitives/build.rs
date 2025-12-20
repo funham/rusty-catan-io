@@ -1,40 +1,60 @@
-use crate::{
-    gameplay::{
-        dev_card::UsableDevCardKind,
-        player::*,
-        resource::{HasCost, Resource, ResourceCollection},
-    },
-    topology::{Hex, Intersection, Path},
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    ops::{Index, IndexMut},
 };
 
-#[derive(Debug, Clone, Copy)]
-pub struct Robbery {
-    pub hex: Hex,
-    pub robbed: Option<PlayerId>,
-}
+use crate::{
+    gameplay::{
+        field::state::BuildCollection,
+        primitives::{
+            player::PlayerId,
+            resource::{HasCost, ResourceCollection},
+        },
+    },
+    topology::{HasPos, Hex, Intersection, Path, graph},
+};
 
-impl Robbery {
-    pub fn just_move(hex: Hex) -> Self {
-        Self { hex, robbed: None }
+#[derive(Debug)]
+pub struct GameBuildData;
+
+impl GameBuildData {
+    pub fn builds_on_hex(&self, hex: Hex) -> BTreeMap<PlayerId, BuildCollection> {
+        todo!()
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum DevCardUsage {
-    Knight(Robbery),
-    YearOfPlenty([Resource; 2]),
-    RoadBuild([Path; 2]),
-    Monopoly(Resource),
+impl Index<PlayerId> for GameBuildData {
+    type Output = PlayerBuildData;
+
+    fn index(&self, index: PlayerId) -> &Self::Output {
+        todo!()
+    }
 }
 
-impl DevCardUsage {
-    pub fn card(&self) -> UsableDevCardKind {
-        match self {
-            DevCardUsage::Knight(_) => UsableDevCardKind::Knight,
-            DevCardUsage::YearOfPlenty(_) => UsableDevCardKind::YearOfPlenty,
-            DevCardUsage::RoadBuild(_) => UsableDevCardKind::YearOfPlenty,
-            DevCardUsage::Monopoly(_) => UsableDevCardKind::Monopoly,
-        }
+impl IndexMut<PlayerId> for GameBuildData {
+    fn index_mut(&mut self, index: PlayerId) -> &mut Self::Output {
+        todo!()
+    }
+}
+
+#[derive(Debug)]
+pub struct PlayerBuildData {
+    pub settlements: BTreeSet<Settlement>,
+    pub cities: BTreeSet<City>,
+    pub roads: graph::RoadGraph, // derives default
+}
+
+impl PlayerBuildData {
+    pub fn builds_occupancy(&self) -> BTreeSet<Intersection> {
+        self.settlements
+            .iter()
+            .map(|s| s.pos)
+            .chain(self.cities.iter().map(|c| c.pos))
+            .collect()
+    }
+
+    pub fn roads_occupancy(&self) -> BTreeSet<Path> {
+        self.roads.roads_occupancy().clone()
     }
 }
 
@@ -45,52 +65,10 @@ pub enum Buildable {
     Road(Road),
 }
 
-pub struct PublicTradeOffer {
-    give: ResourceCollection,
-    take: ResourceCollection,
-}
-
-pub struct PersonalTradeOffer {
-    give: ResourceCollection,
-    take: ResourceCollection,
-    peer: PlayerId,
-}
-
-pub enum BankTradeKind {
-    Common,
-    PortUniversal,
-    PortSpecial,
-}
-
-pub struct BankTrade {
-    give: Resource,
-    take: Resource,
-    kind: BankTradeKind,
-}
-
-pub struct PlayerTrade {
-    pub give: ResourceCollection,
-    pub take: ResourceCollection,
-}
-
-impl PlayerTrade {
-    pub fn opposite(&self) -> Self {
-        Self {
-            give: self.take,
-            take: self.give,
-        }
-    }
-}
-
 impl HasCost for Buildable {
     fn cost(&self) -> ResourceCollection {
         (self as &dyn HasCost).cost()
     }
-}
-
-pub trait HasPos {
-    type Pos;
-    fn get_pos(&self) -> Self::Pos;
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
@@ -102,12 +80,6 @@ impl Settlement {
     pub const fn harvesting_rate() -> u16 {
         1
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum PortType {
-    Special(Resource),
-    General,
 }
 
 impl HasPos for Settlement {
@@ -191,16 +163,4 @@ impl HasCost for Road {
             ..Default::default()
         }
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum HexType {
-    Some(Resource),
-    Desert,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct HexInfo {
-    pub hex_type: HexType,
-    pub number: u8,
 }

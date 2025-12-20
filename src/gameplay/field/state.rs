@@ -1,8 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{HexArrangement, HexesByNum, PortArrangement, PortsByPlayer};
-use crate::gameplay::player::*;
-use crate::gameplay::primitives::{City, HexType, Road, Settlement};
+use crate::gameplay::primitives::{
+    HexResource,
+    build::{City, Road, Settlement},
+};
 use crate::math::dice::DiceVal;
 use crate::topology::*;
 
@@ -14,11 +16,10 @@ struct FieldCache {
 }
 
 #[derive(Debug)]
-pub struct Field {
+pub struct FieldState {
     pub field_radius: usize,
-    pub hexes: HexArrangement,        // (q, r) -> HexInfo
-    pub ports: PortArrangement,       // e -> PortType
-    pub builds: Vec<PlayerBuildData>, // id -> BuildData
+    pub hexes: HexArrangement,  // (q, r) -> HexInfo
+    pub ports: PortArrangement, // e -> PortType
     pub robber_pos: Hex,
     cache_: FieldCache,
 }
@@ -45,7 +46,7 @@ impl FieldBuildParam {
         hex_arrangement: HexArrangement,
         port_arrangement: PortArrangement,
     ) -> Result<Self, FieldBuildError> {
-        if hex_arrangement.len() != Field::field_size_by_radius(field_radius) {
+        if hex_arrangement.len() != FieldState::field_size_by_radius(field_radius) {
             return Err(FieldBuildError::WrongAmountOfHexesProvided);
         }
 
@@ -67,7 +68,7 @@ pub struct BuildCollection {
     pub roads: Vec<Road>,
 }
 
-impl Field {
+impl FieldState {
     pub const fn field_size_by_radius(radius: usize) -> usize {
         1 + 3 * radius * (radius + 1)
     }
@@ -81,7 +82,6 @@ impl Field {
             hexes: param.hex_arrangement,
             ports: param.port_arrangement,
             field_radius: param.field_radius,
-            builds: Vec::new(),
             robber_pos: desert_pos,
             cache_: cache,
         }
@@ -95,15 +95,11 @@ impl Field {
         todo!()
     }
 
-    pub fn builds_on_hex(&self, hex: Hex) -> BTreeMap<PlayerId, BuildCollection> {
-        todo!()
-    }
-
     fn find_desert_pos_static(hexes: &HexArrangement) -> Hex {
         hexes
             .iter()
-            .filter_map(|(k, v)| match v.hex_type {
-                HexType::Desert => Some(k),
+            .filter_map(|(k, v)| match v.hex_resource {
+                HexResource::Desert => Some(k),
                 _ => None,
             })
             .next()

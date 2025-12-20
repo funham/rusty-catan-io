@@ -1,4 +1,4 @@
-use crate::gameplay::player::PlayerId;
+use super::player::PlayerId;
 use num::Integer;
 use std::marker::PhantomData;
 
@@ -53,7 +53,7 @@ impl GameTurn<RegularCycle> {
     ///
     /// # Examples
     /// ~~~
-    /// use rusty_catan_io::gameplay::turn::*;
+    /// use rusty_catan_io::gameplay::primitives::turn::*;
     ///
     /// let mut turn = GameTurn::<RegularCycle>::new(3);
     /// turn.next();
@@ -78,7 +78,7 @@ impl GameTurn<BackAndForthCycle> {
     ///
     /// # Examples
     /// ~~~
-    /// use rusty_catan_io::gameplay::turn::*;
+    /// use rusty_catan_io::gameplay::primitives::turn::*;
     ///
     /// let mut turn = GameTurn::<BackAndForthCycle>::new(3);
     /// turn.next();

@@ -1,7 +1,7 @@
 use super::{HexArrangement, PortArrangement};
 
 use crate::{
-    gameplay::field::state::{Field, FieldPromotingError},
+    gameplay::field::state::{FieldState, FieldPromotingError},
     topology::{Hex, Path},
 };
 
@@ -19,7 +19,7 @@ impl GameInitField {
         todo!()
     }
 
-    pub fn promote() -> Result<Field, FieldPromotingError> {
+    pub fn promote() -> Result<FieldState, FieldPromotingError> {
         todo!()
     }
 }

@@ -1,9 +1,13 @@
 use super::state::GameState;
-use crate::gameplay::player::PlayerId;
-use crate::gameplay::primitives::*;
+use crate::gameplay::primitives::HexResource;
+use crate::gameplay::primitives::build::{Buildable, City, Settlement};
+use crate::gameplay::primitives::dev_card::DevCardUsage;
+use crate::gameplay::primitives::player::PlayerId;
+use crate::gameplay::primitives::trade::{BankTrade, PersonalTradeOffer, PublicTradeOffer};
 use crate::gameplay::strategy::answer;
+use crate::topology::HasPos;
 use crate::{
-    gameplay::resource::ResourceCollection,
+    gameplay::primitives::resource::ResourceCollection,
     math::dice::DiceVal,
     strategy::Strategy,
     topology::{Hex, Intersection},
@@ -58,9 +62,11 @@ impl GameController {
     /// Requests current player's strategy, handles it's answers
     /// Leads to recursion in `handle_rest()`
     fn handle_turn(params: &mut TurnHandlingParams) -> Result<(), ()> {
-        params.game.players[params.player_id]
-            .dev_cards
-            .reset_queue();
+        params
+            .game
+            .players
+            .get_mut(params.player_id)
+            .dev_cards_reset_queue();
 
         // functional state machine handling
         GameController::handle_move_init(params);
@@ -188,8 +194,8 @@ impl GameController {
             let hexes_to_harvest = coincidential_hexes.intersection(&bounding_set);
 
             for hex in hexes_to_harvest {
-                match params.game.field.hexes[hex].hex_type {
-                    HexType::Some(resource) => {
+                match params.game.field.hexes[hex].hex_resource {
+                    HexResource::Some(resource) => {
                         if let Err(e) = params.game.transfer_from_bank(
                             (resource, amount_to_harvest).into(),
                             params.player_id,
@@ -197,7 +203,8 @@ impl GameController {
                             log::error!("{:?}", e);
                         }
                     }
-                    HexType::Desert => (),
+                    HexResource::Desert => (),
+                    HexResource::River => todo!(),
                 }
             }
         }
@@ -217,14 +224,14 @@ impl GameController {
             Self::execute_harvesting_for_one_player(
                 params,
                 &hexes_with_num,
-                params.game.field.builds[player_id].settlements.clone(),
+                params.game.builds[player_id].settlements.clone(),
                 Settlement::harvesting_rate(),
             );
 
             Self::execute_harvesting_for_one_player(
                 params,
                 &hexes_with_num,
-                params.game.field.builds[player_id].cities.clone(),
+                params.game.builds[player_id].cities.clone(),
                 City::harvesting_rate(),
             );
         }
@@ -232,18 +239,39 @@ impl GameController {
 
     fn execute_seven(params: &mut TurnHandlingParams) {
         for (id, strategy) in params.strategies.iter_mut().enumerate() {
-            if params.game.players[params.player_id].resources.total() <= 7 {
+            if params
+                .game
+                .players
+                .get(params.player_id)
+                .resources()
+                .total()
+                <= 7
+            {
                 continue;
             }
 
             // in more than 7 cards
             let to_drop = strategy.drop_half(&params.game.get_perspective(params.player_id));
 
-            if to_drop.total() != params.game.players[params.player_id].resources.total() / 2 {
+            if to_drop.total()
+                != params
+                    .game
+                    .players
+                    .get(params.player_id)
+                    .resources()
+                    .total()
+                    / 2
+            {
                 log::error!(
                     "wrong number of cards dropped; {} instead of {}",
                     to_drop.total(),
-                    params.game.players[params.player_id].resources.total() / 2
+                    params
+                        .game
+                        .players
+                        .get(params.player_id)
+                        .resources()
+                        .total()
+                        / 2
                 );
 
                 return;
@@ -263,7 +291,7 @@ impl GameController {
 
         match params
             .game
-            .execute_robbers(rob_request.robbery, params.player_id)
+            .use_robbers(rob_request.robbery, params.player_id)
         {
             Ok(_) => (),
             Err(e) => log::error!("strategy sent invalid rob request: {:?}", e),

@@ -4,6 +4,7 @@
     - [ ] Add interruption support
     - [ ] populate `main.rs`
     - [ ] Add integration tests
+    - [ ] Premature turn quit on win condition
  - [ ] Strategy
     - [x] Finish `LazyAssStrategy` implementation
     - [ ] Implement console input strategy
@@ -23,6 +24,5 @@
     - [ ] execute_* methods
     - [ ] golden river support
  - [ ] Field
- - [x] move_request (RobRequest::with_robbing)
  - [ ] CLI
  - [ ] UI

@@ -1,6 +1,6 @@
 use crate::gameplay::{
     field::init::GameInitField,
-    turn::{BackAndForthCycle, GameTurn},
+    primitives::turn::{BackAndForthCycle, GameTurn},
 };
 
 pub struct GameInitializationState {

@@ -3,8 +3,8 @@ use answer::{
     TradeAnswer,
 };
 
-use crate::gameplay::primitives::PlayerTrade;
-use crate::gameplay::{game::state::Perspective, resource::ResourceCollection};
+use crate::gameplay::primitives::trade::PlayerTrade;
+use crate::gameplay::{game::state::Perspective, primitives::resource::ResourceCollection};
 
 pub mod answer;
 pub mod cli_strategy;
