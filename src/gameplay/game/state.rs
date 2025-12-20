@@ -131,9 +131,7 @@ impl GameState {
     }
 
     pub fn count_max_tract_length(&self, player_id: PlayerId) -> u16 {
-        todo!(
-            "implement some graph algorithm (maybe store graphs for each player in `PlayerBuildData`"
-        )
+        self.field.builds[player_id].roads.calculate_diameter() as u16
     }
 
     /// goes through the players and if one have >9 vp returns it
