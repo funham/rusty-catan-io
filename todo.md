@@ -6,13 +6,10 @@
     - [ ] Add integration tests
     - [ ] Premature turn quit on win condition
  - [ ] Strategy
-    - [x] Finish `LazyAssStrategy` implementation
     - [ ] Implement console input strategy
     - [ ] Implement baseline unmanned strategy
     - [ ] Get rid of Debug trait derivation for Strategy
  - [ ] GameState implementation
-    - [x] DeckFullnessLevel
-    - [x] Transfer
     - [x] use yop
     - [ ] use roadbuild
     - [x] use monopoly
@@ -23,6 +20,11 @@
       - [ ] handling
     - [ ] execute_* methods
     - [ ] golden river support
+
+ - [ ] Topology::graph
+    - [ ] Diameter calculation
+    - [ ] Occupancy hexgrid (separate for roads and settlements)
+    - [ ] Allowed-to-place-sets for roads and settlements (extendable?)
  - [ ] Field
  - [ ] CLI
  - [ ] UI
