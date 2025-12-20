@@ -1,24 +1,18 @@
 use std::collections::BTreeMap;
 
 use crate::gameplay::dev_card::UsableDevCardKind;
-use crate::gameplay::field::GameInitField;
 use crate::{
     gameplay::{
         bank::{Bank, BankResourceExchangeError, BankView, PlayerResourceExchangeError},
-        field::Field,
+        field::state::Field,
         player::{OpponentData, PlayerData, PlayerId},
         primitives::*,
         resource::{Resource, ResourceCollection},
-        turn::{BackAndForthCycle, GameTurn},
+        turn::GameTurn,
     },
     math::dice::DiceRoller,
     topology::Path,
 };
-
-pub struct GameInitializationState {
-    pub field: GameInitField,
-    pub turn: GameTurn<BackAndForthCycle>,
-}
 
 #[derive(Debug)]
 pub struct GameState {
@@ -47,8 +41,6 @@ impl<'a> Perspective<'a> {
         (self.player_id + 1..n_players).chain(0..=self.player_id)
     }
 }
-
-impl GameInitializationState {}
 
 #[derive(Debug)]
 pub enum DevCardUsageError {

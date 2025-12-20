@@ -1,22 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use super::{HexArrangement, HexesByNum, PortArrangement, PortsByPlayer};
 use crate::gameplay::player::*;
-use crate::gameplay::primitives::{City, HexInfo, HexType, PortType, Road, Settlement};
+use crate::gameplay::primitives::{City, HexType, Road, Settlement};
 use crate::math::dice::DiceVal;
 use crate::topology::*;
-
-type HexArrangement = BTreeMap<Hex, HexInfo>;
-type PortArrangement = BTreeMap<Path, PortType>;
-type HexesByNum = BTreeMap<DiceVal, Vec<Hex>>;
-type PortsByPlayer = BTreeMap<PlayerId, Vec<PortType>>;
-type GameInitPlayerBuilds = ((Hex, Path), (Hex, Path));
-
-pub struct GameInitField {
-    pub field_radius: usize,
-    pub hexes: HexArrangement,             // (q, r) -> HexInfo
-    pub ports: PortArrangement,            // e -> PortType
-    pub builds: Vec<GameInitPlayerBuilds>, // id -> InitialBuids
-}
 
 #[derive(Debug)]
 struct FieldCache {
@@ -69,22 +57,8 @@ impl FieldBuildParam {
     }
 }
 
-impl GameInitField {
-    pub fn new() -> Self {
-        todo!()
-    }
-}
-
 pub enum FieldPromotingError {
     NotEnoughBuilds,
-}
-
-impl TryInto<Field> for GameInitField {
-    type Error = FieldPromotingError;
-
-    fn try_into(self) -> Result<Field, Self::Error> {
-        todo!()
-    }
 }
 
 pub struct BuildCollection {
