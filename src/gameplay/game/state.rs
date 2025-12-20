@@ -48,6 +48,7 @@ pub enum DevCardUsageError {
     InvalidHex,
     InvalidEdge,
     InvalidRobbery,
+    BankIsShort,
 }
 
 impl GameState {
@@ -274,7 +275,13 @@ impl GameState {
         list: [Resource; 2],
         user: PlayerId,
     ) -> Result<(), DevCardUsageError> {
-        todo!()
+        for resource in list {
+            if let Err(_) = self.transfer_from_bank(resource.into(), user) {
+                return Err(DevCardUsageError::BankIsShort);
+            }
+        }
+
+        Ok(())
     }
 
     fn use_roadbuild(&mut self, poses: [Path; 2], user: PlayerId) -> Result<(), DevCardUsageError> {

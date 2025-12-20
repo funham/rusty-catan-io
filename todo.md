@@ -12,7 +12,7 @@
  - [ ] GameState implementation
     - [x] DeckFullnessLevel
     - [x] Transfer
-    - [ ] use yop
+    - [x] use yop
     - [ ] use roadbuild
     - [x] use monopoly
  - [ ] GameController
