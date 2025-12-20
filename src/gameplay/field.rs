@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::gameplay::{hex::*, player::*, resource::*};
+use crate::gameplay::player::*;
+use crate::gameplay::primitives::{City, HexInfo, HexType, PortType, Road, Settlement};
 use crate::math::dice::DiceVal;
 use crate::topology::*;
 

@@ -1,263 +1,19 @@
 use std::collections::BTreeMap;
-use std::marker::PhantomData;
-
-use num::Integer;
-use rand::distr::slice::Empty;
 
 use crate::gameplay::dev_card::UsableDevCardKind;
 use crate::gameplay::field::GameInitField;
-use crate::gameplay::resource;
 use crate::{
     gameplay::{
-        dev_card::DevCardKind,
+        bank::{Bank, BankResourceExchangeError, BankView, PlayerResourceExchangeError},
         field::Field,
-        move_request::{DevCardUsage, RobRequest},
         player::{OpponentData, PlayerData, PlayerId},
+        primitives::*,
         resource::{Resource, ResourceCollection},
-        strategy::Strategy,
+        turn::{BackAndForthCycle, GameTurn},
     },
     math::dice::DiceRoller,
     topology::Path,
 };
-
-#[derive(Debug)]
-pub struct RegularCycle;
-#[derive(Debug)]
-pub struct BackAndForthCycle;
-
-#[derive(Debug)]
-pub struct GameTurn<CycleType = RegularCycle> {
-    n_players: u8, // in [0..=4]
-    rounds_played: u16,
-    turn_index: u8, // in [0..=n_players]
-    _p: PhantomData<CycleType>,
-}
-
-impl<CycleType> GameTurn<CycleType> {
-    /// Create `GameTurn` object with specified number of players
-    pub fn new(n_players: u8) -> Self {
-        Self {
-            n_players,
-            rounds_played: 0,
-            turn_index: 0,
-            _p: PhantomData::default(),
-        }
-    }
-
-    pub fn new_with_initial_index(n_players: u8, initial_index: u8) -> Option<Self> {
-        if initial_index >= n_players {
-            return None;
-        }
-
-        Some(Self {
-            n_players,
-            rounds_played: 0,
-            turn_index: initial_index,
-            _p: PhantomData::default(),
-        })
-    }
-
-    pub fn get_rounds_played(&self) -> u16 {
-        self.rounds_played
-    }
-
-    pub fn get_turn_index(&self) -> usize {
-        self.turn_index as usize
-    }
-}
-
-impl GameTurn<RegularCycle> {
-    /// Pass to the next player
-    ///
-    /// # Examples
-    /// ~~~
-    /// use rusty_catan_io::gameplay::game_state::*;
-    ///
-    /// let mut turn = GameTurn::<RegularCycle>::new(3);
-    /// turn.next();
-    /// turn.next();
-    /// assert_eq!(turn.get_turn_index(), 2);
-    /// assert_eq!(turn.get_rounds_played(), 0);
-    /// turn.next();
-    /// assert_eq!(turn.get_turn_index(), 0);
-    /// assert_eq!(turn.get_rounds_played(), 1);
-    /// ~~~
-    pub fn next(&mut self) {
-        self.turn_index.inc();
-
-        let (round_played, index_truncated) = self.turn_index.div_mod_floor(&self.n_players);
-        self.rounds_played += round_played as u16;
-        self.turn_index = index_truncated;
-    }
-}
-
-impl GameTurn<BackAndForthCycle> {
-    /// Pass to the next player
-    ///
-    /// # Examples
-    /// ~~~
-    /// use rusty_catan_io::gameplay::game_state::*;
-    ///
-    /// let mut turn = GameTurn::<BackAndForthCycle>::new(3);
-    /// turn.next();
-    /// turn.next();
-    /// assert_eq!(turn.get_turn_index(), 2);
-    /// assert_eq!(turn.get_rounds_played(), 0);
-    /// turn.next();
-    /// assert_eq!(turn.get_turn_index(), 2);
-    /// assert_eq!(turn.get_rounds_played(), 1);
-    /// turn.next();
-    /// assert_eq!(turn.get_turn_index(), 1);
-    /// assert_eq!(turn.get_rounds_played(), 1);
-    /// turn.next();
-    /// assert_eq!(turn.get_turn_index(), 0);
-    /// assert_eq!(turn.get_rounds_played(), 1);
-    /// turn.next();
-    /// assert_eq!(turn.get_turn_index(), 0);
-    /// assert_eq!(turn.get_rounds_played(), 2);
-    /// ~~~
-    pub fn next(&mut self) {
-        let incremented = self.turn_index as i32
-            + match self.rounds_played {
-                even if even.is_even() => 1,
-                _ => -1,
-            };
-
-        if (0..self.n_players as i32).contains(&incremented) {
-            self.turn_index = incremented as u8;
-        } else {
-            self.rounds_played.inc();
-        }
-    }
-}
-
-impl<T> Into<PlayerId> for GameTurn<T> {
-    fn into(self) -> PlayerId {
-        self.get_turn_index() as PlayerId
-    }
-}
-
-#[derive(Debug)]
-pub enum DeckFullnessLevel {
-    Empty,
-    Low,
-    Medium,
-    High,
-}
-
-impl DeckFullnessLevel {
-    // none if n > max possible amount of cards of one resource
-    pub fn new(n: u16) -> Option<Self> {
-        for lvl in [Self::Empty, Self::Low, Self::High, Self::High] {
-            if lvl.range().contains(&n) {
-                return Some(lvl);
-            }
-        }
-
-        None
-    }
-
-    pub fn new_or_panic(n: u16) -> Self {
-        for lvl in [Self::Empty, Self::Low, Self::High, Self::High] {
-            if n <= lvl.max() {
-                return lvl;
-            }
-        }
-
-        unreachable!("too much cards")
-    }
-
-    /// min possible number of cards that a deck with this level can contain
-    pub fn min(&self) -> u16 {
-        match self {
-            DeckFullnessLevel::Empty => 0,
-            DeckFullnessLevel::Low => DeckFullnessLevel::Empty.max() + 1,
-            DeckFullnessLevel::Medium => DeckFullnessLevel::Low.max() + 1,
-            DeckFullnessLevel::High => DeckFullnessLevel::Medium.max() + 1,
-        }
-    }
-
-    /// max possible number of cards that a deck with this level can contain
-    pub fn max(&self) -> u16 {
-        match self {
-            DeckFullnessLevel::Empty => 0,
-            DeckFullnessLevel::Low => 7,
-            DeckFullnessLevel::Medium => 13,
-            DeckFullnessLevel::High => 19,
-        }
-    }
-
-    /// possible range in which number of cards can a deck with this level can contain
-    pub fn range(&self) -> std::ops::RangeInclusive<u16> {
-        self.min()..=self.max()
-    }
-}
-
-#[derive(Debug)]
-pub struct Bank {
-    resources: ResourceCollection,
-    dev_cards: Vec<DevCardKind>,
-}
-
-impl Bank {
-    pub fn view(&self) -> BankView {
-        BankView { bank: self }
-    }
-}
-
-#[derive(Debug)]
-pub enum BankResourceExchangeError {
-    BankIsShort,
-    AccountIsShort { id: PlayerId },
-}
-
-#[derive(Debug)]
-pub enum PlayerResourceExchangeError {
-    AccountIsShort { id: PlayerId },
-}
-
-#[derive(Debug)]
-pub struct BankView<'a> {
-    bank: &'a Bank,
-}
-
-impl<'a> BankView<'a> {
-    pub fn fullness(&self, resource: Resource) -> DeckFullnessLevel {
-        match DeckFullnessLevel::new(self.bank.resources[resource]) {
-            Some(lvl) => lvl,
-            None => {
-                log::error!(
-                    "too much cards in the bank: {}, where max is {}",
-                    self.bank.resources[resource],
-                    DeckFullnessLevel::High.max()
-                );
-                DeckFullnessLevel::High
-            }
-        }
-    }
-
-    pub fn dev_cards_fullness(&self) -> u16 {
-        // Development Cards: The deck contains 25 cards:
-        //  - 14 Knight Cards
-        //  - 6 Progress Cards (2 of each type: Year of Plenty, Monopoly, Road Building)
-        //  - 5 Victory Point Cards
-        self.bank.dev_cards.len() as u16
-    }
-}
-
-pub struct PlayerTrade {
-    pub give: ResourceCollection,
-    pub take: ResourceCollection,
-}
-
-impl PlayerTrade {
-    pub fn opposite(&self) -> Self {
-        Self {
-            give: self.take,
-            take: self.give,
-        }
-    }
-}
 
 pub struct GameInitializationState {
     pub field: GameInitField,
@@ -290,14 +46,6 @@ impl<'a> Perspective<'a> {
         let n_players = self.opponents.len() + 1;
         (self.player_id + 1..n_players).chain(0..=self.player_id)
     }
-}
-
-/// convinient struct with neccessary info about player who's turn it currently is
-#[derive(Debug)]
-pub struct TurnHandlingParams<'a, 'b> {
-    pub(super) player_id: PlayerId,
-    pub(super) game: &'a mut GameState,
-    pub(super) strategies: &'b mut Vec<&'b mut dyn Strategy>,
 }
 
 impl GameInitializationState {}
@@ -428,7 +176,7 @@ impl GameState {
     /// no, not in that way
     pub fn execute_robbers(
         &mut self,
-        rob_request: RobRequest,
+        rob_request: Robbery,
         robber_id: PlayerId,
     ) -> Result<(), DevCardUsageError> {
         // move robbers
@@ -509,7 +257,7 @@ impl GameState {
 
     fn use_knight(
         &mut self,
-        rob_request: RobRequest,
+        rob_request: Robbery,
         user: PlayerId,
     ) -> Result<(), DevCardUsageError> {
         self.execute_robbers(rob_request, user)?;

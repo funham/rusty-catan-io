@@ -1,19 +1,23 @@
 use super::*;
 
+use crate::gameplay::primitives::Robbery;
+
 #[derive(Debug)]
 pub struct LazyAssStrategy;
 
 impl Strategy for LazyAssStrategy {
-    fn move_request_init(&mut self, _: &Perspective) -> MoveRequestInit {
-        MoveRequestInit::ThrowDice
+    fn move_request_init(&mut self, _: &Perspective) -> InitialAnswer {
+        InitialAnswer::ThrowDice
     }
 
     fn answer_to_trade(&mut self, _: &Perspective, _: &PlayerTrade) -> TradeAnswer {
         TradeAnswer::Declined
     }
 
-    fn rob(&mut self, perspective: &Perspective) -> RobRequest {
-        RobRequest::just_move(perspective.field.get_desert_pos())
+    fn move_request_rob(&mut self, perspective: &Perspective) -> RobberyAnswer {
+        RobberyAnswer {
+            robbery: Robbery::just_move(perspective.field.get_desert_pos()),
+        }
     }
 
     fn drop_half(&mut self, perspective: &Perspective) -> ResourceCollection {
@@ -36,17 +40,11 @@ impl Strategy for LazyAssStrategy {
         to_drop
     }
 
-    fn move_request_after_dice_throw(
-        &mut self,
-        perspective: &Perspective,
-    ) -> MoveRequestAfterDiceThrow {
-        MoveRequestAfterDiceThrow::EndMove
+    fn move_request_after_dice_throw(&mut self, perspective: &Perspective) -> AfterDiceThrowAnswer {
+        AfterDiceThrowAnswer::EndMove
     }
 
-    fn move_request_after_dice_throw_and_dev_card(
-        &mut self,
-        perspective: &Perspective,
-    ) -> MoveRequestAfterDiceThrowAndDevCard {
-        MoveRequestAfterDiceThrowAndDevCard::EndMove
+    fn move_request_rest(&mut self, perspective: &Perspective) -> FinalStateAnswer {
+        FinalStateAnswer::EndMove
     }
 }

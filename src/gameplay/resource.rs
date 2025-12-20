@@ -21,28 +21,6 @@ impl Resource {
     }
 }
 
-impl Into<ResourceCollection> for Resource {
-    fn into(self) -> ResourceCollection {
-        let mut res = ResourceCollection::default();
-        res[self] = 1;
-        res
-    }
-}
-
-impl Into<ResourceCollection> for (Resource, u16) {
-    fn into(self) -> ResourceCollection {
-        let mut res: ResourceCollection = self.0.into();
-        res[self.0] *= self.1;
-        res
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum PortType {
-    Special(Resource),
-    General,
-}
-
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ResourceCollection {
     pub brick: u16,
@@ -204,9 +182,20 @@ impl std::ops::Sub<&ResourceCollection> for ResourceCollection {
     }
 }
 
-#[derive(Debug)]
-pub enum ResourceCollectionCollectError {
-    ResourceAppearTwice,
+impl Into<ResourceCollection> for Resource {
+    fn into(self) -> ResourceCollection {
+        let mut res = ResourceCollection::default();
+        res[self] = 1;
+        res
+    }
+}
+
+impl Into<ResourceCollection> for (Resource, u16) {
+    fn into(self) -> ResourceCollection {
+        let mut res: ResourceCollection = self.0.into();
+        res[self.0] *= self.1;
+        res
+    }
 }
 
 impl TryFrom<&[(Resource, u16)]> for ResourceCollection {
@@ -231,11 +220,6 @@ impl From<BTreeMap<Resource, u16>> for ResourceCollection {
         let x: Vec<_> = value.into_iter().collect();
         TryFrom::<&[(Resource, u16)]>::try_from(x.as_slice()).unwrap()
     }
-}
-
-enum ResourceCollectionOpt {
-    Some(ResourceCollection),
-    None,
 }
 
 impl Index<Resource> for ResourceCollection {
@@ -263,7 +247,11 @@ impl IndexMut<Resource> for ResourceCollection {
         }
     }
 }
-
 pub trait HasCost {
     fn cost(&self) -> ResourceCollection;
+}
+
+#[derive(Debug)]
+pub enum ResourceCollectionCollectError {
+    ResourceAppearTwice,
 }

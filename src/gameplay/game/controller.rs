@@ -1,26 +1,26 @@
-use std::collections::BTreeSet;
-
+use super::state::GameState;
+use crate::gameplay::player::PlayerId;
+use crate::gameplay::primitives::*;
+use crate::gameplay::strategy::answer;
 use crate::{
-    gameplay::{
-        hex::HexType,
-        move_request::{
-            BankTrade, Buildable, DevCardUsage, MoveRequestAfterDiceThrow,
-            MoveRequestAfterDiceThrowAndDevCard, MoveRequestInit, PersonalTradeOffer,
-            PublicTradeOffer, RobRequest,
-        },
-        player::{City, HasPos, PlayerId, Settlement},
-        resource::ResourceCollection,
-    },
+    gameplay::resource::ResourceCollection,
     math::dice::DiceVal,
     strategy::Strategy,
     topology::{Hex, Intersection},
 };
-
-use crate::gameplay::game_state::{GameState, TurnHandlingParams};
+use std::collections::BTreeSet;
 
 pub enum GameResult {
     Win(PlayerId),
     Interrupted,
+}
+
+/// convinient struct with neccessary info about player who's turn it currently is
+#[derive(Debug)]
+pub struct TurnHandlingParams<'a, 'b> {
+    pub(super) player_id: PlayerId,
+    pub(super) game: &'a mut GameState,
+    pub(super) strategies: &'b mut Vec<&'b mut dyn Strategy>,
 }
 
 #[derive(Debug, Default)]
@@ -75,12 +75,12 @@ impl GameController {
         match params.strategies[params.player_id]
             .move_request_init(&params.game.get_perspective(params.player_id))
         {
-            MoveRequestInit::ThrowDice => {
+            answer::InitialAnswer::ThrowDice => {
                 Self::execute_dice_trow(params);
                 Self::handle_dice_thrown(params);
             }
-            MoveRequestInit::UseKnight(rob_request) => {
-                Self::handle_dev_card_used(params, DevCardUsage::Knight(rob_request));
+            answer::InitialAnswer::UseKnight(rob_request) => {
+                Self::handle_dev_card_used(params, DevCardUsage::Knight(rob_request.robbery));
             }
         }
     }
@@ -89,26 +89,26 @@ impl GameController {
         match params.strategies[params.player_id]
             .move_request_after_dice_throw(&params.game.get_perspective(params.player_id))
         {
-            MoveRequestAfterDiceThrow::UseDevCard(dev_card_usage) => {
+            answer::AfterDiceThrowAnswer::UseDevCard(dev_card_usage) => {
                 if let Err(e) = params.game.use_dev_card(dev_card_usage, params.player_id) {
                     log::error!("{:?}", e);
                 }
                 Self::handle_rest(params);
                 return;
             }
-            MoveRequestAfterDiceThrow::OfferPublicTrade(public_trade_offer) => {
+            answer::AfterDiceThrowAnswer::OfferPublicTrade(public_trade_offer) => {
                 Self::execute_public_trade_offer(params, public_trade_offer)
             }
-            MoveRequestAfterDiceThrow::OfferPersonalTrade(personal_trade_offer) => {
+            answer::AfterDiceThrowAnswer::OfferPersonalTrade(personal_trade_offer) => {
                 Self::execute_personal_trade_offer(params, personal_trade_offer)
             }
-            MoveRequestAfterDiceThrow::TradeWithBank(bank_trade) => {
+            answer::AfterDiceThrowAnswer::TradeWithBank(bank_trade) => {
                 Self::execute_bank_trade(params, bank_trade);
             }
-            MoveRequestAfterDiceThrow::Build(buildable) => {
+            answer::AfterDiceThrowAnswer::Build(buildable) => {
                 Self::execute_build(params, buildable);
             }
-            MoveRequestAfterDiceThrow::EndMove => {
+            answer::AfterDiceThrowAnswer::EndMove => {
                 return;
             }
         }
@@ -126,22 +126,20 @@ impl GameController {
     }
 
     fn handle_rest(params: &mut TurnHandlingParams) {
-        match params.strategies[params.player_id].move_request_after_dice_throw_and_dev_card(
-            &params.game.get_perspective(params.player_id),
-        ) {
-            MoveRequestAfterDiceThrowAndDevCard::OfferPublicTrade(public_trade_offer) => {
+        match params.strategies[params.player_id]
+            .move_request_rest(&params.game.get_perspective(params.player_id))
+        {
+            answer::FinalStateAnswer::OfferPublicTrade(public_trade_offer) => {
                 Self::execute_public_trade_offer(params, public_trade_offer)
             }
-            MoveRequestAfterDiceThrowAndDevCard::OfferPersonalTrade(personal_trade_offer) => {
+            answer::FinalStateAnswer::OfferPersonalTrade(personal_trade_offer) => {
                 Self::execute_personal_trade_offer(params, personal_trade_offer);
             }
-            MoveRequestAfterDiceThrowAndDevCard::TradeWithBank(bank_trade) => {
+            answer::FinalStateAnswer::TradeWithBank(bank_trade) => {
                 Self::execute_bank_trade(params, bank_trade)
             }
-            MoveRequestAfterDiceThrowAndDevCard::Build(buildable) => {
-                Self::execute_build(params, buildable)
-            }
-            MoveRequestAfterDiceThrowAndDevCard::EndMove => {
+            answer::FinalStateAnswer::Build(buildable) => Self::execute_build(params, buildable),
+            answer::FinalStateAnswer::EndMove => {
                 return;
             }
         }
@@ -260,10 +258,13 @@ impl GameController {
             }
         }
 
-        let rob_request: RobRequest =
-            params.strategies[params.player_id].rob(&params.game.get_perspective(params.player_id));
+        let rob_request: answer::RobberyAnswer = params.strategies[params.player_id]
+            .move_request_rob(&params.game.get_perspective(params.player_id));
 
-        match params.game.execute_robbers(rob_request, params.player_id) {
+        match params
+            .game
+            .execute_robbers(rob_request.robbery, params.player_id)
+        {
             Ok(_) => (),
             Err(e) => log::error!("strategy sent invalid rob request: {:?}", e),
         }

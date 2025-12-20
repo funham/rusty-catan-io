@@ -1,77 +1,12 @@
 use std::collections::BTreeSet;
 
 use crate::gameplay::dev_card::{DevCardData, OpponentDevCardData};
+use crate::gameplay::primitives::{City, Road, Settlement};
 use crate::gameplay::resource::{HasCost, ResourceCollection};
 use crate::topology::*;
 
-pub trait HasPos {
-    type Pos;
-    fn get_pos(&self) -> Self::Pos;
-}
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-pub struct Settlement {
-    pub pos: Intersection,
-}
-
-impl Settlement {
-    pub const fn harvesting_rate() -> u16 {
-        1
-    }
-}
-
-impl HasPos for Settlement {
-    type Pos = Intersection;
-    fn get_pos(&self) -> Self::Pos {
-        self.pos
-    }
-}
-
-impl HasPos for &Settlement {
-    type Pos = Intersection;
-    fn get_pos(&self) -> Self::Pos {
-        self.pos
-    }
-}
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-pub struct City {
-    pub pos: Intersection,
-}
-
-impl City {
-    pub const fn harvesting_rate() -> u16 {
-        2
-    }
-}
-
-impl HasPos for City {
-    type Pos = Intersection;
-    fn get_pos(&self) -> Self::Pos {
-        self.pos
-    }
-}
-
-impl HasPos for &City {
-    type Pos = Intersection;
-    fn get_pos(&self) -> Self::Pos {
-        self.pos
-    }
-}
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Road {
-    pub pos: Path,
-}
-
-impl HasPos for Road {
-    type Pos = Path;
-    fn get_pos(&self) -> Self::Pos {
-        self.pos
-    }
-}
-
 pub type PlayerId = usize;
+
 #[derive(Debug)]
 pub struct PlayerBuildData {
     pub settlements: BTreeSet<Settlement>,
@@ -111,38 +46,6 @@ impl From<&PlayerData> for OpponentData {
                 active: player_data.dev_cards.active.total(),
                 played: player_data.dev_cards.played.clone(),
             },
-        }
-    }
-}
-
-impl HasCost for Settlement {
-    fn cost(&self) -> ResourceCollection {
-        ResourceCollection {
-            brick: 1,
-            wood: 1,
-            wheat: 1,
-            sheep: 1,
-            ore: 0,
-        }
-    }
-}
-
-impl HasCost for City {
-    fn cost(&self) -> ResourceCollection {
-        ResourceCollection {
-            ore: 3,
-            wheat: 2,
-            ..Default::default()
-        }
-    }
-}
-
-impl HasCost for Road {
-    fn cost(&self) -> ResourceCollection {
-        ResourceCollection {
-            brick: 1,
-            wood: 1,
-            ..Default::default()
         }
     }
 }

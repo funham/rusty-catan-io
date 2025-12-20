@@ -1,8 +1,8 @@
 use itertools::Itertools;
 use std::collections::BTreeSet;
 
-use crate::topology::path::*;
 use crate::topology::hex::*;
+use crate::topology::path::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct Intersection(Hex, Hex, Hex);

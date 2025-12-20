@@ -160,7 +160,7 @@ impl Path {
             _ => Err(()),
         }
     }
-    
+
     pub fn opposite_or_panic(&self, v: Intersection) -> Intersection {
         self.opposite(v).expect("too cocky")
     }

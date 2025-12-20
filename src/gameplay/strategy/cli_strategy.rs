@@ -4,21 +4,15 @@ use super::*;
 pub struct ConsoleControllerStrategy {}
 
 impl Strategy for ConsoleControllerStrategy {
-    fn move_request_init(&mut self, perspective: &Perspective) -> MoveRequestInit {
+    fn move_request_init(&mut self, perspective: &Perspective) -> InitialAnswer {
         todo!()
     }
 
-    fn move_request_after_dice_throw(
-        &mut self,
-        perspective: &Perspective,
-    ) -> MoveRequestAfterDiceThrow {
+    fn move_request_after_dice_throw(&mut self, perspective: &Perspective) -> AfterDiceThrowAnswer {
         todo!()
     }
 
-    fn move_request_after_dice_throw_and_dev_card(
-        &mut self,
-        perspective: &Perspective,
-    ) -> MoveRequestAfterDiceThrowAndDevCard {
+    fn move_request_rest(&mut self, perspective: &Perspective) -> FinalStateAnswer {
         todo!()
     }
 
@@ -26,7 +20,7 @@ impl Strategy for ConsoleControllerStrategy {
         todo!()
     }
 
-    fn rob(&mut self, perspective: &Perspective) -> RobRequest {
+    fn move_request_rob(&mut self, perspective: &Perspective) -> RobberyAnswer {
         todo!()
     }
 
