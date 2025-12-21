@@ -240,7 +240,7 @@ impl GameController {
             return;
         }
 
-        let hexes_with_num = params.game.field.hexes_by_num(num);
+        let hexes_with_num = params.game.field.hexes_by_num(num).clone();
 
         for player_id in params.game.player_ids_starting_from(params.player_id) {
             Self::execute_harvesting_for_one_player(

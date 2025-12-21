@@ -6,7 +6,7 @@ use crate::math::probability::{Probability, Probable};
 
 /// Value that can be produced by rolling two D6's
 /// `DiceVal \in [2..12]` (11 possible states)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PartialOrd, Ord)]
 pub struct DiceVal(u8);
 
 impl DiceVal {
@@ -64,6 +64,18 @@ impl DiceVal {
 
     pub fn twelve() -> Self {
         Self::new(12).expect("12 is a valid dice value")
+    }
+
+    pub fn max() -> Self {
+        Self::twelve()
+    }
+
+    pub fn min() -> Self {
+        Self::two()
+    }
+
+    pub fn list() -> impl Iterator<Item = DiceVal> {
+        (2..=12).map(|x| DiceVal::new(x).unwrap())
     }
 }
 

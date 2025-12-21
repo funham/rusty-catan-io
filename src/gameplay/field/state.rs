@@ -1,9 +1,10 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{collections::BTreeSet, usize};
 
 use super::{HexArrangement, HexesByNum, PortArrangement, PortsByPlayer};
 use crate::gameplay::primitives::{
-    HexResource,
+    HexResource, PortKind,
     build::{City, Road, Settlement},
+    player::PlayerId,
 };
 use crate::math::dice::DiceVal;
 use crate::topology::*;
@@ -17,6 +18,7 @@ struct FieldCache {
 
 #[derive(Debug)]
 pub struct FieldState {
+    pub n_players: usize,
     pub field_radius: usize,
     pub hexes: HexArrangement,  // (q, r) -> HexInfo
     pub ports: PortArrangement, // e -> PortType
@@ -25,12 +27,54 @@ pub struct FieldState {
 }
 
 impl FieldCache {
-    fn new(hexes: &HexArrangement, ports: &PortArrangement) -> Self {
-        todo!()
+    fn new(n_players: usize, hexes: &HexArrangement) -> Self {
+        let desert_pos = Self::find_desert_pos(hexes);
+        let hex_by_num = Self::get_hex_by_num(hexes);
+        let ports_by_player = Self::get_ports_by_player(n_players);
+
+        Self {
+            desert_pos,
+            hex_by_num,
+            ports_by_player,
+        }
+    }
+
+    fn get_ports_by_player(n_players: usize) -> PortsByPlayer {
+        vec![BTreeSet::default(); n_players]
+    }
+
+    fn get_hex_by_num(hexes: &HexArrangement) -> HexesByNum {
+        let mut hex_by_num = HexesByNum::default();
+        for num in DiceVal::list() {
+            hex_by_num[num] = hexes
+                .iter()
+                .filter_map(|(pos, info)| (info.number == num).then_some(*pos))
+                .collect();
+        }
+
+        assert!(
+            hex_by_num[DiceVal::seven()].is_empty(),
+            "no hexes should be assigned with 7"
+        );
+
+        hex_by_num
+    }
+
+    fn find_desert_pos(hexes: &HexArrangement) -> Hex {
+        hexes
+            .iter()
+            .filter_map(|(k, v)| match v.hex_resource {
+                HexResource::Desert => Some(k),
+                _ => None,
+            })
+            .next()
+            .unwrap()
+            .clone()
     }
 }
 
 pub struct FieldBuildParam {
+    n_players: usize,
     field_radius: usize,
     hex_arrangement: HexArrangement,
     port_arrangement: PortArrangement,
@@ -42,6 +86,7 @@ pub enum FieldBuildError {
 
 impl FieldBuildParam {
     pub fn try_new(
+        n_players: usize,
         field_radius: usize,
         hex_arrangement: HexArrangement,
         port_arrangement: PortArrangement,
@@ -51,6 +96,7 @@ impl FieldBuildParam {
         }
 
         Ok(Self {
+            n_players,
             field_radius,
             hex_arrangement,
             port_arrangement,
@@ -74,15 +120,14 @@ impl FieldState {
     }
 
     pub fn new(param: FieldBuildParam) -> Self {
-        let desert_pos = Self::find_desert_pos_static(&param.hex_arrangement);
-
-        let cache = FieldCache::new(&param.hex_arrangement, &param.port_arrangement);
+        let cache = FieldCache::new(param.n_players, &param.hex_arrangement);
 
         Self {
+            n_players: param.n_players,
             hexes: param.hex_arrangement,
             ports: param.port_arrangement,
             field_radius: param.field_radius,
-            robber_pos: desert_pos,
+            robber_pos: cache.desert_pos,
             cache_: cache,
         }
     }
@@ -91,19 +136,11 @@ impl FieldState {
         self.cache_.desert_pos
     }
 
-    pub fn hexes_by_num(&self, num: DiceVal) -> BTreeSet<Hex> {
-        todo!()
+    pub fn hexes_by_num(&self, num: DiceVal) -> &BTreeSet<Hex> {
+        &self.cache_.hex_by_num[num]
     }
 
-    fn find_desert_pos_static(hexes: &HexArrangement) -> Hex {
-        hexes
-            .iter()
-            .filter_map(|(k, v)| match v.hex_resource {
-                HexResource::Desert => Some(k),
-                _ => None,
-            })
-            .next()
-            .unwrap()
-            .clone()
+    pub fn ports_aquired(&self, player_id: PlayerId) -> &BTreeSet<PortKind> {
+        &self.cache_.ports_by_player[player_id]
     }
 }

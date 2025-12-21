@@ -1,6 +1,9 @@
 # TODO list for this project
    - [ ] Game loop pipeline
       - [ ] Add game initialization logic
+         - [x] Game runner interface
+         - [ ] GameController::init (or GameInitController)
+         - [ ] FieldInit
       - [ ] Add interruption support
       - [ ] populate `main.rs`
       - [ ] Add integration tests
