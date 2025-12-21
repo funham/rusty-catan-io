@@ -1,5 +1,5 @@
 use crate::gameplay::primitives::{
-    dev_card::DevCardKind,
+    dev_card::{DevCardKind, UsableDevCardKind},
     player::PlayerId,
     resource::{Resource, ResourceCollection},
 };
@@ -13,6 +13,31 @@ pub struct Bank {
 impl Bank {
     pub fn view(&self) -> BankView {
         BankView { bank: self }
+    }
+}
+
+impl Default for Bank {
+    fn default() -> Self {
+        let resources = ResourceCollection {
+            brick: 19,
+            wood: 19,
+            wheat: 19,
+            sheep: 19,
+            ore: 19,
+        };
+
+        let mut dev_cards = Vec::new();
+
+        dev_cards.extend([DevCardKind::VictoryPoint; 5].iter());
+        dev_cards.extend([DevCardKind::Usable(UsableDevCardKind::Knight); 14].iter());
+        dev_cards.extend([DevCardKind::Usable(UsableDevCardKind::Monopoly); 2].iter());
+        dev_cards.extend([DevCardKind::Usable(UsableDevCardKind::YearOfPlenty); 2].iter());
+        dev_cards.extend([DevCardKind::Usable(UsableDevCardKind::RoadBuild); 2].iter());
+
+        Self {
+            resources,
+            dev_cards,
+        }
     }
 }
 

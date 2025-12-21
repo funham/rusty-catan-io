@@ -7,10 +7,13 @@ pub use gameplay::strategy;
 
 use clap::Parser;
 
-use crate::gameplay::game::{
-    controller::{GameController, GameResult},
-    init::GameInitializationState,
-    state::GameState,
+use crate::gameplay::{
+    field::state::FieldBuildParam,
+    game::{
+        controller::{GameController, GameResult},
+        init::GameInitializationState,
+        state::GameState,
+    },
 };
 
 /// A simple program to greet a person
@@ -24,6 +27,14 @@ pub struct Args {
     /// field size
     #[arg(short, long)]
     pub field_size: usize,
+
+    /// filename from which field arrangement will be taken
+    #[arg(short, long)]
+    pub arrangement: String,
+
+    /// dice option
+    #[arg(short, long)]
+    pub dice: String,
 }
 
 pub struct GameStarter {
@@ -33,15 +44,25 @@ pub struct GameStarter {
 
 impl GameStarter {
     pub fn new(args: Args) -> Self {
+        let n_players = args.strategies.len();
         let mut strats: Vec<Box<dyn strategy::Strategy>> = Vec::new();
         for _strat_name in args.strategies {
+            log::warn!("todo: implement strategy table");
             strats.push(Box::new(
                 strategy::lazy_ass_strategy::LazyAssStrategy::default(),
             ));
         }
 
-        let game_init = GameInitializationState::new(args.field_size);
-        let game = GameController::init(game_init);
+        let field_build_param = FieldBuildParam::try_new(
+            n_players,
+            6,
+            todo!("read from file"),
+            todo!("read from file"),
+        )
+        .expect("Couldn't build the field: invalid arguments");
+
+        let game_init = GameInitializationState::new(field_build_param);
+        let game = GameController::init(game_init, &mut strats, todo!());
 
         Self { strats, game }
     }

@@ -1,11 +1,13 @@
 # TODO list for this project
    - [ ] Game loop pipeline
       - [ ] Add game initialization logic
-         - [x] Game runner interface
-         - [ ] GameController::init (or GameInitController)
-         - [ ] FieldInit
+         - [x] ~~Game runner interface~~
+         - [x] ~~GameController::init (or GameInitController)~~
+         - [x] ~~FieldInit~~
+         - [ ] Read field arrangement from file
+         - [ ] Random field generation
       - [ ] Add interruption support
-      - [ ] populate `main.rs`
+      - [x] ~~populate `main.rs`~~
       - [ ] Add integration tests
       - [ ] Premature turn quit on win condition
    - [ ] Strategy
@@ -19,7 +21,7 @@
       - [x] ~~execute_building(Buildable)~~
    - [ ] Async IO
       - [ ] maybe spawn thread { if peer.strategy.answer(trade) { mt.lock(); answerer = Some } }
-      - [ ] turn strategy into a coroutine
+      - [ ] turn strategy move handling into a coroutine
       - [ ] maybe move trade offers from state transitions entirely into strategy logic
       - [ ] maybe rework strategy to be fully async
          - [ ] async communication interface between GameController and Strategy

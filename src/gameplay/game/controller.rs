@@ -1,11 +1,13 @@
 use super::state::GameState;
 use crate::gameplay::game::init::GameInitializationState;
 use crate::gameplay::primitives::HexResource;
-use crate::gameplay::primitives::build::{Builds, City, Settlement};
+use crate::gameplay::primitives::build::{BuildingError, Builds, City, Settlement};
 use crate::gameplay::primitives::dev_card::DevCardUsage;
 use crate::gameplay::primitives::player::PlayerId;
 use crate::gameplay::primitives::trade::{BankTrade, PersonalTradeOffer, PublicTradeOffer};
+use crate::gameplay::primitives::turn::GameTurn;
 use crate::gameplay::strategy::answer;
+use crate::math::dice::DiceRoller;
 use crate::topology::HasPos;
 use crate::{
     gameplay::primitives::resource::ResourceCollection,
@@ -32,8 +34,41 @@ pub struct TurnHandlingParams<'a, 'b> {
 pub struct GameController {}
 
 impl GameController {
-    pub fn init(game_init: GameInitializationState) -> GameState {
-        todo!()
+    pub fn init(
+        mut game_init: GameInitializationState,
+        strategies: &mut Vec<Box<dyn Strategy>>,
+        dice: Box<dyn DiceRoller>,
+    ) -> GameState {
+        while game_init.turn.get_rounds_played() < 2 {
+            let player_id = game_init.turn.get_turn_index();
+
+            let (settlement, road) = strategies[player_id]
+                .initialization(&game_init.field, game_init.turn.get_rounds_played() as u8);
+
+            match game_init.builds.try_init_place(player_id, road, settlement) {
+                Err(err) => match err {
+                    BuildingError::InitRoad() => {
+                        log::error!("invalid initial road placement {:?}", err)
+                    }
+                    BuildingError::InitSettlement() => {
+                        log::error!("invalid initial settlement placement {:?}", err)
+                    }
+                    _ => unreachable!(),
+                },
+                _ => (),
+            }
+
+            game_init.turn.next();
+        }
+
+        GameState {
+            turn: GameTurn::new(game_init.field.n_players as u8),
+            field: game_init.field,
+            dice,
+            bank: game_init.bank,
+            players: game_init.players,
+            builds: game_init.builds,
+        }
     }
 
     // execute game untill it's over

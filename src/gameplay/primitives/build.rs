@@ -30,7 +30,7 @@ pub trait Buildable: HasPos + Occupying {}
 
 /* BuildData */
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct BuildDataContainer {
     players: Vec<PlayerBuildData>,
     longest_road: Option<PlayerId>,
@@ -97,7 +97,7 @@ impl BuildDataContainer {
     }
 
     /* modifiers */
-    pub fn try_build(&mut self, player_id: PlayerId, build: Builds) -> Result<(), TryBuildError> {
+    pub fn try_build(&mut self, player_id: PlayerId, build: Builds) -> Result<(), BuildingError> {
         let checker = &CollisionChecker {
             other_occupancy: &self.occupancy((0..self.players.len()).filter(|id| id != &player_id)),
             this_occupancy: &self.occupancy([player_id]),
@@ -106,7 +106,7 @@ impl BuildDataContainer {
         match build {
             Builds::Road(road) => match self.players[player_id].roads.extend(road.pos, &checker) {
                 Ok(_) => Ok(()),
-                Err(err) => Err(TryBuildError::Road(err)),
+                Err(err) => Err(BuildingError::Road(err)),
             },
             Builds::Settlement(settlement) => match checker.can_place(&settlement) {
                 true => Ok({
@@ -116,7 +116,7 @@ impl BuildDataContainer {
                         .not()
                         .then(|| log::warn!("seems like settlement was placed on top of another"));
                 }),
-                false => Err(TryBuildError::Settlement()),
+                false => Err(BuildingError::Settlement()),
             },
             Builds::City(city) => {
                 match self.players[player_id]
@@ -139,6 +139,47 @@ impl BuildDataContainer {
                     false => todo!(),
                 }
             }
+        }
+    }
+
+    pub fn try_init_place(
+        &mut self,
+        player_id: PlayerId,
+        road: Road,
+        settlement: Settlement,
+    ) -> Result<(), BuildingError> {
+        let checker = &CollisionChecker {
+            other_occupancy: &self.occupancy((0..self.players.len()).filter(|id| id != &player_id)),
+            this_occupancy: &self.occupancy([player_id]),
+        };
+
+        let settlement_ok = checker
+            .full_occupancy()
+            .builds_occupancy
+            .is_disjoint(&checker.building_deadzone(&settlement));
+
+        match settlement_ok {
+            true => {
+                self[player_id].settlements.insert(settlement);
+            }
+            false => return Err(BuildingError::InitSettlement()),
+        }
+
+        let road_ok = checker
+            .full_occupancy()
+            .roads_occupancy
+            .paths
+            .contains(&road.pos);
+
+        road_ok
+            .not()
+            .then(|| log::error!("invalid initial road placement"));
+
+        match road_ok {
+            true => Ok({
+                self[player_id].roads.add_edge(road.pos);
+            }),
+            false => Err(BuildingError::InitRoad()),
         }
     }
 
@@ -284,10 +325,12 @@ pub enum Builds {
 }
 
 #[derive(Debug)]
-pub enum TryBuildError {
+pub enum BuildingError {
     Road(EdgeInsertationError),
     Settlement(),
     City(),
+    InitRoad(),
+    InitSettlement(),
 }
 
 /* impls */

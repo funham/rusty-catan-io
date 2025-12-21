@@ -12,7 +12,7 @@ pub enum UsableDevCardKind {
     Monopoly,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum DevCardKind {
     Usable(UsableDevCardKind),
     VictoryPoint,

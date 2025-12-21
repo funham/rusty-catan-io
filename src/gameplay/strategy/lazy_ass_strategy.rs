@@ -47,4 +47,8 @@ impl Strategy for LazyAssStrategy {
     fn move_request_rest(&mut self, perspective: &Perspective) -> FinalStateAnswer {
         FinalStateAnswer::EndMove
     }
+
+    fn initialization(&mut self, field: &FieldState, round: u8) -> (Settlement, Road) {
+        todo!()
+    }
 }

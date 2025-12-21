@@ -1,12 +1,7 @@
-use std::{
-    cell::{Ref, RefCell},
-    collections::BTreeSet,
-    rc::Rc,
-};
-
 use crate::{
     gameplay::primitives::build::{
-        AggregateOccupancy, Buildable, OccupancyGetter, Road, Settlement,
+        AggregateOccupancy, Buildable, IntersectionOccupancy, OccupancyGetter, Occupying, Road,
+        Settlement,
     },
     topology::{HasPos, Intersection, Path, graph::RoadGraph},
 };
@@ -34,6 +29,17 @@ impl<'a, 'b> CollisionChecker<'a, 'b> {
             .occupancy()
             .intersection(&self.this_occupancy.roads_occupancy.occupancy)
             .any(|_| true)
+    }
+
+    pub fn building_deadzone(
+        &self,
+        build: &impl HasPos<Pos = Intersection>,
+    ) -> IntersectionOccupancy {
+        build
+            .get_pos()
+            .neighbors()
+            .chain([build.get_pos()])
+            .collect()
     }
 }
 
@@ -66,7 +72,7 @@ pub trait Placeble: OccupancyGetter + HasPos {
 
 impl<T: OccupancyGetter + HasPos<Pos = Intersection>> Placeble for T {
     fn placeble(&self, checker: &CollisionChecker) -> bool {
-        let dead_zone = self.get_pos().neighbors().chain([self.get_pos()]).collect();
+        let dead_zone = checker.building_deadzone(self);
         checker.connected(self)
             && checker
                 .full_occupancy()

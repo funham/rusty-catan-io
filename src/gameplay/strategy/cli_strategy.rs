@@ -27,4 +27,8 @@ impl Strategy for ConsoleControllerStrategy {
     fn drop_half(&mut self, perspective: &Perspective) -> ResourceCollection {
         todo!()
     }
+
+    fn initialization(&mut self, field: &FieldState, round: u8) -> (Settlement, Road) {
+        todo!()
+    }
 }

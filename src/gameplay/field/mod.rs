@@ -9,12 +9,11 @@ use crate::{
     topology::{Hex, Path},
 };
 
-pub mod init;
 pub mod state;
 
-type HexArrangement = BTreeMap<Hex, HexInfo>;
-type PortArrangement = BTreeMap<Path, PortKind>;
-type PortsByPlayer = Vec<BTreeSet<PortKind>>;
+pub type HexArrangement = BTreeMap<Hex, HexInfo>;
+pub type PortArrangement = BTreeMap<Path, PortKind>;
+pub type PortsByPlayer = Vec<BTreeSet<PortKind>>;
 
 #[derive(Debug, Clone, Default)]
 pub struct HexesByNum {

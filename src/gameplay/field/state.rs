@@ -73,13 +73,15 @@ impl FieldCache {
     }
 }
 
+#[derive(Debug)]
 pub struct FieldBuildParam {
-    n_players: usize,
-    field_radius: usize,
-    hex_arrangement: HexArrangement,
-    port_arrangement: PortArrangement,
+    pub n_players: usize,
+    pub field_radius: usize,
+    pub hex_arrangement: HexArrangement,
+    pub port_arrangement: PortArrangement,
 }
 
+#[derive(Debug)]
 pub enum FieldBuildError {
     WrongAmountOfHexesProvided,
 }

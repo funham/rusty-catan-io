@@ -7,7 +7,7 @@ use crate::gameplay::primitives::{
 
 pub type PlayerId = usize;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct PlayerDataContainer {
     players: Vec<PlayerData>,
     best_army: Option<PlayerId>,
