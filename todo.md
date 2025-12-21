@@ -25,7 +25,7 @@
       - [ ] error handling
          - [x] ~~logging~~
          - [ ] handling
-      - [ ] execute_* methods
+      - [x] ~~execute_* methods~~
       - [ ] golden river support
    - [ ] Topology::graph/Primitives::build
       - [ ] Diameter calculation
