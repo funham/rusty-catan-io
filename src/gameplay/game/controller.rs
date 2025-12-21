@@ -1,6 +1,6 @@
 use super::state::GameState;
 use crate::gameplay::primitives::HexResource;
-use crate::gameplay::primitives::build::{Buildable, City, Settlement};
+use crate::gameplay::primitives::build::{Builds, City, Settlement};
 use crate::gameplay::primitives::dev_card::DevCardUsage;
 use crate::gameplay::primitives::player::PlayerId;
 use crate::gameplay::primitives::trade::{BankTrade, PersonalTradeOffer, PublicTradeOffer};
@@ -174,7 +174,7 @@ impl GameController {
         todo!()
     }
 
-    fn execute_build(params: &mut TurnHandlingParams, buildable: Buildable) {
+    fn execute_build(params: &mut TurnHandlingParams, buildable: Builds) {
         todo!()
     }
 

@@ -1,6 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::topology::{Intersection, Path};
+use crate::{
+    gameplay::primitives::build::{AggregateOccupancy, Buildable, OccupancyGetter, Occupancy, Road},
+    topology::{Intersection, Path, collision::CollisionChecker},
+};
 
 // neighbors v -> {e | v \in e}
 // (better than v -> {v}, cause edge's invariant enforces correctness of a graph)
@@ -12,101 +15,14 @@ pub struct RoadGraph {
     out: BTreeMap<Intersection, BTreeSet<Path>>,
 }
 
-#[derive(Debug)]
-pub enum EdgeInsertationError {
-    EdgeIsNotCoincidentialError,
-    CantContinueBrokenPath,
-}
-
-pub struct IncedenceChecker<'a, 'b> {
-    graph: &'a RoadGraph,
-    occupied_by_paths: &'b BTreeSet<Intersection>,
-    occupied_by_builds: &'b BTreeSet<Intersection>, // occupied_by_builds => occupied_by_paths
-    claimed_by_builds: &'b BTreeSet<Intersection>,
-}
-
-impl<'a, 'b> IncedenceChecker<'a, 'b> {
-    /* technical methods */
-    fn claimed_unchecked_(&self, v: &Intersection) -> bool {
-        self.graph.out.contains_key(v)
-    }
-
-    fn occupied_unchecked_(&self, v: &Intersection) -> bool {
-        self.occupied_by_paths.contains(v)
-    }
-
-    fn occupied_by_builds_unchecked_(&self, v: &Intersection) -> bool {
-        self.occupied_by_builds.contains(v)
-    }
-
-    fn claimed_by_builds_unchecked_(&self, v: &Intersection) -> bool {
-        self.claimed_by_builds.contains(v)
-    }
-
-    /// A -> B === True
-    fn check_correctness(&self, v: &Intersection) -> bool {
-        !self.claimed_unchecked_(v) || self.occupied_unchecked_(v)
-    }
-
-    fn assert_invariant(&self, v: &Intersection) {
-        if !self.check_correctness(v) {
-            unreachable!("connected must always be a subset of occupied")
-        }
-    }
-
-    fn check_correctness_builds(&self, v: &Intersection) -> bool {
-        !self.claimed_by_builds_unchecked_(v) || self.occupied_by_builds_unchecked_(v)
-    }
-
-    fn assert_invariant_builds(&self, v: &Intersection) {
-        if !self.check_correctness_builds(v) {
-            unreachable!("connected must always be a subset of occupied")
-        }
-    }
-
-    /* public interface */
-
-    /// A - claimed (by roads)
-    pub fn claimed(&self, v: &Intersection) -> bool {
-        self.assert_invariant(v);
-        self.claimed_unchecked_(v)
-    }
-
-    /// B - occupied
-    pub fn occupied(&self, v: &Intersection) -> bool {
-        self.assert_invariant(v);
-        self.occupied_unchecked_(v)
-    }
-
-    /// (A ^ B) - occupied by others or [Infallible]
-    pub fn occupied_by_others(&self, v: &Intersection) -> bool {
-        self.claimed(v) ^ self.occupied(v)
-    }
-
-    // !B (=> !A) - free of all
-    pub fn free(&self, v: &Intersection) -> bool {
-        !self.occupied(v)
-    }
-
-    /// has anybody's building on it
-    pub fn occupied_by_builds(&self, v: &Intersection) -> bool {
-        self.assert_invariant_builds(v);
-        self.occupied_by_builds_unchecked_(v)
-    }
-
-    /// has our building on it
-    pub fn claimed_by_builds(&self, v: &Intersection) -> bool {
-        self.assert_invariant_builds(v);
-        self.claimed_by_builds_unchecked_(v)
-    }
-
-    pub fn occupied_by_others_builds(&self, v: &Intersection) -> bool {
-        self.claimed_by_builds(v) ^ self.occupied_by_builds(v)
-    }
-}
-
 impl RoadGraph {
+    pub fn iter(&self) -> impl Iterator<Item = Road> {
+        self.edges.iter().map(|p| Road { pos: *p })
+    }
+
     /// add an edge, no questions asked
+    /// ---
+    /// for inside use only basically
     pub fn add_edge(&mut self, edge: Path) {
         let (v1, v2) = edge.intersections();
         let _ = match self.out.get_mut(&v1) {
@@ -119,50 +35,29 @@ impl RoadGraph {
         };
     }
 
-    pub fn incedence_checker<'a, 'b>(
-        &'a self,
-        occupied_by_paths: &'b BTreeSet<Intersection>,
-        occupied_by_builds: &'b BTreeSet<Intersection>,
-        claimed_by_builds: &'b BTreeSet<Intersection>,
-    ) -> IncedenceChecker<'a, 'b> {
-        IncedenceChecker {
-            graph: self,
-            occupied_by_paths,
-            occupied_by_builds,
-            claimed_by_builds,
-        }
-    }
-
-    pub fn roads_occupancy(&self) -> &BTreeSet<Path> {
-        &self.edges
-    }
-
-    /// add new road connected to the graph
+    /// add new road connected to existing
     pub fn extend(
         &mut self,
         edge: Path,
-        occupied_by_paths: &BTreeSet<Intersection>,
-        occupied_by_builds: &BTreeSet<Intersection>,
-        claimed_by_builds: &BTreeSet<Intersection>,
+        full_occupancy: &AggregateOccupancy,
+        this_occupancy: &AggregateOccupancy,
     ) -> Result<(), EdgeInsertationError> {
         let (v1, v2) = edge.intersections();
-        let checker =
-            self.incedence_checker(occupied_by_paths, occupied_by_builds, claimed_by_builds);
+        let checker = CollisionChecker {
+            roads: &self.edges,
+            other_occupancy: full_occupancy,
+            this_occupancy,
+        };
 
-        match (checker.claimed(&v1), checker.claimed(&v2)) {
-            (true, _) if !checker.claimed_by_builds(&v1) => (),
-            (_, true) if !checker.claimed_by_builds(&v2) => (),
-            (false, false) => return Err(EdgeInsertationError::EdgeIsNotCoincidentialError),
-            _ => return Err(EdgeInsertationError::CantContinueBrokenPath),
+        match checker.can_place(&Road { pos: edge }) {
+            true => Ok(self.add_edge(edge)),
+            false => Err(EdgeInsertationError),
         }
-
-        self.add_edge(edge);
-        Ok(())
     }
 
     /// returns all possible extends for a road
     /// * `occupied` - all vertices occupied with building
-    pub fn possible_extends(
+    pub fn possible_road_placements(
         &self,
         occupied: &BTreeSet<Intersection>,
     ) -> impl IntoIterator<Item = Path> {
@@ -192,7 +87,7 @@ impl RoadGraph {
         &self,
         vertex: Intersection,
         visited: &mut BTreeSet<Intersection>,
-        occupied: &BTreeSet<Intersection>,
+        occupied: &Occupancy,
         result: &mut BTreeSet<Path>,
     ) {
         if visited.contains(&vertex) {
@@ -225,3 +120,6 @@ impl RoadGraph {
         todo!()
     }
 }
+
+#[derive(Debug)]
+pub struct EdgeInsertationError;

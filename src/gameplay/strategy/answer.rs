@@ -1,6 +1,6 @@
 use crate::gameplay::primitives::{
     Robbery,
-    build::Buildable,
+    build::Builds,
     dev_card::DevCardUsage,
     trade::{BankTrade, PersonalTradeOffer, PublicTradeOffer},
 };
@@ -27,7 +27,7 @@ pub enum AfterDiceThrowAnswer {
     OfferPublicTrade(PublicTradeOffer),
     OfferPersonalTrade(PersonalTradeOffer),
     TradeWithBank(BankTrade),
-    Build(Buildable),
+    Build(Builds),
     EndMove,
 }
 
@@ -35,6 +35,6 @@ pub enum FinalStateAnswer {
     OfferPublicTrade(PublicTradeOffer),
     OfferPersonalTrade(PersonalTradeOffer),
     TradeWithBank(BankTrade),
-    Build(Buildable),
+    Build(Builds),
     EndMove,
 }

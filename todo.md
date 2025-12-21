@@ -20,11 +20,11 @@
       - [ ] handling
     - [ ] execute_* methods
     - [ ] golden river support
-
- - [ ] Topology::graph
+ - [ ] Topology::graph/Primitives::build
     - [ ] Diameter calculation
-    - [ ] Occupancy hexgrid (separate for roads and settlements)
+    - [x] Occupancy hexgrid (separate for roads and settlements)
     - [ ] Allowed-to-place-sets for roads and settlements (extendable?)
+    <!-- - [ ] { *_occupancy : Occupancy } -> { occupancy : Occupancy<Tagged> } -->
  - [ ] Field
  - [ ] CLI
  - [ ] UI

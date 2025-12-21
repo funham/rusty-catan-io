@@ -100,8 +100,8 @@ impl PathDual {
         BTreeSet::from([self.0, self.1])
     }
     pub fn canon(&self) -> Path {
-        let n0 = self.0.neighbors().collect::<BTreeSet<_>>();
-        let n1 = self.1.neighbors().collect();
+        let n0 = self.0.neighbors_set();
+        let n1 = self.1.neighbors_set();
 
         let inter = n0.intersection(&n1).cloned().collect::<BTreeSet<Hex>>();
 
@@ -119,8 +119,8 @@ impl Path {
     }
 
     pub fn dual(&self) -> PathDual {
-        let n0 = self.0.neighbors().collect::<BTreeSet<_>>();
-        let n1 = self.1.neighbors().collect();
+        let n0 = self.0.neighbors_set();
+        let n1 = self.1.neighbors().into_iter().collect();
 
         let inter = n0.intersection(&n1).cloned().collect::<BTreeSet<Hex>>();
 
@@ -132,11 +132,10 @@ impl Path {
     }
 
     pub fn intersections(&self) -> (Intersection, Intersection) {
-        let n0 = self.0.neighbors().collect::<BTreeSet<_>>();
-        let n1 = self.1.neighbors().collect::<BTreeSet<_>>();
+        let nb = (self.0.neighbors_set(), self.1.neighbors_set());
         let dual = self.dual();
 
-        let [h1, h2] = <[&Hex; 2]>::try_from(n0.intersection(&n1).collect::<Vec<_>>()).unwrap();
+        let [h1, h2] = <[&Hex; 2]>::try_from(nb.0.intersection(&nb.1).collect::<Vec<_>>()).unwrap();
 
         let h1 = h1.clone();
         let h2 = h2.clone();

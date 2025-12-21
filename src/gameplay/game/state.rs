@@ -1,7 +1,7 @@
 use crate::gameplay::primitives::{
     Robbery,
     bank::{Bank, BankResourceExchangeError, BankView, PlayerResourceExchangeError},
-    build::GameBuildData,
+    build::BuildDataContainer,
     dev_card::DevCardUsage,
     player::{PlayerDataContainer, PlayerDataProxy, PlayerId, SecuredPlayerData},
     resource::{Resource, ResourceCollection},
@@ -17,8 +17,7 @@ pub struct GameState {
     pub(super) bank: Bank,
     pub(super) turn: GameTurn,
     pub(super) players: PlayerDataContainer,
-    pub(super) builds: GameBuildData,
-    pub(super) longest_tract: Option<PlayerId>,
+    pub(super) builds: BuildDataContainer,
 }
 
 /// player's perspective on a game, used in `Strategy`
@@ -134,7 +133,8 @@ impl GameState {
         const VP_TO_WIN: u8 = 10; // TODO: move outside to config
         for player_id in self.player_ids_starting_from(0) {
             let pure_vp = self.count_vp_without_track_and_army(player_id);
-            let tract_pts = match self.longest_tract {
+
+            let tract_pts = match self.builds.longest_road() {
                 Some(id) if id == player_id => 2,
                 _ => 0,
             };
