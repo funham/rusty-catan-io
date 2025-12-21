@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
-    gameplay::primitives::build::{AggregateOccupancy, Buildable, OccupancyGetter, Occupancy, Road},
+    gameplay::primitives::build::{
+        AggregateOccupancy, Buildable, Occupancy, OccupancyGetter, Road,
+    },
     topology::{Intersection, Path, collision::CollisionChecker},
 };
 
@@ -59,7 +61,7 @@ impl RoadGraph {
     /// * `occupied` - all vertices occupied with building
     pub fn possible_road_placements(
         &self,
-        occupied: &BTreeSet<Intersection>,
+        checker: &CollisionChecker,
     ) -> impl IntoIterator<Item = Path> {
         let mut visited = BTreeSet::new();
         let mut result = BTreeSet::new();
@@ -68,17 +70,15 @@ impl RoadGraph {
             if visited.contains(vertex) {
                 continue;
             }
-            self.connectable_vertices_dfs(*vertex, &mut visited, occupied, &mut result);
+            self.connectable_vertices_dfs(*vertex, &mut visited, checker, &mut result);
         }
 
         // |- incident => occupied
         // 1) (incident & occupied) | (!incident & !occupied) == !(incident ^ occupied)
-        let is_good_vertex = |v| !(self.out.contains_key(&v) ^ occupied.contains(&v));
-        let is_good_edge = |e: &&Path| e.intersections_iter().all(is_good_vertex);
 
         result
             .iter()
-            .filter(is_good_edge)
+            .filter(|e| checker.can_place(&Road { pos: **e }))
             .cloned()
             .collect::<BTreeSet<_>>()
     }
@@ -87,7 +87,7 @@ impl RoadGraph {
         &self,
         vertex: Intersection,
         visited: &mut BTreeSet<Intersection>,
-        occupied: &Occupancy,
+        checker: &CollisionChecker,
         result: &mut BTreeSet<Path>,
     ) {
         if visited.contains(&vertex) {
@@ -108,12 +108,32 @@ impl RoadGraph {
             }
 
             dead_end = false;
-            self.connectable_vertices_dfs(next, visited, occupied, result);
+            self.connectable_vertices_dfs(next, visited, checker, result);
         }
 
         if dead_end {
             result.extend(vertex.paths());
         }
+    }
+
+    pub fn possible_settlement_placements(
+        &self,
+        checker: CollisionChecker,
+    ) -> impl IntoIterator<Item = Intersection> {
+        checker
+            .this_occupancy
+            .roads_occupancy
+            .iter()
+            .filter(|v| {
+                let dead_zone = v.neighbors().chain([**v]);
+
+                checker
+                    .full_occupancy()
+                    .builds_occupancy
+                    .is_disjoint(&dead_zone.collect())
+            })
+            .copied()
+            .collect::<BTreeSet<_>>()
     }
 
     pub fn calculate_diameter(&self) -> usize {

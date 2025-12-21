@@ -23,7 +23,7 @@
  - [ ] Topology::graph/Primitives::build
     - [ ] Diameter calculation
     - [x] Occupancy hexgrid (separate for roads and settlements)
-    - [ ] Allowed-to-place-sets for roads and settlements (extendable?)
+    - [x] Allowed-to-place-sets for roads and settlements (extendable?)
     <!-- - [ ] { *_occupancy : Occupancy } -> { occupancy : Occupancy<Tagged> } -->
  - [ ] Field
  - [ ] CLI
