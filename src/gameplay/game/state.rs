@@ -1,7 +1,7 @@
 use crate::gameplay::primitives::{
     Robbery,
     bank::{Bank, BankResourceExchangeError, BankView, PlayerResourceExchangeError},
-    build::BuildDataContainer,
+    build::{BuildDataContainer, Builds, Road},
     dev_card::DevCardUsage,
     player::{PlayerDataContainer, PlayerDataProxy, PlayerId, SecuredPlayerData},
     resource::{Resource, ResourceCollection},
@@ -261,7 +261,14 @@ impl GameState {
     }
 
     fn use_roadbuild(&mut self, poses: [Path; 2], user: PlayerId) -> Result<(), DevCardUsageError> {
-        todo!()
+        for pos in poses {
+            if let Err(err) = self.builds.try_build(user, Builds::Road(Road { pos })) {
+                log::info!("invalid placement try: {:?}", err);
+                return Err(DevCardUsageError::InvalidEdge);
+            }
+        }
+
+        Ok(())
     }
 
     fn use_monopoly(

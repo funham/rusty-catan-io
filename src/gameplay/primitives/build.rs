@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    ops::{Index, IndexMut},
+    ops::{Index, IndexMut, Not},
 };
 
 use crate::{
@@ -11,7 +11,11 @@ use crate::{
             resource::{HasCost, ResourceCollection},
         },
     },
-    topology::{HasPos, Hex, Intersection, Path, collision::CollisionChecker, graph},
+    topology::{
+        HasPos, Hex, Intersection, Path,
+        collision::CollisionChecker,
+        graph::{self, EdgeInsertationError},
+    },
 };
 
 /* traits & aliases */
@@ -87,25 +91,54 @@ impl BuildDataContainer {
         }
     }
 
-    pub fn create_collision_checker(&self, player_id: PlayerId) -> CollisionChecker {
-        CollisionChecker {
-            other_occupancy: todo!(),
-            this_occupancy: todo!(),
-        }
-    }
-
     /* getters */
     pub fn longest_road(&self) -> Option<PlayerId> {
         self.longest_road
     }
 
     /* modifiers */
-    pub fn try_build(&mut self, player_id: PlayerId, build: Builds) -> Result<(), ()> {
-        let graph = &self.players[player_id].roads;
+    pub fn try_build(&mut self, player_id: PlayerId, build: Builds) -> Result<(), TryBuildError> {
+        let checker = &CollisionChecker {
+            other_occupancy: &self.occupancy((0..self.players.len()).filter(|id| id != &player_id)),
+            this_occupancy: &self.occupancy([player_id]),
+        };
+
         match build {
-            Builds::Road(road) => todo!(),
-            Builds::Settlement(settlement) => todo!(),
-            Builds::City(city) => todo!(),
+            Builds::Road(road) => match self.players[player_id].roads.extend(road.pos, &checker) {
+                Ok(_) => Ok(()),
+                Err(err) => Err(TryBuildError::Road(err)),
+            },
+            Builds::Settlement(settlement) => match checker.can_place(&settlement) {
+                true => Ok({
+                    self.players[player_id]
+                        .settlements
+                        .insert(settlement)
+                        .not()
+                        .then(|| log::warn!("seems like settlement was placed on top of another"));
+                }),
+                false => Err(TryBuildError::Settlement()),
+            },
+            Builds::City(city) => {
+                match self.players[player_id]
+                    .settlements
+                    .contains(&Settlement { pos: city.pos })
+                {
+                    true => Ok({
+                        self.players[player_id]
+                            .settlements
+                            .remove(&Settlement { pos: city.pos })
+                            .not()
+                            .then(|| log::warn!("settlement non-existent"));
+
+                        self.players[player_id]
+                            .cities
+                            .insert(city)
+                            .not()
+                            .then(|| log::warn!("city already exists"));
+                    }),
+                    false => todo!(),
+                }
+            }
         }
     }
 
@@ -152,7 +185,6 @@ pub struct AggregateOccupancy {
     pub roads_occupancy: PathOccupancy,
 }
 
-
 #[derive(Debug, Default)]
 pub struct PathOccupancy {
     pub occupancy: IntersectionOccupancy,
@@ -161,7 +193,10 @@ pub struct PathOccupancy {
 
 impl PathOccupancy {
     pub fn union(&self, other: &Self) -> Self {
-        Self { occupancy: self.occupancy.union(&other.occupancy).copied().collect(), paths: self.paths.union(&other.paths).copied().collect() }
+        Self {
+            occupancy: self.occupancy.union(&other.occupancy).copied().collect(),
+            paths: self.paths.union(&other.paths).copied().collect(),
+        }
     }
 }
 
@@ -177,17 +212,20 @@ impl AggregateOccupancy {
                 .union(&other.builds_occupancy)
                 .copied()
                 .collect(),
-            roads_occupancy: PathOccupancy {occupancy: self
-                .roads_occupancy.occupancy
-                .union(&other.roads_occupancy.occupancy)
-                .copied()
-                .collect(),
+            roads_occupancy: PathOccupancy {
+                occupancy: self
+                    .roads_occupancy
+                    .occupancy
+                    .union(&other.roads_occupancy.occupancy)
+                    .copied()
+                    .collect(),
                 paths: self
-                .roads_occupancy.paths
-                .union(&other.roads_occupancy.paths)
-                .copied()
-                .collect()
-            }
+                    .roads_occupancy
+                    .paths
+                    .union(&other.roads_occupancy.paths)
+                    .copied()
+                    .collect(),
+            },
         }
     }
 }
@@ -245,19 +283,26 @@ pub enum Builds {
     Road(Road),
 }
 
+#[derive(Debug)]
+pub enum TryBuildError {
+    Road(EdgeInsertationError),
+    Settlement(),
+    City(),
+}
+
 /* impls */
 
 impl Index<PlayerId> for BuildDataContainer {
     type Output = PlayerBuildData;
 
     fn index(&self, index: PlayerId) -> &Self::Output {
-        todo!()
+        &self.players[index]
     }
 }
 
 impl IndexMut<PlayerId> for BuildDataContainer {
     fn index_mut(&mut self, index: PlayerId) -> &mut Self::Output {
-        todo!()
+        &mut self.players[index]
     }
 }
 

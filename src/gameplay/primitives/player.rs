@@ -1,6 +1,6 @@
 use crate::gameplay::primitives::{
     dev_card::{
-        DevCardData, DevCardDataPlayingError, DevCardKind, OpponentDevCardData, UsableDevCardKind,
+        DevCardData, DevCardDataPlayingError, DevCardKind, SecuredDevCardData, UsableDevCardKind,
     },
     resource::ResourceCollection,
 };
@@ -161,14 +161,14 @@ impl<'a> PlayerDataProxyMut<'a> {
 }
 
 pub struct SecuredPlayerData {
-    pub dev_cards: OpponentDevCardData,
+    pub dev_cards: SecuredDevCardData,
     pub resource_card_count: u16,
 }
 
 impl From<&PlayerData> for SecuredPlayerData {
     fn from(player_data: &PlayerData) -> Self {
         Self {
-            dev_cards: OpponentDevCardData {
+            dev_cards: SecuredDevCardData {
                 queued: player_data.dev_cards.queued.total(),
                 active: player_data.dev_cards.active.total(),
                 played: player_data.dev_cards.used.clone(),
@@ -181,7 +181,7 @@ impl From<&PlayerData> for SecuredPlayerData {
 impl<'a> From<&PlayerDataProxy<'a>> for SecuredPlayerData {
     fn from(player_data: &PlayerDataProxy) -> Self {
         Self {
-            dev_cards: OpponentDevCardData {
+            dev_cards: SecuredDevCardData {
                 queued: player_data.dev_cards.queued.total(),
                 active: player_data.dev_cards.active.total(),
                 played: player_data.dev_cards.used.clone(),

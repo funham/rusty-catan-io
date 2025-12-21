@@ -101,13 +101,13 @@ impl DevCardData {
     }
 }
 
-pub struct OpponentDevCardData {
+pub struct SecuredDevCardData {
     pub(crate) queued: u16,
     pub(crate) active: u16,
     pub(crate) played: UsableDevCardCollection,
 }
 
-impl OpponentDevCardData {
+impl SecuredDevCardData {
     pub fn max_potential_vp(&self) -> u16 {
         self.queued + self.active
     }

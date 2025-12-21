@@ -9,11 +9,11 @@
       - [ ] Implement console input strategy
       - [ ] Implement baseline unmanned strategy
       - [ ] Get rid of Debug trait derivation for Strategy
-   - [ ] GameState implementation
-      - [x] use yop
-      - [ ] use roadbuild
-      - [x] use monopoly
-      - [ ] execute_building(Buildable)
+   - [x] ~~Game State modifiers~~
+      - [x] ~~use yop~~
+      - [x] ~~use roadbuild~~
+      - [x] ~~use monopoly
+      - [x] ~~execute_building(Buildable)~~
    - [ ] Async IO
       - [ ] maybe spawn thread { if peer.strategy.answer(trade) { mt.lock(); answerer = Some } }
       - [ ] maybe straregy and trade offer threads must be able to communicate
@@ -23,14 +23,14 @@
          - [ ] Helper state machine class?
    - [ ] GameController
       - [ ] error handling
-         - [x] logging
+         - [x] ~~logging~~
          - [ ] handling
       - [ ] execute_* methods
       - [ ] golden river support
    - [ ] Topology::graph/Primitives::build
       - [ ] Diameter calculation
-      - [x] Occupancy hexgrid (separate for roads and settlements)
-      - [x] Allowed-to-place-sets for roads and settlements (extendable?)
+      - [x] ~~Occupancy hexgrid (separate for roads and settlements)~~
+      - [x] ~~Allowed-to-place-sets for roads and settlements (extendable?)~~
    - [ ] Field
    - [ ] CLI
    - [ ] UI
