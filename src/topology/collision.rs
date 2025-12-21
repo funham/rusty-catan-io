@@ -38,6 +38,7 @@ impl<'a, 'b> CollisionChecker<'a, 'b> {
         build
             .get_pos()
             .neighbors()
+            .into_iter()
             .chain([build.get_pos()])
             .collect()
     }

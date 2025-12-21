@@ -1,5 +1,5 @@
 /// An unordered triple of three distinct values
-#[derive(Debug, Eq)]
+#[derive(Debug, Eq, Clone)]
 pub struct UnorderedTriple<T: PartialEq>(T, T, T);
 
 impl<T: PartialEq> PartialEq for UnorderedTriple<T> {

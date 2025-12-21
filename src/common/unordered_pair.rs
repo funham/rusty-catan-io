@@ -1,10 +1,26 @@
 /// An unordered pair of two distinct values
-#[derive(Debug, Eq)]
+#[derive(Debug, Clone, Copy, PartialOrd)]
 pub struct UnorderedPair<T: PartialEq>(T, T);
 
 impl<T: PartialEq> PartialEq for UnorderedPair<T> {
     fn eq(&self, other: &Self) -> bool {
         (self.0 == other.0 && self.1 == other.1) || (self.0 == other.1 && self.1 == other.0)
+    }
+}
+
+impl<T: Eq> Eq for UnorderedPair<T> {}
+impl<T: Ord + Eq> Ord for UnorderedPair<T> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        let self_min = (&self.0).min(&self.1);
+        let self_max = (&self.0).max(&self.1);
+
+        let other_min = (&other.0).min(&other.1);
+        let other_max = (&other.0).max(&other.1);
+
+        match self_min.cmp(other_min) {
+            std::cmp::Ordering::Equal => self_max.cmp(other_max),
+            ord => return ord,
+        }
     }
 }
 
@@ -143,6 +159,10 @@ impl<T: PartialEq> UnorderedPair<T> {
     /// ```
     pub fn into_tuple(self) -> (T, T) {
         (self.0, self.1)
+    }
+
+    pub fn into_arr(self) -> [T; 2] {
+        [self.0, self.1]
     }
 
     /// Returns `true` if the unordered pair contains both given values

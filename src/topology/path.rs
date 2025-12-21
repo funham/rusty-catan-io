@@ -1,10 +1,11 @@
 use std::collections::BTreeSet;
 
+use crate::common::UnorderedPair;
 use crate::topology::hex::*;
 use crate::topology::intersection::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub struct Path(Hex, Hex);
+pub struct Path(UnorderedPair<Hex>);
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PathDual(Hex, Hex);
@@ -19,10 +20,10 @@ impl TryFrom<(Hex, Hex)> for Path {
     type Error = EdgeConstructError;
 
     fn try_from(value: (Hex, Hex)) -> Result<Self, Self::Error> {
-        if value.0.distance(&value.1) == 1 {
+        let (h1, h2) = value;
+        if h1.distance(&h2) == 1 {
             Ok(Self {
-                0: value.0.min(value.1),
-                1: value.0.max(value.1),
+                0: UnorderedPair::try_from((h1, h2)).unwrap(),
             })
         } else {
             Err(EdgeConstructError::NotAdjacentHexes)
@@ -41,13 +42,13 @@ impl TryFrom<(Intersection, Intersection)> for Path {
             .cloned()
             .collect::<Vec<_>>();
 
-        if inter.len() != 2 {
-            return Err(EdgeConstructError::NotNeighboringVertices);
-        }
+        let inter = match <[Hex; 2] as TryFrom<Vec<Hex>>>::try_from(inter) {
+            Ok(x) => x,
+            Err(_) => return Err(EdgeConstructError::NotNeighboringVertices),
+        };
 
         Ok(Self {
-            0: inter.first().unwrap().clone(),
-            1: inter.last().unwrap().clone(),
+            0: UnorderedPair::try_from((inter[0], inter[1])).unwrap(),
         })
     }
 }
@@ -115,14 +116,25 @@ impl PathDual {
 
 impl Path {
     pub fn as_set(&self) -> BTreeSet<Hex> {
-        BTreeSet::from([self.0, self.1])
+        let (h1, h2) = self.as_pair();
+        BTreeSet::from([h1, h2])
+    }
+
+    pub fn as_pair(&self) -> (Hex, Hex) {
+        self.0.into_tuple()
+    }
+
+    pub fn as_arr(&self) -> [Hex; 2] {
+        self.0.into_arr()
     }
 
     pub fn dual(&self) -> PathDual {
-        let n0 = self.0.neighbors_set();
-        let n1 = self.1.neighbors().into_iter().collect();
+        let n0 = self.as_pair().0.neighbors_set();
+        let n1 = self.as_pair().1.neighbors_set();
 
         let inter = n0.intersection(&n1).cloned().collect::<BTreeSet<Hex>>();
+
+        assert_eq!(inter.len(), 2);
 
         PathDual::try_from((
             inter.first().unwrap().clone(),
@@ -132,13 +144,8 @@ impl Path {
     }
 
     pub fn intersections(&self) -> (Intersection, Intersection) {
-        let nb = (self.0.neighbors_set(), self.1.neighbors_set());
         let dual = self.dual();
-
-        let [h1, h2] = <[&Hex; 2]>::try_from(nb.0.intersection(&nb.1).collect::<Vec<_>>()).unwrap();
-
-        let h1 = h1.clone();
-        let h2 = h2.clone();
+        let (h1, h2) = self.as_pair();
 
         (
             Intersection::try_from((dual.0, h1, h2)).unwrap(),
@@ -162,5 +169,25 @@ impl Path {
 
     pub fn opposite_or_panic(&self, v: Intersection) -> Intersection {
         self.opposite(v).expect("too cocky")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Helper to create hexes
+    fn h(q: i32, r: i32) -> Hex {
+        Hex::new(q, r)
+    }
+
+    #[test]
+    fn it_works() {
+        Path::try_from((h(0, 1), h(0, 0))).unwrap();
+    }
+
+    #[test]
+    fn intersections_works() {
+        let _ = Path::try_from((h(0, 1), h(0, 0))).unwrap();
     }
 }

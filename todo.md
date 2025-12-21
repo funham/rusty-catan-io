@@ -32,10 +32,11 @@
          - [ ] handling
       - [x] ~~execute_* methods~~
       - [ ] golden river support
-   - [ ] Topology::graph/Primitives::build
-      - [ ] Diameter calculation
+   - [x] Topology::graph/Primitives::build
+      - [x] Diameter calculation
       - [x] ~~Occupancy hexgrid (separate for roads and settlements)~~
       - [x] ~~Allowed-to-place-sets for roads and settlements (extendable?)~~
+   - [ ] { Path, PathDual } -> {Path<Canon>, Path<Dual>}
    - [ ] Field
    - [ ] CLI
    - [ ] UI
