@@ -16,7 +16,7 @@
       - [x] ~~execute_building(Buildable)~~
    - [ ] Async IO
       - [ ] maybe spawn thread { if peer.strategy.answer(trade) { mt.lock(); answerer = Some } }
-      - [ ] maybe straregy and trade offer threads must be able to communicate
+      - [ ] turn strategy into a coroutine
       - [ ] maybe move trade offers from state transitions entirely into strategy logic
       - [ ] maybe rework strategy to be fully async
          - [ ] async communication interface between GameController and Strategy

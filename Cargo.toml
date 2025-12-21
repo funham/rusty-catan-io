@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+genawaiter = "0.99.1"
 itertools = "0.14.0"
 log = "0.4.29"
 num = "0.4.3"
