@@ -103,10 +103,12 @@ impl GameController {
                 return;
             }
             answer::AfterDiceThrowAnswer::OfferPublicTrade(public_trade_offer) => {
-                Self::execute_public_trade_offer(params, public_trade_offer)
+                // Self::execute_public_trade_offer(params, public_trade_offer, acceptor);
+                log::warn!("Trades are not implemented yet")
             }
             answer::AfterDiceThrowAnswer::OfferPersonalTrade(personal_trade_offer) => {
-                Self::execute_personal_trade_offer(params, personal_trade_offer)
+                // Self::execute_personal_trade_offer(params, personal_trade_offer);
+                log::warn!("Trades are not implemented yet")
             }
             answer::AfterDiceThrowAnswer::TradeWithBank(bank_trade) => {
                 Self::execute_bank_trade(params, bank_trade);
@@ -136,10 +138,12 @@ impl GameController {
             .move_request_rest(&params.game.get_perspective(params.player_id))
         {
             answer::FinalStateAnswer::OfferPublicTrade(public_trade_offer) => {
-                Self::execute_public_trade_offer(params, public_trade_offer)
+                // Self::execute_public_trade_offer(params, public_trade_offer);
+                log::warn!("Trades are not implemented yet")
             }
             answer::FinalStateAnswer::OfferPersonalTrade(personal_trade_offer) => {
-                Self::execute_personal_trade_offer(params, personal_trade_offer);
+                // Self::execute_personal_trade_offer(params, personal_trade_offer);
+                log::warn!("Trades are not implemented yet")
             }
             answer::FinalStateAnswer::TradeWithBank(bank_trade) => {
                 Self::execute_bank_trade(params, bank_trade)
@@ -158,24 +162,40 @@ impl GameController {
 
     fn execute_public_trade_offer(
         params: &mut TurnHandlingParams,
-        public_trade_offer: PublicTradeOffer,
+        trade: PublicTradeOffer,
+        acceptor: PlayerId,
     ) {
-        todo!()
+        if let Err(err) = params
+            .game
+            .players_resource_exchange((params.player_id, trade.give), (acceptor, trade.take))
+        {
+            log::error!("Invalid player resource exchange: {:?}", err)
+        }
     }
 
-    fn execute_personal_trade_offer(
-        params: &mut TurnHandlingParams,
-        personal_trade_offer: PersonalTradeOffer,
-    ) {
-        todo!()
+    fn execute_personal_trade_offer(params: &mut TurnHandlingParams, trade: PersonalTradeOffer) {
+        if let Err(err) = params
+            .game
+            .players_resource_exchange((params.player_id, trade.give), (trade.peer_id, trade.take))
+        {
+            log::error!("Invalid player resource exchange: {:?}", err)
+        }
     }
 
     fn execute_bank_trade(params: &mut TurnHandlingParams, bank_trade: BankTrade) {
-        todo!()
+        if let Err(err) = params.game.bank_resource_exchange(
+            params.player_id,
+            bank_trade.to_bank(),
+            bank_trade.from_bank(),
+        ) {
+            log::error!("Invalid bank resource exchange: {:?}", err)
+        }
     }
 
     fn execute_build(params: &mut TurnHandlingParams, buildable: Builds) {
-        todo!()
+        if let Err(err) = params.game.builds.try_build(params.player_id, buildable) {
+            log::error!("Invalid building try: {:?}", err)
+        }
     }
 
     fn execute_harvesting_for_one_player(

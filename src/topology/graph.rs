@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
     gameplay::primitives::build::{
-        AggregateOccupancy, Buildable, Occupancy, OccupancyGetter, Road,
+        AggregateOccupancy, Buildable, IntersectionOccupancy, OccupancyGetter, Road,
     },
     topology::{Intersection, Path, collision::CollisionChecker},
 };
@@ -20,6 +20,10 @@ pub struct RoadGraph {
 impl RoadGraph {
     pub fn iter(&self) -> impl Iterator<Item = Road> {
         self.edges.iter().map(|p| Road { pos: *p })
+    }
+
+    pub fn edges(&self) -> &BTreeSet<Path> {
+        &self.edges
     }
 
     /// add an edge, no questions asked
@@ -41,16 +45,8 @@ impl RoadGraph {
     pub fn extend(
         &mut self,
         edge: Path,
-        full_occupancy: &AggregateOccupancy,
-        this_occupancy: &AggregateOccupancy,
+        checker: &CollisionChecker,
     ) -> Result<(), EdgeInsertationError> {
-        let (v1, v2) = edge.intersections();
-        let checker = CollisionChecker {
-            roads: &self.edges,
-            other_occupancy: full_occupancy,
-            this_occupancy,
-        };
-
         match checker.can_place(&Road { pos: edge }) {
             true => Ok(self.add_edge(edge)),
             false => Err(EdgeInsertationError),
@@ -123,6 +119,7 @@ impl RoadGraph {
         checker
             .this_occupancy
             .roads_occupancy
+            .occupancy
             .iter()
             .filter(|v| {
                 let dead_zone = v.neighbors().chain([**v]);

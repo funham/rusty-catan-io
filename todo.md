@@ -1,30 +1,36 @@
 # TODO list for this project
- - [ ] Game loop pipeline
-    - [ ] Add game initialization logic
-    - [ ] Add interruption support
-    - [ ] populate `main.rs`
-    - [ ] Add integration tests
-    - [ ] Premature turn quit on win condition
- - [ ] Strategy
-    - [ ] Implement console input strategy
-    - [ ] Implement baseline unmanned strategy
-    - [ ] Get rid of Debug trait derivation for Strategy
- - [ ] GameState implementation
-    - [x] use yop
-    - [ ] use roadbuild
-    - [x] use monopoly
-    - [ ] execute_building(Buildable)
- - [ ] GameController
-    - [ ] error handling
-      - [x] logging
-      - [ ] handling
-    - [ ] execute_* methods
-    - [ ] golden river support
- - [ ] Topology::graph/Primitives::build
-    - [ ] Diameter calculation
-    - [x] Occupancy hexgrid (separate for roads and settlements)
-    - [x] Allowed-to-place-sets for roads and settlements (extendable?)
-    <!-- - [ ] { *_occupancy : Occupancy } -> { occupancy : Occupancy<Tagged> } -->
- - [ ] Field
- - [ ] CLI
- - [ ] UI
+   - [ ] Game loop pipeline
+      - [ ] Add game initialization logic
+      - [ ] Add interruption support
+      - [ ] populate `main.rs`
+      - [ ] Add integration tests
+      - [ ] Premature turn quit on win condition
+   - [ ] Strategy
+      - [ ] Implement console input strategy
+      - [ ] Implement baseline unmanned strategy
+      - [ ] Get rid of Debug trait derivation for Strategy
+   - [ ] GameState implementation
+      - [x] use yop
+      - [ ] use roadbuild
+      - [x] use monopoly
+      - [ ] execute_building(Buildable)
+   - [ ] Async IO
+      - [ ] maybe spawn thread { if peer.strategy.answer(trade) { mt.lock(); answerer = Some } }
+      - [ ] maybe straregy and trade offer threads must be able to communicate
+      - [ ] maybe move trade offers from state transitions entirely into strategy logic
+      - [ ] maybe rework strategy to be fully async
+         - [ ] async communication interface between GameController and Strategy
+         - [ ] Helper state machine class?
+   - [ ] GameController
+      - [ ] error handling
+         - [x] logging
+         - [ ] handling
+      - [ ] execute_* methods
+      - [ ] golden river support
+   - [ ] Topology::graph/Primitives::build
+      - [ ] Diameter calculation
+      - [x] Occupancy hexgrid (separate for roads and settlements)
+      - [x] Allowed-to-place-sets for roads and settlements (extendable?)
+   - [ ] Field
+   - [ ] CLI
+   - [ ] UI

@@ -115,6 +115,24 @@ impl GameState {
         )
     }
 
+    pub fn players_resource_exchange(
+        &mut self,
+        lhs: (PlayerId, ResourceCollection),
+        rhs: (PlayerId, ResourceCollection),
+    ) -> Result<(), PlayerResourceExchangeError> {
+        let has_enough =
+            |(id, rc): &(_, ResourceCollection)| self.players.get(*id).resources.has_enough(rc);
+
+        match (has_enough(&lhs), has_enough(&rhs)) {
+            (false, _) => Err(PlayerResourceExchangeError::AccountIsShort { id: lhs.0 }),
+            (_, false) => Err(PlayerResourceExchangeError::AccountIsShort { id: rhs.0 }),
+            _ => {
+                self.players_resource_transfer(lhs.0, rhs.0, lhs.1)?;
+                self.players_resource_transfer(lhs.0, rhs.0, lhs.1)
+            }
+        }
+    }
+
     pub fn player_ids_starting_from(
         &self,
         start_id: PlayerId,

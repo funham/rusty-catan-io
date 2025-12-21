@@ -12,9 +12,8 @@ use crate::{
 };
 
 pub struct CollisionChecker<'a, 'b> {
-    pub roads: &'b BTreeSet<Path>,
     pub other_occupancy: &'a AggregateOccupancy,
-    pub this_occupancy: &'a AggregateOccupancy,
+    pub this_occupancy: &'b AggregateOccupancy,
 }
 
 impl<'a, 'b> CollisionChecker<'a, 'b> {
@@ -33,7 +32,7 @@ impl<'a, 'b> CollisionChecker<'a, 'b> {
     pub fn connected<T: OccupancyGetter>(&self, build: &T) -> bool {
         build
             .occupancy()
-            .intersection(self.this_occupancy.get_for::<T>())
+            .intersection(&self.this_occupancy.roads_occupancy.occupancy)
             .any(|_| true)
     }
 }
@@ -53,7 +52,11 @@ impl<T: Buildable + HasPos<Pos = Intersection>> Containable for T {
 
 impl Containable for Road {
     fn contained(&self, checker: &CollisionChecker) -> bool {
-        checker.roads.contains(&self.get_pos())
+        checker
+            .this_occupancy
+            .roads_occupancy
+            .paths
+            .contains(&self.get_pos())
     }
 }
 
@@ -67,14 +70,20 @@ impl<T: OccupancyGetter + HasPos<Pos = Intersection>> Placeble for T {
         checker.connected(self)
             && checker
                 .full_occupancy()
-                .get_for::<T>()
+                .builds_occupancy
                 .is_disjoint(&dead_zone)
     }
 }
 
 impl Placeble for Road {
     fn placeble(&self, checker: &CollisionChecker) -> bool {
-        let connected = |v| checker.this_occupancy.roads_occupancy.contains(&v);
+        let connected = |v| {
+            checker
+                .this_occupancy
+                .roads_occupancy
+                .occupancy
+                .contains(&v)
+        };
         let broken = |v| checker.other_occupancy.builds_occupancy.contains(&v);
 
         self.pos

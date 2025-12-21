@@ -1,15 +1,15 @@
-use super::resource::{Resource, ResourceCollection};
 use super::player::PlayerId;
+use super::resource::{Resource, ResourceCollection};
 
 pub struct PublicTradeOffer {
-    give: ResourceCollection,
-    take: ResourceCollection,
+    pub give: ResourceCollection,
+    pub take: ResourceCollection,
 }
 
 pub struct PersonalTradeOffer {
-    give: ResourceCollection,
-    take: ResourceCollection,
-    peer: PlayerId,
+    pub give: ResourceCollection,
+    pub take: ResourceCollection,
+    pub peer_id: PlayerId,
 }
 
 pub enum BankTradeKind {
@@ -19,9 +19,9 @@ pub enum BankTradeKind {
 }
 
 pub struct BankTrade {
-    give: Resource,
-    take: Resource,
-    kind: BankTradeKind,
+    pub give: Resource,
+    pub take: Resource,
+    pub kind: BankTradeKind,
 }
 
 pub struct PlayerTrade {
@@ -35,5 +35,21 @@ impl PlayerTrade {
             give: self.take,
             take: self.give,
         }
+    }
+}
+
+impl BankTrade {
+    pub fn to_bank(&self) -> ResourceCollection {
+        let res_count = match self.kind {
+            BankTradeKind::Common => 4,
+            BankTradeKind::PortUniversal => 3,
+            BankTradeKind::PortSpecial => 2,
+        };
+
+        (self.give, res_count).into()
+    }
+
+    pub fn from_bank(&self) -> ResourceCollection {
+        (self.take, 1).into()
     }
 }
