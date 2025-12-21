@@ -77,7 +77,7 @@ This framework implements the complete logic of Settlers of Catan, exposing a cl
 ```rust
 // Create a game with four AI players
 let mut game = GameState::build(...);
-let mut strategies = vec![ConsoleInputStrategy::new(...), LazyAssStrategy::default(), ...]
+let mut strategies = vec![ConsoleInputStrategy::new(...), LazyAssStrategy::default(), ...];
 let mut game_result = GameController::run(&mut game, &mut strategies);
 
 // Access final results

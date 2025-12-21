@@ -12,12 +12,12 @@ use crate::{gameplay::field::state::FieldState, math::dice::DiceRoller, topology
 
 #[derive(Debug)]
 pub struct GameState {
-    pub(super) field: FieldState,
-    pub(super) dice: Box<dyn DiceRoller>,
-    pub(super) bank: Bank,
-    pub(super) turn: GameTurn,
-    pub(super) players: PlayerDataContainer,
-    pub(super) builds: BuildDataContainer,
+    pub field: FieldState,
+    pub dice: Box<dyn DiceRoller>,
+    pub bank: Bank,
+    pub turn: GameTurn,
+    pub players: PlayerDataContainer,
+    pub builds: BuildDataContainer,
 }
 
 /// player's perspective on a game, used in `Strategy`

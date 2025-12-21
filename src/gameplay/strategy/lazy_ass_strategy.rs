@@ -2,7 +2,7 @@ use super::*;
 
 use crate::gameplay::primitives::Robbery;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct LazyAssStrategy;
 
 impl Strategy for LazyAssStrategy {

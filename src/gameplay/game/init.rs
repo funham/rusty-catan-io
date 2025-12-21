@@ -8,4 +8,8 @@ pub struct GameInitializationState {
     pub turn: GameTurn<BackAndForthCycle>,
 }
 
-impl GameInitializationState {}
+impl GameInitializationState {
+    pub fn new(field_size: usize) -> Self {
+        todo!()
+    }
+}

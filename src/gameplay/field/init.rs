@@ -1,7 +1,7 @@
 use super::{HexArrangement, PortArrangement};
 
 use crate::{
-    gameplay::field::state::{FieldState, FieldPromotingError},
+    gameplay::field::state::{FieldPromotingError, FieldState},
     topology::{Hex, Path},
 };
 

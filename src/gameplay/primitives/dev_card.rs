@@ -87,10 +87,7 @@ impl DevCardData {
         }
     }
 
-    pub fn move_to_used(
-        &mut self,
-        card: UsableDevCardKind,
-    ) -> Result<(), DevCardDataPlayingError> {
+    pub fn move_to_used(&mut self, card: UsableDevCardKind) -> Result<(), DevCardDataPlayingError> {
         match self.active.contains(card) {
             true => Ok({
                 self.active[card].dec();

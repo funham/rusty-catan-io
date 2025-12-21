@@ -1,8 +1,8 @@
+pub mod collision;
 pub mod graph;
 pub mod hex;
 pub mod intersection;
 pub mod path;
-pub mod collision;
 
 pub use hex::*;
 pub use intersection::*;

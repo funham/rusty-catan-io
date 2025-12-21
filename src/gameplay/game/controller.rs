@@ -1,4 +1,5 @@
 use super::state::GameState;
+use crate::gameplay::game::init::GameInitializationState;
 use crate::gameplay::primitives::HexResource;
 use crate::gameplay::primitives::build::{Builds, City, Settlement};
 use crate::gameplay::primitives::dev_card::DevCardUsage;
@@ -24,18 +25,19 @@ pub enum GameResult {
 pub struct TurnHandlingParams<'a, 'b> {
     pub(super) player_id: PlayerId,
     pub(super) game: &'a mut GameState,
-    pub(super) strategies: &'b mut Vec<&'b mut dyn Strategy>,
+    pub(super) strategies: &'b mut Vec<Box<dyn Strategy>>,
 }
 
 #[derive(Debug, Default)]
 pub struct GameController {}
 
 impl GameController {
+    pub fn init(game_init: GameInitializationState) -> GameState {
+        todo!()
+    }
+
     // execute game untill it's over
-    pub fn run<'a>(
-        game: &mut GameState,
-        strategies: &'a mut Vec<&'a mut dyn Strategy>,
-    ) -> GameResult {
+    pub fn run(game: &mut GameState, strategies: &mut Vec<Box<dyn Strategy>>) -> GameResult {
         let mut params = TurnHandlingParams {
             player_id: 0,
             game,
