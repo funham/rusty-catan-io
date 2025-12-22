@@ -114,21 +114,21 @@ impl GameController {
 
     /* Turn handling methods; Kind of a procedural state machine */
 
-    fn handle_move_init(params: &mut TurnHandlingParams) {
+    fn handle_move_init(params: &mut TurnHandlingParams) -> Result<(), ()> {
         match params.strategies[params.player_id]
             .move_request_init(&params.game.get_perspective(params.player_id))
         {
             answer::InitialAnswer::ThrowDice => {
                 Self::execute_dice_trow(params);
-                Self::handle_dice_thrown(params);
+                Self::handle_dice_thrown(params)
             }
             answer::InitialAnswer::UseKnight(rob_request) => {
-                Self::handle_dev_card_used(params, DevCardUsage::Knight(rob_request.robbery));
+                Self::handle_dev_card_used(params, DevCardUsage::Knight(rob_request.robbery))
             }
         }
     }
 
-    fn handle_dice_thrown(params: &mut TurnHandlingParams) {
+    fn handle_dice_thrown(params: &mut TurnHandlingParams) -> Result<(), ()> {
         match params.strategies[params.player_id]
             .move_request_after_dice_throw(&params.game.get_perspective(params.player_id))
         {
@@ -136,8 +136,7 @@ impl GameController {
                 if let Err(e) = params.game.use_dev_card(dev_card_usage, params.player_id) {
                     log::error!("{:?}", e);
                 }
-                Self::handle_rest(params);
-                return;
+                Self::handle_rest(params)?;
             }
             answer::AfterDiceThrowAnswer::OfferPublicTrade(public_trade_offer) => {
                 // Self::execute_public_trade_offer(params, public_trade_offer, acceptor);
@@ -154,23 +153,33 @@ impl GameController {
                 Self::execute_build(params, buildable);
             }
             answer::AfterDiceThrowAnswer::EndMove => {
-                return;
+                return Err(());
             }
         }
 
-        Self::handle_dice_thrown(params);
+        Self::handle_dice_thrown(params)
     }
 
-    fn handle_dev_card_used(params: &mut TurnHandlingParams, usage: DevCardUsage) {
+    fn handle_dev_card_used(
+        params: &mut TurnHandlingParams,
+        usage: DevCardUsage,
+    ) -> Result<(), ()> {
         if let Err(e) = params.game.use_dev_card(usage, params.player_id) {
             log::error!("{:?}", e);
         }
+
+        if let Some(_) = params.game.check_win_condition() {
+            return Err(());
+        }
+
         let _ = params.strategies[params.player_id]
             .move_request_after_knight(&params.game.get_perspective(params.player_id)); // dice throw (must be manual for players)
-        Self::handle_rest(params);
+
+        Self::execute_dice_trow(params);
+        Self::handle_rest(params)
     }
 
-    fn handle_rest(params: &mut TurnHandlingParams) {
+    fn handle_rest(params: &mut TurnHandlingParams) -> Result<(), ()> {
         match params.strategies[params.player_id]
             .move_request_rest(&params.game.get_perspective(params.player_id))
         {
@@ -183,16 +192,20 @@ impl GameController {
                 log::warn!("Trades are not implemented yet")
             }
             answer::FinalStateAnswer::TradeWithBank(bank_trade) => {
-                Self::execute_bank_trade(params, bank_trade)
+                Self::execute_bank_trade(params, bank_trade);
             }
             answer::FinalStateAnswer::Build(buildable) => Self::execute_build(params, buildable),
             answer::FinalStateAnswer::EndMove => {
-                return;
+                return Err(());
             }
         }
 
+        if params.game.check_win_condition().is_some() {
+            return Err(());
+        }
+
         // !warning! recursion
-        Self::handle_rest(params);
+        Self::handle_rest(params)
     }
 
     /* Helper methods, to reduce clutter, no calls to `handle*` methods allowed */
