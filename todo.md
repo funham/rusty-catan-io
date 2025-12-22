@@ -9,7 +9,7 @@
       - [ ] Add interruption support
       - [x] ~~populate `main.rs`~~
       - [ ] Add integration tests
-      - [ ] Premature turn quit on win condition
+      - [x] ~~Premature turn quit on win condition~~
    - [ ] Strategy
       - [ ] Implement console input strategy
       - [ ] Implement baseline unmanned strategy
@@ -27,7 +27,7 @@
          - [ ] handling
       - [x] ~~execute_* methods~~
       - [ ] golden river support
-   - [ ] { Path, PathDual } -> {Path<Canon>, Path<Dual>}
+   - [ ] { Path, PathDual } -> {Path\<Canon\>, Path \<Dual\>}
    - [ ] Field
    - [ ] CLI
    - [ ] UI
