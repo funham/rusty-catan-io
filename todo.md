@@ -29,5 +29,6 @@
       - [ ] golden river support
    - [ ] { Path, PathDual } -> {Path\<Canon\>, Path \<Dual\>}
    - [ ] Field
+   - [ ] UnorderedPair, ... -> NSet<N> (interface over BTreeSet)
    - [ ] CLI
    - [ ] UI
