@@ -43,12 +43,12 @@ impl TryFrom<(Hex, Hex, Hex)> for Intersection {
 }
 
 impl TryFrom<[Hex; 3]> for Intersection {
-    type Error = Vec<Hex>;
+    type Error = VertexConstructError;
 
     fn try_from(value: [Hex; 3]) -> Result<Self, Self::Error> {
         match Self::try_from((value[0], value[1], value[2])) {
             Ok(x) => Ok(x),
-            Err(_) => Err(value.into_iter().collect()),
+            Err(_) => Err(VertexConstructError::NotAdjacentHexes),
         }
     }
 }

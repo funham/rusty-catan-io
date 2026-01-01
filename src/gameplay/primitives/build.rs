@@ -104,7 +104,7 @@ impl BuildDataContainer {
         };
 
         match build {
-            Builds::Road(road) => match self.players[player_id].roads.extend(road.pos, &checker) {
+            Builds::Road(road) => match self.players[player_id].roads.extend(&road.pos, &checker) {
                 Ok(_) => Ok(()),
                 Err(err) => Err(BuildingError::Road(err)),
             },
@@ -177,7 +177,7 @@ impl BuildDataContainer {
 
         match road_ok {
             true => Ok({
-                self[player_id].roads.add_edge(road.pos);
+                self[player_id].roads.add_edge(&road.pos);
             }),
             false => Err(BuildingError::InitRoad()),
         }
@@ -236,7 +236,7 @@ impl PathOccupancy {
     pub fn union(&self, other: &Self) -> Self {
         Self {
             occupancy: self.occupancy.union(&other.occupancy).copied().collect(),
-            paths: self.paths.union(&other.paths).copied().collect(),
+            paths: self.paths.union(&other.paths).cloned().collect(),
         }
     }
 }
@@ -264,7 +264,7 @@ impl AggregateOccupancy {
                     .roads_occupancy
                     .paths
                     .union(&other.roads_occupancy.paths)
-                    .copied()
+                    .cloned()
                     .collect(),
             },
         }
@@ -408,7 +408,7 @@ impl HasPos for City {
 impl HasPos for Road {
     type Pos = Path;
     fn get_pos(&self) -> Self::Pos {
-        self.pos
+        self.pos.clone()
     }
 }
 

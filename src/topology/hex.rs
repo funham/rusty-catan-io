@@ -31,6 +31,28 @@ impl Into<(i32, i32, i32)> for Hex {
     }
 }
 
+impl std::ops::Add for Hex {
+    type Output = Hex;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Hex {
+            q: self.q + rhs.q,
+            r: self.r + rhs.r,
+        }
+    }
+}
+
+impl std::ops::Mul<i32> for Hex {
+    type Output = Hex;
+
+    fn mul(self, c: i32) -> Self::Output {
+        Hex {
+            q: self.q * c,
+            r: self.r * c,
+        }
+    }
+}
+
 impl Hex {
     pub const fn new(q: i32, r: i32) -> Self {
         Self { q, r }
@@ -40,10 +62,57 @@ impl Hex {
         -self.q - self.r
     }
 
-    pub const fn len(&self) -> i32 {
+    pub const fn norm(&self) -> u32 {
         self.distance(&Self::new(0, 0))
     }
 
+    /// Returns the six neighboring hexes in the order:
+    /// East, Northeast, Northwest, West, Southwest, Southeast
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rusty_catan_io::topology::Hex;
+    ///
+    /// let center = Hex::new(0, 0);
+    /// let neighbors = center.neighbors();
+    ///
+    /// // East
+    /// assert_eq!(neighbors[0], Hex::new(1, 0));
+    /// // Northeast
+    /// assert_eq!(neighbors[1], Hex::new(1, -1));
+    /// // Northwest
+    /// assert_eq!(neighbors[2], Hex::new(0, -1));
+    /// // West
+    /// assert_eq!(neighbors[3], Hex::new(-1, 0));
+    /// // Southwest
+    /// assert_eq!(neighbors[4], Hex::new(-1, 1));
+    /// // Southeast
+    /// assert_eq!(neighbors[5], Hex::new(0, 1));
+    ///
+    /// // Test with non-zero starting point
+    /// let hex = Hex::new(3, 2);
+    /// let neighbors = hex.neighbors();
+    ///
+    /// assert_eq!(neighbors[0], Hex::new(4, 2));
+    /// assert_eq!(neighbors[1], Hex::new(4, 1));
+    /// assert_eq!(neighbors[2], Hex::new(3, 1));
+    /// assert_eq!(neighbors[3], Hex::new(2, 2));
+    /// assert_eq!(neighbors[4], Hex::new(2, 3));
+    /// assert_eq!(neighbors[5], Hex::new(3, 3));
+    ///
+    /// // Verify we get exactly 6 neighbors
+    /// assert_eq!(neighbors.len(), 6);
+    ///
+    /// // Verify all neighbors are distinct
+    /// for i in 0..neighbors.len() {
+    ///     for j in 0..neighbors.len() {
+    ///         if i != j {
+    ///             assert_ne!(neighbors[i], neighbors[j]);
+    ///         }
+    ///     }
+    /// }
+    /// ```
     pub const fn neighbors(&self) -> [Hex; 6] {
         let (q, r) = (self.q, self.r);
         [
@@ -73,17 +142,49 @@ impl Hex {
             })
     }
 
-    pub const fn distance(&self, other: &Self) -> i32 {
+    pub const fn distance(&self, other: &Self) -> u32 {
         let dq = self.q - other.q;
         let dr = self.r - other.r;
         let ds = self.get_s() - other.get_s();
 
-        (dq.abs() + dr.abs() + ds.abs()) / 2
+        (dq.abs() + dr.abs() + ds.abs()) as u32 / 2
     }
 
     pub const fn are_neighbors(&self, other: &Self) -> bool {
         self.distance(other) == 1
     }
+
+    pub const fn directions() -> [Hex; 6] {
+        Hex { q: 0, r: 0 }.neighbors()
+    }
+
+    pub const fn ring_size(ring: u32) -> u32 {
+        ring * 6
+    }
+
+    // pub const fn spiral_index(&self) -> u32 {
+    //     let mut dir = Self::directions();
+    //     let mut d2 = [Hex { q: 0, r: 0 }; 6];
+
+    //     let mut i = 0;
+    //     while i < 6 {
+    //         d2[i] = dir[i] * 6;
+    //         i += 1;
+    //     }
+
+    //     // East, Northeast, Northwest, West, Southwest, Southeast
+    //     let (pos, side) = match (self.q, self.r, self.get_s()) {
+    //         (_, _, s) if dir[0].get_s() == s => (self.q, 0),
+    //         (_, r, _) if dir[1].r == r => (-self.get_s(), 1),
+    //         (q, _, _) if dir[2].q == q => (self.r, 2),
+    //         (_, _, s) if dir[3].get_s() == s => (-self.q, 3),
+    //         (_, r, _) if dir[4].r == r => (self.get_s(), 4),
+    //         (q, _, _) if dir[5].q == q => (-self.r, 5),
+    //         _ => unreachable!(),
+    //     };
+
+    //     1 + 3 * self.norm() * (self.norm() - 1) + side * 6 + pos as u32
+    // }
 }
 
 impl std::fmt::Display for Hex {

@@ -17,7 +17,7 @@ pub struct RoadGraph {
 
 impl RoadGraph {
     pub fn iter(&self) -> impl Iterator<Item = Road> {
-        self.edges.iter().map(|p| Road { pos: *p })
+        self.edges.iter().map(|p| Road { pos: p.clone() })
     }
 
     pub fn edges(&self) -> &BTreeSet<Path> {
@@ -27,26 +27,32 @@ impl RoadGraph {
     /// add an edge, no questions asked
     /// ---
     /// for inside use only basically
-    pub fn add_edge(&mut self, edge: Path) {
+    pub fn add_edge(&mut self, edge: &Path) {
         let (v1, v2) = edge.intersections();
         let _ = match self.out.get_mut(&v1) {
-            Some(edges) => edges.insert(edge),
-            None => self.out.insert(v1, BTreeSet::from([edge])).is_none(),
+            Some(edges) => edges.insert(edge.clone()),
+            None => self
+                .out
+                .insert(v1, BTreeSet::from([edge.clone()]))
+                .is_none(),
         };
         let _ = match self.out.get_mut(&v2) {
-            Some(edges) => edges.insert(edge),
-            None => self.out.insert(v2, BTreeSet::from([edge])).is_none(),
+            Some(edges) => edges.insert(edge.clone()),
+            None => self
+                .out
+                .insert(v2, BTreeSet::from([edge.clone()]))
+                .is_none(),
         };
-        self.edges.insert(edge);
+        self.edges.insert(edge.clone());
     }
 
     /// add new road connected to existing
     pub fn extend(
         &mut self,
-        edge: Path,
+        edge: &Path,
         checker: &CollisionChecker,
     ) -> Result<(), EdgeInsertationError> {
-        match checker.can_place(&Road { pos: edge }) {
+        match checker.can_place(&Road { pos: edge.clone() }) {
             true => Ok(self.add_edge(edge)),
             false => Err(EdgeInsertationError),
         }
@@ -72,7 +78,7 @@ impl RoadGraph {
 
         result
             .iter()
-            .filter(|e| checker.can_place(&Road { pos: **e }))
+            .filter(|e| checker.can_place(&Road { pos: (*e).clone() }))
             .cloned()
             .collect::<BTreeSet<_>>()
     }
@@ -188,13 +194,13 @@ impl RoadGraph {
 
         // Try all edges from current vertex
         if let Some(edges) = self.out.get(&current) {
-            for &edge in edges {
+            for edge in edges.iter() {
                 if visited_edges.contains(&edge) {
                     continue;
                 }
 
                 // Mark edge as visited
-                visited_edges.insert(edge);
+                visited_edges.insert(edge.clone());
 
                 // Move to the other endpoint
                 let neighbor = edge.opposite_or_panic(current);
@@ -223,12 +229,12 @@ impl RoadGraph {
         let mut max_length = 0;
 
         // Try starting with each edge
-        for &start_edge in &self.edges {
+        for start_edge in &self.edges {
             let mut visited_edges = BTreeSet::new();
             let mut current_path = Vec::new();
 
             self.dfs_find_longest_trail(
-                start_edge,
+                start_edge.clone(),
                 &mut visited_edges,
                 &mut current_path,
                 &mut best_path,
@@ -248,8 +254,8 @@ impl RoadGraph {
         best_path: &mut Vec<Path>,
         max_length: &mut usize,
     ) {
-        visited_edges.insert(current_edge);
-        current_path.push(current_edge);
+        visited_edges.insert(current_edge.clone());
+        current_path.push(current_edge.clone());
 
         // Check if this is the longest path so far
         if current_path.len() > *max_length {
@@ -262,7 +268,7 @@ impl RoadGraph {
 
         // Try extending from v1
         if let Some(edges) = self.out.get(&v1) {
-            for &next_edge in edges {
+            for next_edge in edges.iter().cloned() {
                 if !visited_edges.contains(&next_edge) {
                     self.dfs_find_longest_trail(
                         next_edge,
@@ -277,7 +283,7 @@ impl RoadGraph {
 
         // Try extending from v2
         if let Some(edges) = self.out.get(&v2) {
-            for &next_edge in edges {
+            for next_edge in edges.iter().cloned() {
                 if !visited_edges.contains(&next_edge) {
                     self.dfs_find_longest_trail(
                         next_edge,
@@ -316,7 +322,7 @@ impl RoadGraph {
 
             // Add all unvisited neighbors to the stack
             if let Some(edges) = self.out.get(&current) {
-                for &edge in edges {
+                for edge in edges.iter().cloned() {
                     let neighbor = edge.opposite_or_panic(current);
                     if !visited.contains(&neighbor) {
                         stack.push(neighbor);
@@ -366,7 +372,7 @@ mod tests {
     fn test_single_road() {
         let mut graph = RoadGraph::default();
         let p = path(h(0, 0), h(1, 0));
-        graph.add_edge(p);
+        graph.add_edge(&p);
 
         assert_eq!(graph.find_longest_trail_length(), 1);
         assert_eq!(graph.find_longest_trail(), vec![p]);
@@ -381,12 +387,12 @@ mod tests {
         let p1 = path(h(0, 0), h(1, 0));
         let p2 = path(h(1, -1), h(1, 0));
 
-        graph.add_edge(p1);
-        graph.add_edge(p2);
+        graph.add_edge(&p1);
+        graph.add_edge(&p2);
 
         assert_eq!(graph.find_longest_trail_length(), 2);
         let longest = graph.find_longest_trail();
-        assert!(longest == vec![p1, p2] || longest == vec![p2, p1]);
+        assert!(longest == vec![p1.clone(), p2.clone()] || longest == vec![p2, p1]);
     }
 
     #[test]
@@ -400,9 +406,9 @@ mod tests {
         let p2 = path(h(2, 0), h(3, 0));
         let p3 = path(h(3, 0), h(2, 1));
 
-        graph.add_edge(p1);
-        graph.add_edge(p2);
-        graph.add_edge(p3);
+        graph.add_edge(&p1);
+        graph.add_edge(&p2);
+        graph.add_edge(&p3);
 
         // Longest component has 2 roads
         assert_eq!(graph.find_longest_trail_length(), 2);
@@ -418,9 +424,9 @@ mod tests {
         let p2 = path(center, h(-1, 0)); // B-C
         let p3 = path(center, h(0, 1)); // B-D
 
-        graph.add_edge(p1);
-        graph.add_edge(p2);
-        graph.add_edge(p3);
+        graph.add_edge(&p1);
+        graph.add_edge(&p2);
+        graph.add_edge(&p3);
 
         // Can only take 2 roads from a star (enter and exit from different arms)
         assert_eq!(graph.find_longest_trail_length(), 2);
@@ -431,7 +437,7 @@ mod tests {
         let mut graph = RoadGraph::default();
 
         for n in h(0, 0).neighbors() {
-            graph.add_edge(path(h(0, 0), n));
+            graph.add_edge(&path(h(0, 0), n));
         }
 
         assert_eq!(graph.find_longest_trail_length(), 6);
@@ -444,9 +450,9 @@ mod tests {
         let p4 = path(h(1, -1), h(1, -2));
 
         for path in intersection(h(0, 0), h(0, -1), h(1, -1)).paths() {
-            graph.add_edge(path);
+            graph.add_edge(&path);
         }
-        graph.add_edge(p4);
+        graph.add_edge(&p4);
 
         // Longest: A-B-C-D or D-C-B-E (length 3)
         assert_eq!(graph.find_longest_trail_length(), 3);
@@ -461,8 +467,8 @@ mod tests {
             path(h(2, 0), h(3, 0)),
         ];
 
-        for &road in &roads {
-            graph.add_edge(road);
+        for road in roads.iter().cloned() {
+            graph.add_edge(&road);
         }
 
         let iter_roads: Vec<Path> = graph.iter().map(|r| r.pos).collect();
@@ -484,9 +490,9 @@ mod tests {
         let p2 = path(h(2, 0), h(3, 0));
         let p3 = path(h(3, 0), h(2, 1));
 
-        graph.add_edge(p1);
-        graph.add_edge(p2);
-        graph.add_edge(p3);
+        graph.add_edge(&p1);
+        graph.add_edge(&p2);
+        graph.add_edge(&p3);
 
         // Get any intersection from p1 to start component collection
         let (v1_start, _) = p1.intersections();
@@ -549,8 +555,8 @@ mod tests {
             path(h(1, -1), h(2, -1)),
         ];
 
-        for &road in &roads {
-            graph.add_edge(road);
+        for road in roads.iter().cloned() {
+            graph.add_edge(&road);
         }
 
         // Verify internal structure

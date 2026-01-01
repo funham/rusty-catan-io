@@ -184,7 +184,7 @@ impl GameState {
         robber_id: PlayerId,
     ) -> Result<(), DevCardUsageError> {
         // move robbers
-        if (self.field.field_radius as i32) < rob_request.hex.len() {
+        if self.field.field_radius < rob_request.hex.norm() as usize {
             return Err(DevCardUsageError::InvalidHex);
         }
 
@@ -207,7 +207,7 @@ impl GameState {
         usage: DevCardUsage,
         user: PlayerId,
     ) -> Result<(), DevCardUsageError> {
-        match usage {
+        match usage.clone() {
             DevCardUsage::Knight(rob_request) => {
                 self.use_robbers(rob_request, user)?;
             }

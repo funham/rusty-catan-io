@@ -1,5 +1,2 @@
-pub mod unordered_pair;
-pub mod unordered_triple;
-
-pub use unordered_pair::*;
-pub use unordered_triple::*;
+pub mod fixed_set;
+pub use fixed_set::*;

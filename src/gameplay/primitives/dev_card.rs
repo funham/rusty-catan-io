@@ -110,7 +110,7 @@ impl SecuredDevCardData {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum DevCardUsage {
     Knight(Robbery),
     YearOfPlenty([Resource; 2]),

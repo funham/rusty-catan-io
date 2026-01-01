@@ -1,11 +1,11 @@
 use std::collections::BTreeSet;
 
-use crate::common::UnorderedPair;
+use crate::common::FixedSet;
 use crate::topology::hex::*;
 use crate::topology::intersection::*;
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub struct Path(UnorderedPair<Hex>);
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub struct Path(FixedSet<Hex, 2>);
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PathDual(Hex, Hex);
@@ -23,7 +23,7 @@ impl TryFrom<(Hex, Hex)> for Path {
         let (h1, h2) = value;
         if h1.distance(&h2) == 1 {
             Ok(Self {
-                0: UnorderedPair::try_from((h1, h2)).unwrap(),
+                0: FixedSet::try_from([h1, h2]).unwrap(),
             })
         } else {
             Err(EdgeConstructError::NotAdjacentHexes)
@@ -48,7 +48,7 @@ impl TryFrom<(Intersection, Intersection)> for Path {
         };
 
         Ok(Self {
-            0: UnorderedPair::try_from((inter[0], inter[1])).unwrap(),
+            0: FixedSet::try_from([inter[0], inter[1]]).unwrap(),
         })
     }
 }
@@ -121,11 +121,12 @@ impl Path {
     }
 
     pub fn as_pair(&self) -> (Hex, Hex) {
-        self.0.into_tuple()
+        let [h1, h2] = self.as_arr();
+        (h1, h2)
     }
 
     pub fn as_arr(&self) -> [Hex; 2] {
-        self.0.into_arr()
+        self.0.clone().into()
     }
 
     pub fn dual(&self) -> PathDual {
