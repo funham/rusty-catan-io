@@ -4,7 +4,7 @@ use crate::common::FixedSet;
 use crate::topology::hex::*;
 use crate::topology::intersection::*;
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct Path(FixedSet<Hex, 2>);
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
