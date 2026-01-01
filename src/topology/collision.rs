@@ -1,9 +1,8 @@
 use crate::{
     gameplay::primitives::build::{
-        AggregateOccupancy, Buildable, IntersectionOccupancy, OccupancyGetter, Occupying, Road,
-        Settlement,
+        AggregateOccupancy, Buildable, IntersectionOccupancy, OccupancyGetter, Road,
     },
-    topology::{HasPos, Intersection, Path, graph::RoadGraph},
+    topology::{HasPos, Intersection},
 };
 
 pub struct CollisionChecker<'a, 'b> {
