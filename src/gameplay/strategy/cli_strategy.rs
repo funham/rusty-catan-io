@@ -1,4 +1,4 @@
-use crate::gameplay::agent::{agent::Agent, action::*};
+use crate::gameplay::agent::{action::*, agent::Agent};
 
 use crate::gameplay::field::state::FieldState;
 use crate::gameplay::primitives::build::{Road, Settlement};
