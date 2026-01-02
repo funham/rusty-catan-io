@@ -64,7 +64,7 @@ impl Intersection {
             .map(|p| {
                 let v = p
                     .dual()
-                    .set()
+                    .as_set()
                     .difference(&self.as_set())
                     .chain(p.as_arr().each_ref())
                     .copied()

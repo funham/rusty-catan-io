@@ -28,7 +28,7 @@ impl RoadGraph {
     /// ---
     /// for inside use only basically
     pub fn add_edge(&mut self, edge: &Path) {
-        let (v1, v2) = edge.intersections();
+        let [v1, v2] = edge.intersections();
         let _ = match self.out.get_mut(&v1) {
             Some(edges) => edges.insert(edge.clone()),
             None => self
@@ -264,7 +264,7 @@ impl RoadGraph {
         }
 
         // Try to extend from both endpoints
-        let (v1, v2) = current_edge.intersections();
+        let [v1, v2] = current_edge.intersections();
 
         // Try extending from v1
         if let Some(edges) = self.out.get(&v1) {
@@ -495,10 +495,10 @@ mod tests {
         graph.add_edge(&p3);
 
         // Get any intersection from p1 to start component collection
-        let (v1_start, _) = p1.intersections();
+        let [v1_start, _] = p1.intersections();
 
         // Get any intersection from p2 to start component collection
-        let (v2_start, _) = p2.intersections();
+        let [v2_start, _] = p2.intersections();
 
         let mut visited = BTreeSet::new();
 
@@ -519,7 +519,7 @@ mod tests {
     #[test]
     fn test_path_intersections() {
         let p = path(h(0, 0), h(1, 0));
-        let (v1, v2) = p.intersections();
+        let [v1, v2] = p.intersections();
 
         // Verify both intersections contain the edge's hexes
         assert!(v1.as_set().contains(&h(0, 0)));
@@ -534,7 +534,7 @@ mod tests {
     #[test]
     fn test_path_opposite() {
         let p = path(h(0, 0), h(1, 0));
-        let (v1, v2) = p.intersections();
+        let [v1, v2] = p.intersections();
 
         assert_eq!(p.opposite(v1).unwrap(), v2);
         assert_eq!(p.opposite(v2).unwrap(), v1);

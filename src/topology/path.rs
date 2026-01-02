@@ -1,14 +1,23 @@
 use std::collections::BTreeSet;
+use std::marker::PhantomData;
 
 use crate::common::FixedSet;
 use crate::topology::hex::*;
 use crate::topology::intersection::*;
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub struct Path(FixedSet<Hex, 2>);
+pub mod repr {
+    pub trait Representation: Clone + Copy + std::fmt::Debug + Ord + Eq {}
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    pub struct Canon;
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    pub struct Dual;
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct PathDual(Hex, Hex);
+    impl Representation for Canon {}
+    impl Representation for Dual {}
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub struct Path<Repr: repr::Representation = repr::Canon>(FixedSet<Hex, 2>, PhantomData<Repr>);
 
 #[derive(Debug)]
 pub enum EdgeConstructError {
@@ -24,6 +33,7 @@ impl TryFrom<(Hex, Hex)> for Path {
         if h1.distance(&h2) == 1 {
             Ok(Self {
                 0: FixedSet::try_from([h1, h2]).unwrap(),
+                1: PhantomData::default(),
             })
         } else {
             Err(EdgeConstructError::NotAdjacentHexes)
@@ -49,6 +59,7 @@ impl TryFrom<(Intersection, Intersection)> for Path {
 
         Ok(Self {
             0: FixedSet::try_from([inter[0], inter[1]]).unwrap(),
+            1: PhantomData::default(),
         })
     }
 }
@@ -59,7 +70,7 @@ pub enum EdgeDualConstructError {
     NotNeighboringVertices,
 }
 
-impl TryFrom<(Intersection, Intersection)> for PathDual {
+impl TryFrom<(Intersection, Intersection)> for Path<repr::Dual> {
     type Error = EdgeDualConstructError;
 
     fn try_from(value: (Intersection, Intersection)) -> Result<Self, Self::Error> {
@@ -70,39 +81,49 @@ impl TryFrom<(Intersection, Intersection)> for PathDual {
             .cloned()
             .collect::<Vec<_>>();
 
-        if inter.len() != 2 {
-            return Err(EdgeDualConstructError::NotNeighboringVertices);
+        match inter.as_slice() {
+            [a, b] => Ok(Self {
+                0: [*a, *b].try_into().unwrap(),
+                1: PhantomData::default(),
+            }),
+            _ => Err(EdgeDualConstructError::NotNeighboringVertices),
         }
-
-        Ok(Self {
-            0: inter.first().unwrap().clone(),
-            1: inter.last().unwrap().clone(),
-        })
     }
 }
 
-impl TryFrom<(Hex, Hex)> for PathDual {
+impl TryFrom<(Hex, Hex)> for Path<repr::Dual> {
     type Error = EdgeDualConstructError;
 
     fn try_from(value: (Hex, Hex)) -> Result<Self, Self::Error> {
-        if value.0.distance(&value.1) == 2 {
-            Ok(Self {
-                0: value.0.min(value.1),
-                1: value.0.max(value.1),
-            })
-        } else {
-            Err(EdgeDualConstructError::NotAdjacentHexes)
+        let (h1, h2) = value;
+
+        let nb1 = h1.neighbors_set();
+        let nb2 = h2.neighbors_set();
+        let intersection = nb1.intersection(&nb2).copied().collect::<Vec<_>>();
+
+        match intersection.as_slice() {
+            [_, _] => Ok(Self(
+                FixedSet::try_from([h1, h2]).unwrap(),
+                PhantomData::default(),
+            )),
+            _ => Err(EdgeDualConstructError::NotAdjacentHexes),
         }
     }
 }
 
-impl PathDual {
-    pub fn set(&self) -> BTreeSet<Hex> {
-        BTreeSet::from([self.0, self.1])
+impl Path<repr::Dual> {
+    pub fn as_set(&self) -> BTreeSet<Hex> {
+        self.0.into()
     }
+
+    pub fn as_arr(&self) -> [Hex; 2] {
+        self.0.into()
+    }
+
     pub fn canon(&self) -> Path {
-        let n0 = self.0.neighbors_set();
-        let n1 = self.1.neighbors_set();
+        let [h1, h2] = self.0.into();
+        let n0 = h1.neighbors_set();
+        let n1 = h2.neighbors_set();
 
         let inter = n0.intersection(&n1).cloned().collect::<BTreeSet<Hex>>();
 
@@ -114,7 +135,7 @@ impl PathDual {
     }
 }
 
-impl Path {
+impl Path<repr::Canon> {
     pub fn as_set(&self) -> BTreeSet<Hex> {
         let (h1, h2) = self.as_pair();
         BTreeSet::from([h1, h2])
@@ -129,7 +150,7 @@ impl Path {
         self.0.clone().into()
     }
 
-    pub fn dual(&self) -> PathDual {
+    pub fn dual(&self) -> Path<repr::Dual> {
         let n0 = self.as_pair().0.neighbors_set();
         let n1 = self.as_pair().1.neighbors_set();
 
@@ -137,33 +158,32 @@ impl Path {
 
         assert_eq!(inter.len(), 2);
 
-        PathDual::try_from((
+        Path::<repr::Dual>::try_from((
             inter.first().unwrap().clone(),
             inter.last().unwrap().clone(),
         ))
         .unwrap()
     }
 
-    pub fn intersections(&self) -> (Intersection, Intersection) {
-        let dual = self.dual();
+    pub fn intersections(&self) -> [Intersection; 2] {
+        let [d1, d2] = self.dual().as_arr();
         let (h1, h2) = self.as_pair();
 
-        (
-            Intersection::try_from((dual.0, h1, h2)).unwrap(),
-            Intersection::try_from((dual.1, h1, h2)).unwrap(),
-        )
+        [
+            Intersection::try_from((d1, h1, h2)).unwrap(),
+            Intersection::try_from((d2, h1, h2)).unwrap(),
+        ]
     }
 
     pub fn intersections_iter(&self) -> impl Iterator<Item = Intersection> {
-        let vs = self.intersections();
-        [vs.0, vs.1].into_iter()
+        self.intersections().into_iter()
     }
 
     /// Err if `v` is not a part of a path
     pub fn opposite(&self, v: Intersection) -> Result<Intersection, ()> {
         match self.intersections() {
-            (v1, v2) if v1 == v => Ok(v2),
-            (v1, v2) if v2 == v => Ok(v1),
+            [v1, v2] if v1 == v => Ok(v2),
+            [v1, v2] if v2 == v => Ok(v1),
             _ => Err(()),
         }
     }
@@ -175,6 +195,8 @@ impl Path {
 
 #[cfg(test)]
 mod tests {
+    use crate::topology::repr::Canon;
+
     use super::*;
 
     // Helper to create hexes
@@ -184,11 +206,11 @@ mod tests {
 
     #[test]
     fn it_works() {
-        Path::try_from((h(0, 1), h(0, 0))).unwrap();
+        Path::<Canon>::try_from((h(0, 1), h(0, 0))).unwrap();
     }
 
     #[test]
     fn intersections_works() {
-        let _ = Path::try_from((h(0, 1), h(0, 0))).unwrap();
+        let _ = Path::<Canon>::try_from((h(0, 1), h(0, 0))).unwrap();
     }
 }
