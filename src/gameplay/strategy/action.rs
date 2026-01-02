@@ -1,28 +1,22 @@
 use crate::gameplay::primitives::{
-    Robbery,
     build::Builds,
     dev_card::DevCardUsage,
     trade::{BankTrade, PersonalTradeOffer, PublicTradeOffer},
 };
 
-#[derive(Debug, Clone, Copy)]
-pub struct RobberyAnswer {
-    pub robbery: Robbery,
-}
-
-pub enum TradeAnswer {
+pub enum TradeAction {
     Accepted,
     Declined,
 }
-pub enum InitialAnswer {
+pub enum InitialAction {
     ThrowDice,
-    UseKnight(RobberyAnswer),
+    UseDevCard(DevCardUsage),
 }
-pub enum AfterKnightAnswer {
+pub enum PostDevCardAction {
     ThrowDice,
 }
 
-pub enum AfterDiceThrowAnswer {
+pub enum PostDiceThrowAnswer {
     UseDevCard(DevCardUsage),
     OfferPublicTrade(PublicTradeOffer),
     OfferPersonalTrade(PersonalTradeOffer),

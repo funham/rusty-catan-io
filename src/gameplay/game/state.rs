@@ -1,11 +1,13 @@
-use crate::gameplay::primitives::{
-    Robbery,
-    bank::{Bank, BankResourceExchangeError, BankView, PlayerResourceExchangeError},
-    build::{BuildDataContainer, Builds, Road},
-    dev_card::DevCardUsage,
-    player::{PlayerDataContainer, PlayerDataProxy, PlayerId, SecuredPlayerData},
-    resource::{Resource, ResourceCollection},
-    turn::GameTurn,
+use crate::{
+    gameplay::primitives::{
+        bank::{Bank, BankResourceExchangeError, BankView, PlayerResourceExchangeError},
+        build::{BuildDataContainer, Builds, City, Road, Settlement},
+        dev_card::DevCardUsage,
+        player::{PlayerDataContainer, PlayerDataProxy, PlayerId, SecuredPlayerData},
+        resource::{Resource, ResourceCollection},
+        turn::GameTurn,
+    },
+    topology::Hex,
 };
 
 use crate::{gameplay::field::state::FieldState, math::dice::DiceRoller, topology::Path};
@@ -142,6 +144,28 @@ impl GameState {
             .collect::<Vec<_>>()
     }
 
+    pub fn is_player_on_hex(&self, player_id: PlayerId, hex: Hex) -> bool {
+        for v in hex.vertices() {
+            let good = self.builds[player_id]
+                .settlements
+                .contains(&Settlement { pos: v })
+                || self.builds[player_id].cities.contains(&City { pos: v });
+
+            if good {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    pub fn players_on_hex(&self, hex: Hex) -> Vec<PlayerId> {
+        self.player_ids_starting_from(0)
+            .into_iter()
+            .filter(|id| self.is_player_on_hex(*id, hex))
+            .collect()
+    }
+
     pub fn count_max_tract_length(&self, player_id: PlayerId) -> u16 {
         self.builds[player_id].roads.find_longest_trail_length() as u16
     }
@@ -180,19 +204,20 @@ impl GameState {
     /// no, not in that way
     pub fn use_robbers(
         &mut self,
-        rob_request: Robbery,
+        rob_hex: Hex,
         robber_id: PlayerId,
+        robbed_id: Option<PlayerId>,
     ) -> Result<(), DevCardUsageError> {
         // move robbers
-        if self.field.field_radius < rob_request.hex.norm() as usize {
+        if self.field.field_radius < rob_hex.norm() as usize {
             return Err(DevCardUsageError::InvalidHex);
         }
 
-        self.field.robber_pos = rob_request.hex;
+        self.field.robber_pos = rob_hex;
 
         // steal card
-        if let Some(robbed_id) = rob_request.robbed {
-            match self.builds.builds_on_hex(rob_request.hex).get(&robbed_id) {
+        if let Some(robbed_id) = robbed_id {
+            match self.builds.builds_on_hex(rob_hex).get(&robbed_id) {
                 Some(v) if !v.settlements.is_empty() || !v.cities.is_empty() => {
                     self.steal(robbed_id, robber_id)
                 }
@@ -207,9 +232,9 @@ impl GameState {
         usage: DevCardUsage,
         user: PlayerId,
     ) -> Result<(), DevCardUsageError> {
-        match usage.clone() {
-            DevCardUsage::Knight(rob_request) => {
-                self.use_robbers(rob_request, user)?;
+        match usage {
+            DevCardUsage::Knight(rob_hex) => {
+                self.use_robbers(rob_hex, user, todo!())?;
             }
             DevCardUsage::YearOfPlenty(list) => {
                 self.use_year_of_plenty(list, user)?;

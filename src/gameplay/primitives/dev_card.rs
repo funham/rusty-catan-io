@@ -1,7 +1,7 @@
 use std::ops::{Index, IndexMut};
 
-use super::{Robbery, resource::Resource};
-use crate::topology::Path;
+use super::resource::Resource;
+use crate::topology::{Hex, Path};
 use num::Integer;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -112,7 +112,7 @@ impl SecuredDevCardData {
 
 #[derive(Debug, Clone)]
 pub enum DevCardUsage {
-    Knight(Robbery),
+    Knight(Hex),
     YearOfPlenty([Resource; 2]),
     RoadBuild([Path; 2]),
     Monopoly(Resource),

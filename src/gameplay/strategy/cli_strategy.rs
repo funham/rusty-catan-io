@@ -4,11 +4,11 @@ use super::*;
 pub struct ConsoleControllerStrategy {}
 
 impl Strategy for ConsoleControllerStrategy {
-    fn move_request_init(&mut self, perspective: &Perspective) -> InitialAnswer {
+    fn move_request_init(&mut self, perspective: &Perspective) -> InitialAction {
         todo!()
     }
 
-    fn move_request_after_dice_throw(&mut self, perspective: &Perspective) -> AfterDiceThrowAnswer {
+    fn move_request_after_dice_throw(&mut self, perspective: &Perspective) -> PostDiceThrowAnswer {
         todo!()
     }
 
@@ -16,11 +16,11 @@ impl Strategy for ConsoleControllerStrategy {
         todo!()
     }
 
-    fn answer_to_trade(&mut self, perspective: &Perspective, trade: &PlayerTrade) -> TradeAnswer {
+    fn answer_to_trade(&mut self, perspective: &Perspective, trade: &PlayerTrade) -> TradeAction {
         todo!()
     }
 
-    fn move_request_rob(&mut self, perspective: &Perspective) -> RobberyAnswer {
+    fn move_request_rob_hex(&mut self, perspective: &Perspective) -> Hex {
         todo!()
     }
 
@@ -29,6 +29,10 @@ impl Strategy for ConsoleControllerStrategy {
     }
 
     fn initialization(&mut self, field: &FieldState, round: u8) -> (Settlement, Road) {
+        todo!()
+    }
+
+    fn move_request_rob_id(&mut self, perspective: &Perspective) -> PlayerId {
         todo!()
     }
 }

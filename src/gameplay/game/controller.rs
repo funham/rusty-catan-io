@@ -6,7 +6,7 @@ use crate::gameplay::primitives::dev_card::DevCardUsage;
 use crate::gameplay::primitives::player::PlayerId;
 use crate::gameplay::primitives::trade::{BankTrade, PersonalTradeOffer, PublicTradeOffer};
 use crate::gameplay::primitives::turn::GameTurn;
-use crate::gameplay::strategy::answer;
+use crate::gameplay::strategy::action;
 use crate::math::dice::DiceRoller;
 use crate::topology::HasPos;
 use crate::{
@@ -118,13 +118,11 @@ impl GameController {
         match params.strategies[params.player_id]
             .move_request_init(&params.game.get_perspective(params.player_id))
         {
-            answer::InitialAnswer::ThrowDice => {
+            action::InitialAction::ThrowDice => {
                 Self::execute_dice_trow(params);
                 Self::handle_dice_thrown(params)
             }
-            answer::InitialAnswer::UseKnight(rob_request) => {
-                Self::handle_dev_card_used(params, DevCardUsage::Knight(rob_request.robbery))
-            }
+            action::InitialAction::UseDevCard(usage) => Self::handle_dev_card_used(params, usage),
         }
     }
 
@@ -132,27 +130,41 @@ impl GameController {
         match params.strategies[params.player_id]
             .move_request_after_dice_throw(&params.game.get_perspective(params.player_id))
         {
-            answer::AfterDiceThrowAnswer::UseDevCard(dev_card_usage) => {
+            action::PostDiceThrowAnswer::UseDevCard(dev_card_usage)
+                if matches!(dev_card_usage, DevCardUsage::Knight(_)) =>
+            {
+                let rob_hex = if let DevCardUsage::Knight(rob_hex) = dev_card_usage {
+                    rob_hex
+                } else {
+                    unreachable!()
+                };
+                let robbed_id = Self::get_robbed_id(params, rob_hex);
+                params
+                    .game
+                    .use_robbers(rob_hex, params.player_id, robbed_id);
+                Self::handle_rest(params)?;
+            }
+            action::PostDiceThrowAnswer::UseDevCard(dev_card_usage) => {
                 if let Err(e) = params.game.use_dev_card(dev_card_usage, params.player_id) {
                     log::error!("{:?}", e);
                 }
                 Self::handle_rest(params)?;
             }
-            answer::AfterDiceThrowAnswer::OfferPublicTrade(public_trade_offer) => {
+            action::PostDiceThrowAnswer::OfferPublicTrade(public_trade_offer) => {
                 // Self::execute_public_trade_offer(params, public_trade_offer, acceptor);
                 log::warn!("Trades are not implemented yet")
             }
-            answer::AfterDiceThrowAnswer::OfferPersonalTrade(personal_trade_offer) => {
+            action::PostDiceThrowAnswer::OfferPersonalTrade(personal_trade_offer) => {
                 // Self::execute_personal_trade_offer(params, personal_trade_offer);
                 log::warn!("Trades are not implemented yet")
             }
-            answer::AfterDiceThrowAnswer::TradeWithBank(bank_trade) => {
+            action::PostDiceThrowAnswer::TradeWithBank(bank_trade) => {
                 Self::execute_bank_trade(params, bank_trade);
             }
-            answer::AfterDiceThrowAnswer::Build(buildable) => {
+            action::PostDiceThrowAnswer::Build(buildable) => {
                 Self::execute_build(params, buildable);
             }
-            answer::AfterDiceThrowAnswer::EndMove => {
+            action::PostDiceThrowAnswer::EndMove => {
                 return Err(());
             }
         }
@@ -183,19 +195,19 @@ impl GameController {
         match params.strategies[params.player_id]
             .move_request_rest(&params.game.get_perspective(params.player_id))
         {
-            answer::FinalStateAnswer::OfferPublicTrade(public_trade_offer) => {
+            action::FinalStateAnswer::OfferPublicTrade(public_trade_offer) => {
                 // Self::execute_public_trade_offer(params, public_trade_offer);
                 log::warn!("Trades are not implemented yet")
             }
-            answer::FinalStateAnswer::OfferPersonalTrade(personal_trade_offer) => {
+            action::FinalStateAnswer::OfferPersonalTrade(personal_trade_offer) => {
                 // Self::execute_personal_trade_offer(params, personal_trade_offer);
                 log::warn!("Trades are not implemented yet")
             }
-            answer::FinalStateAnswer::TradeWithBank(bank_trade) => {
+            action::FinalStateAnswer::TradeWithBank(bank_trade) => {
                 Self::execute_bank_trade(params, bank_trade);
             }
-            answer::FinalStateAnswer::Build(buildable) => Self::execute_build(params, buildable),
-            answer::FinalStateAnswer::EndMove => {
+            action::FinalStateAnswer::Build(buildable) => Self::execute_build(params, buildable),
+            action::FinalStateAnswer::EndMove => {
                 return Err(());
             }
         }
@@ -356,15 +368,28 @@ impl GameController {
             }
         }
 
-        let rob_request: answer::RobberyAnswer = params.strategies[params.player_id]
-            .move_request_rob(&params.game.get_perspective(params.player_id));
+        let robbery_hex = params.strategies[params.player_id]
+            .move_request_rob_hex(&params.game.get_perspective(params.player_id));
+
+        let robbed_id = Self::get_robbed_id(params, robbery_hex);
 
         match params
             .game
-            .use_robbers(rob_request.robbery, params.player_id)
+            .use_robbers(robbery_hex, params.player_id, robbed_id)
         {
             Ok(_) => (),
             Err(e) => log::error!("strategy sent invalid rob request: {:?}", e),
+        }
+    }
+
+    fn get_robbed_id(params: &mut TurnHandlingParams, rob_hex: Hex) -> Option<PlayerId> {
+        match params.game.players_on_hex(rob_hex).as_slice() {
+            [] => None,
+            [robbed_id] => Some(*robbed_id),
+            _ => Some(
+                params.strategies[params.player_id]
+                    .move_request_rob_id(&params.game.get_perspective(params.player_id)),
+            ),
         }
     }
 
