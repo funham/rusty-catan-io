@@ -3,11 +3,12 @@ pub mod gameplay;
 pub mod math;
 pub mod topology;
 
-pub use gameplay::strategy;
+pub use gameplay::agent;
 
 use clap::Parser;
 
 use crate::gameplay::{
+    agent::agent::Agent,
     field::state::FieldBuildParam,
     game::{
         controller::{GameController, GameResult},
@@ -38,19 +39,16 @@ pub struct Args {
 }
 
 pub struct GameStarter {
-    strats: Vec<Box<dyn strategy::Strategy>>,
+    strats: Vec<Box<dyn Agent>>,
     game: GameState,
 }
 
 impl GameStarter {
     pub fn new(args: Args) -> Self {
         let n_players = args.strategies.len();
-        let mut strats: Vec<Box<dyn strategy::Strategy>> = Vec::new();
-        for _strat_name in args.strategies {
-            log::warn!("todo: implement strategy table");
-            strats.push(Box::new(
-                strategy::lazy_ass_strategy::LazyAssStrategy::default(),
-            ));
+        let mut strats: Vec<Box<dyn Agent>> = Vec::new();
+        for strat_name in args.strategies {
+            strats.push(agent::agent::AgentFactory::fetch(&strat_name));
         }
 
         let field_build_param = FieldBuildParam::try_new(

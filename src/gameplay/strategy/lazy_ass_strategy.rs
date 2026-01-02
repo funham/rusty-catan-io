@@ -1,9 +1,16 @@
-use super::*;
+use crate::gameplay::agent::{action::*, agent::Agent};
+
+use crate::gameplay::field::state::FieldState;
+use crate::gameplay::primitives::build::{Road, Settlement};
+use crate::gameplay::primitives::player::PlayerId;
+use crate::gameplay::primitives::trade::PlayerTrade;
+use crate::gameplay::{game::state::Perspective, primitives::resource::ResourceCollection};
+use crate::topology::Hex;
 
 #[derive(Debug, Default)]
 pub struct LazyAssStrategy;
 
-impl Strategy for LazyAssStrategy {
+impl Agent for LazyAssStrategy {
     fn move_request_init(&mut self, _: &Perspective) -> InitialAction {
         InitialAction::ThrowDice
     }

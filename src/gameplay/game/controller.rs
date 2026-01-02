@@ -1,4 +1,5 @@
 use super::state::GameState;
+use crate::gameplay::agent::action;
 use crate::gameplay::game::init::GameInitializationState;
 use crate::gameplay::primitives::HexResource;
 use crate::gameplay::primitives::build::{BuildingError, Builds, City, Settlement};
@@ -6,13 +7,12 @@ use crate::gameplay::primitives::dev_card::DevCardUsage;
 use crate::gameplay::primitives::player::PlayerId;
 use crate::gameplay::primitives::trade::{BankTrade, PersonalTradeOffer, PublicTradeOffer};
 use crate::gameplay::primitives::turn::GameTurn;
-use crate::gameplay::strategy::action;
 use crate::math::dice::DiceRoller;
 use crate::topology::HasPos;
 use crate::{
+    agent::agent::Agent,
     gameplay::primitives::resource::ResourceCollection,
     math::dice::DiceVal,
-    strategy::Strategy,
     topology::{Hex, Intersection},
 };
 use std::collections::BTreeSet;
@@ -23,11 +23,10 @@ pub enum GameResult {
 }
 
 /// convinient struct with neccessary info about player who's turn it currently is
-#[derive(Debug)]
 pub struct TurnHandlingParams<'a, 'b> {
     pub(super) player_id: PlayerId,
     pub(super) game: &'a mut GameState,
-    pub(super) strategies: &'b mut Vec<Box<dyn Strategy>>,
+    pub(super) strategies: &'b mut Vec<Box<dyn Agent>>,
 }
 
 #[derive(Debug, Default)]
@@ -36,7 +35,7 @@ pub struct GameController {}
 impl GameController {
     pub fn init(
         mut game_init: GameInitializationState,
-        strategies: &mut Vec<Box<dyn Strategy>>,
+        strategies: &mut Vec<Box<dyn Agent>>,
         dice: Box<dyn DiceRoller>,
     ) -> GameState {
         while game_init.turn.get_rounds_played() < 2 {
@@ -72,7 +71,7 @@ impl GameController {
     }
 
     // execute game untill it's over
-    pub fn run(game: &mut GameState, strategies: &mut Vec<Box<dyn Strategy>>) -> GameResult {
+    pub fn run(game: &mut GameState, strategies: &mut Vec<Box<dyn Agent>>) -> GameResult {
         let mut params = TurnHandlingParams {
             player_id: 0,
             game,
@@ -185,7 +184,7 @@ impl GameController {
         }
 
         let _ = params.strategies[params.player_id]
-            .move_request_after_knight(&params.game.get_perspective(params.player_id)); // dice throw (must be manual for players)
+            .move_request_after_dev_card(&params.game.get_perspective(params.player_id)); // dice throw (must be manual for players)
 
         Self::execute_dice_trow(params);
         Self::handle_rest(params)

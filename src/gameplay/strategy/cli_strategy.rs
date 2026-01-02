@@ -1,9 +1,16 @@
-use super::*;
+use crate::gameplay::agent::{agent::Agent, action::*};
+
+use crate::gameplay::field::state::FieldState;
+use crate::gameplay::primitives::build::{Road, Settlement};
+use crate::gameplay::primitives::player::PlayerId;
+use crate::gameplay::primitives::trade::PlayerTrade;
+use crate::gameplay::{game::state::Perspective, primitives::resource::ResourceCollection};
+use crate::topology::Hex;
 
 #[derive(Debug)]
 pub struct ConsoleControllerStrategy {}
 
-impl Strategy for ConsoleControllerStrategy {
+impl Agent for ConsoleControllerStrategy {
     fn move_request_init(&mut self, perspective: &Perspective) -> InitialAction {
         todo!()
     }
