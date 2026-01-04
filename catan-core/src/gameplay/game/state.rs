@@ -33,11 +33,8 @@ pub struct Perspective<'a> {
     pub secured_players_info: Vec<SecuredPlayerData>,
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OwnedPerspective {
-    
-}
+pub struct OwnedPerspective {}
 
 impl<'a> Perspective<'a> {
     /// hint: you can call .cycle() on it

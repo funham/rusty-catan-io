@@ -73,7 +73,7 @@ impl Hex {
     /// # Examples
     ///
     /// ```
-    /// use rusty_catan_io::topology::Hex;
+    /// use catan_core::topology::Hex;
     ///
     /// let center = Hex::new(0, 0);
     /// let neighbors = center.neighbors();

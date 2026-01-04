@@ -1,6 +1,6 @@
+use crate::protocol::*;
 use axum::extract::ws::{Message, WebSocket};
 use tokio::sync::mpsc::{Receiver, Sender};
-use crate::protocol::*;
 
 pub struct PlayerSession {
     socket: WebSocket,
