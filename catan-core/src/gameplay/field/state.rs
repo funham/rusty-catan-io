@@ -81,6 +81,17 @@ pub struct FieldBuildParam {
     pub port_arrangement: PortArrangement,
 }
 
+impl Default for FieldBuildParam {
+    fn default() -> Self {
+        Self {
+            n_players: Default::default(),
+            field_radius: Default::default(),
+            hex_arrangement: Default::default(),
+            port_arrangement: Default::default(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum FieldBuildError {
     WrongAmountOfHexesProvided,

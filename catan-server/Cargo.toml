@@ -11,3 +11,5 @@ serde_json = "1"
 
 catan-core = { path = "../catan-core" }
 catan-agents = { path = "../catan-agents" }
+log = "0.4.29"
+

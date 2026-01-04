@@ -1,8 +1,6 @@
 use crate::gameplay::{
-    field::{
-        HexArrangement,
-        state::{FieldBuildParam, FieldState},
-    },
+    field::state::{FieldBuildParam, FieldState},
+    game::state::GameState,
     primitives::{
         bank::Bank,
         build::BuildDataContainer,
@@ -19,6 +17,18 @@ pub struct GameInitializationState {
     pub builds: BuildDataContainer,
 }
 
+impl Default for GameInitializationState {
+    fn default() -> Self {
+        Self {
+            field: todo!(),
+            turn: todo!(),
+            bank: Default::default(),
+            players: Default::default(),
+            builds: Default::default(),
+        }
+    }
+}
+
 impl GameInitializationState {
     pub fn new(field_build_param: FieldBuildParam) -> Self {
         Self {
@@ -28,5 +38,9 @@ impl GameInitializationState {
             players: PlayerDataContainer::default(),
             builds: BuildDataContainer::default(),
         }
+    }
+
+    pub fn promote(self) -> GameState {
+        todo!()
     }
 }

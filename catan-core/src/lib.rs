@@ -7,16 +7,43 @@ pub mod topology;
 
 pub use gameplay::agent;
 
+use crate::gameplay::{
+    agent::Agent,
+    game::{init::GameInitializationState, state::GameState},
+};
+
 #[derive(Debug, Serialize, Deserialize)]
 pub enum GameEvent {}
 
-pub struct GameRunner {}
+type Agents = [Box<dyn Agent>];
+type AgentsOwned = Vec<Box<dyn Agent>>;
 
-impl GameRunner {
-    pub fn new() -> Self {
+pub struct GameInitializer {
+    state: GameInitializationState,
+    agents: AgentsOwned,
+}
+
+pub struct GameRunner {
+    state: GameState,
+    agents: AgentsOwned,
+}
+
+impl GameInitializer {
+    pub fn new(state: GameInitializationState, agents: AgentsOwned) -> Self {
         todo!()
     }
 
+    pub fn init_game(&mut self) -> GameRunner {
+        todo!("init game logic");
+
+        GameRunner {
+            state: self.state.promote(),
+            agents: self.agents,
+        }
+    }
+}
+
+impl GameRunner {
     pub fn run(&mut self) {
         todo!()
     }
