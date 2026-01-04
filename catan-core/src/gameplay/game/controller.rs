@@ -105,7 +105,7 @@ impl GameController {
             .dev_cards_reset_queue();
 
         // functional state machine handling
-        GameController::handle_move_init(params);
+        let _ = GameController::handle_move_init(params);
         // end of the move; cant't send request to a strategy
         // ... move ending routines
         Ok(())
@@ -138,7 +138,7 @@ impl GameController {
                     unreachable!()
                 };
                 let robbed_id = Self::get_robbed_id(params, rob_hex);
-                params
+                let _ = params
                     .game
                     .use_robbers(rob_hex, params.player_id, robbed_id);
                 Self::handle_rest(params)?;
