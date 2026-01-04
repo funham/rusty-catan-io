@@ -1,4 +1,6 @@
 use itertools::Itertools;
+use serde::Deserialize;
+use serde::Serialize;
 use std::collections::BTreeSet;
 
 use crate::common::FixedSet;
@@ -7,6 +9,24 @@ use crate::topology::path::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct Intersection(FixedSet<Hex, 3>);
+
+impl Serialize for Intersection {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        todo!()
+    }
+}
+
+impl<'de> Deserialize<'de> for Intersection {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        todo!()
+    }
+}
 
 #[derive(Debug)]
 pub enum VertexConstructError {

@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::{
     gameplay::primitives::{
         bank::{Bank, BankResourceExchangeError, BankView, PlayerResourceExchangeError},
@@ -31,11 +33,21 @@ pub struct Perspective<'a> {
     pub secured_players_info: Vec<SecuredPlayerData>,
 }
 
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OwnedPerspective {
+    
+}
+
 impl<'a> Perspective<'a> {
     /// hint: you can call .cycle() on it
     pub fn turn_ids_from_next(&self) -> impl Iterator<Item = PlayerId> {
         let n_players = self.secured_players_info.len() + 1;
         (self.player_id + 1..n_players).chain(0..=self.player_id)
+    }
+
+    pub fn to_owned(&self) -> OwnedPerspective {
+        todo!()
     }
 }
 

@@ -1,6 +1,9 @@
 use std::collections::BTreeSet;
 use std::marker::PhantomData;
 
+use serde::Deserialize;
+use serde::Serialize;
+
 use crate::common::FixedSet;
 use crate::topology::hex::*;
 use crate::topology::intersection::*;
@@ -18,6 +21,24 @@ pub mod repr {
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct Path<Repr: repr::Representation = repr::Canon>(FixedSet<Hex, 2>, PhantomData<Repr>);
+
+impl Serialize for Path {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        todo!()
+    }
+}
+
+impl<'de> Deserialize<'de> for Path {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        todo!()
+    }
+}
 
 #[derive(Debug)]
 pub enum EdgeConstructError {

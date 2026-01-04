@@ -1,6 +1,6 @@
 use axum::extract::ws::{Message, WebSocket};
-use crate::protocol::*;
 use tokio::sync::mpsc::{Receiver, Sender};
+use crate::protocol::*;
 
 pub struct PlayerSession {
     socket: WebSocket,
@@ -34,10 +34,7 @@ impl PlayerSession {
 
                 Some(msg) = self.from_game.recv() => {
                     let text = serde_json::to_string(&msg).unwrap();
-                    self.socket
-                        .send(Message::Text(text))
-                        .await
-                        .unwrap();
+                    self.socket.send(Message::Text(text)).await.unwrap();
                 }
             }
         }

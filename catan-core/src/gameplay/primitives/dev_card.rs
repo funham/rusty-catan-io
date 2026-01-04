@@ -3,6 +3,7 @@ use std::ops::{Index, IndexMut};
 use super::resource::Resource;
 use crate::topology::{Hex, Path};
 use num::Integer;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum UsableDevCardKind {
@@ -110,7 +111,7 @@ impl SecuredDevCardData {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DevCardUsage {
     Knight(Hex),
     YearOfPlenty([Resource; 2]),

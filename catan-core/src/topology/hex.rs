@@ -1,10 +1,11 @@
 use std::{collections::BTreeSet, hash::Hash};
 
 use itertools::Itertools;
+use serde::{Deserialize, Serialize};
 
 use crate::topology::Intersection;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Hex {
     pub q: i32,
     pub r: i32,

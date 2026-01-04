@@ -1,25 +1,21 @@
-use serde::{Deserialize, Serialize};
-
-use crate::gameplay::primitives::{
+use catan_core::gameplay::primitives::{
     build::Builds,
     dev_card::DevCardUsage,
     trade::{BankTrade, PersonalTradeOffer, PublicTradeOffer},
 };
-#[derive(Debug, Serialize, Deserialize)]
+
 pub enum TradeAction {
     Accepted,
     Declined,
 }
-#[derive(Debug, Serialize, Deserialize)]
 pub enum InitialAction {
     ThrowDice,
     UseDevCard(DevCardUsage),
 }
-#[derive(Debug, Serialize, Deserialize)]
 pub enum PostDevCardAction {
     ThrowDice,
 }
-#[derive(Debug, Serialize, Deserialize)]
+
 pub enum PostDiceThrowAnswer {
     UseDevCard(DevCardUsage),
     OfferPublicTrade(PublicTradeOffer),
@@ -28,7 +24,7 @@ pub enum PostDiceThrowAnswer {
     Build(Builds),
     EndMove,
 }
-#[derive(Debug, Serialize)]
+
 pub enum FinalStateAnswer {
     OfferPublicTrade(PublicTradeOffer),
     OfferPersonalTrade(PersonalTradeOffer),

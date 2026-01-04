@@ -1,12 +1,10 @@
-use serde::{Deserialize, Serialize};
-
-use crate::{
+use catan_core::{
     agent::action::{
         FinalStateAnswer, InitialAction, PostDevCardAction, PostDiceThrowAnswer, TradeAction,
     },
     gameplay::{
         field::state::FieldState,
-        game::state::{OwnedPerspective, Perspective},
+        game::state::Perspective,
         primitives::{
             build::{Road, Settlement},
             player::PlayerId,
@@ -17,18 +15,6 @@ use crate::{
     },
     topology::Hex,
 };
-
-#[derive(Debug, Serialize, Deserialize)]
-pub enum AgentRequest {
-    Init(OwnedPerspective),
-    AfterDice(OwnedPerspective),
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub enum AgentResponse {
-    Init(InitialAction),
-    AfterDice(PostDiceThrowAnswer),
-}
 
 pub trait Agent {
     /* methods used during your turn */
@@ -48,11 +34,11 @@ pub trait Agent {
     fn drop_half(&mut self, perspective: &Perspective) -> ResourceCollection;
 }
 
-pub struct AgentFactory;
+// pub struct AgentFactory;
 
-impl AgentFactory {
-    pub fn fetch(_name: &str) -> Box<dyn Agent> {
-        log::warn!("todo: implement strategy table");
-        Box::new(LazyAssStrategy)
-    }
-}
+// impl AgentFactory {
+//     pub fn fetch(_name: &str) -> Box<dyn Agent> {
+//         log::warn!("todo: implement strategy table");
+//         Box::new(LazyAssStrategy)
+//     }
+// }

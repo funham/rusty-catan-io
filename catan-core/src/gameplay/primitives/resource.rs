@@ -4,8 +4,9 @@ use std::{
 };
 
 use rand::Rng;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Resource {
     Brick,
     Wood,
@@ -21,7 +22,7 @@ impl Resource {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 pub struct ResourceCollection {
     pub brick: u16,
     pub wood: u16,

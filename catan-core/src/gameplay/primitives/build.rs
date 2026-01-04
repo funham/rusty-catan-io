@@ -3,6 +3,8 @@ use std::{
     ops::{Index, IndexMut, Not},
 };
 
+use serde::{Deserialize, Serialize};
+
 use crate::{
     gameplay::{
         field::state::BuildCollection,
@@ -290,7 +292,7 @@ impl<T: Occupying + HasPos<Pos = Intersection>> OccupancyGetter for T {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Serialize, Deserialize)]
 pub struct Settlement {
     pub pos: Intersection,
 }
@@ -301,7 +303,7 @@ impl Settlement {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Serialize, Deserialize)]
 pub struct City {
     pub pos: Intersection,
 }
@@ -312,12 +314,12 @@ impl City {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Road {
     pub pos: Path,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum Builds {
     Settlement(Settlement),
     City(City),

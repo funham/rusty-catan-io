@@ -1,9 +1,28 @@
+use serde::{Deserialize, Serialize};
+
 pub mod common;
 pub mod gameplay;
 pub mod math;
 pub mod topology;
 
 pub use gameplay::agent;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum GameEvent {}
+
+pub struct GameRunner {}
+
+impl GameRunner {
+    pub fn new() -> Self {
+        todo!()
+    }
+
+    pub fn run(&mut self) {
+        todo!()
+    }
+}
+
+/*
 
 use clap::Parser;
 
@@ -69,3 +88,5 @@ impl GameStarter {
         GameController::run(&mut self.game, &mut self.strats)
     }
 }
+
+*/
