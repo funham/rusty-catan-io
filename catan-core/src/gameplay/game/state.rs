@@ -2,49 +2,46 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     gameplay::primitives::{
-        bank::{Bank, BankResourceExchangeError, BankView, PlayerResourceExchangeError},
+        bank::{Bank, BankResourceExchangeError, BankViewOwned, PlayerResourceExchangeError},
         build::{BuildDataContainer, Builds, City, Road, Settlement},
         dev_card::DevCardUsage,
-        player::{PlayerDataContainer, PlayerDataProxy, PlayerId, SecuredPlayerData},
+        player::{PlayerData, PlayerDataContainer, PlayerId, SecuredPlayerData},
         resource::{Resource, ResourceCollection},
         turn::GameTurn,
     },
     topology::Hex,
 };
 
-use crate::{gameplay::field::state::FieldState, math::dice::DiceRoller, topology::Path};
+use crate::{gameplay::field::state::FieldState, topology::Path};
 
 #[derive(Debug)]
 pub struct GameState {
     pub field: FieldState,
-    pub dice: Box<dyn DiceRoller>,
     pub bank: Bank,
     pub turn: GameTurn,
     pub players: PlayerDataContainer,
     pub builds: BuildDataContainer,
 }
 
-/// player's perspective on a game, used in `Strategy`
-pub struct Perspective<'a> {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VisiblePlayer {
     pub player_id: PlayerId,
-    pub player_view: PlayerDataProxy<'a>,
-    pub field: &'a FieldState,
-    pub bank: BankView<'a>,
-    pub secured_players_info: Vec<SecuredPlayerData>,
+    pub public_data: SecuredPlayerData,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OwnedPerspective {}
+pub struct Perspective {
+    pub player_id: PlayerId,
+    pub player_view: PlayerData,
+    pub field: FieldState,
+    pub bank: BankViewOwned,
+    pub other_players: Vec<VisiblePlayer>,
+}
 
-impl<'a> Perspective<'a> {
-    /// hint: you can call .cycle() on it
+impl Perspective {
     pub fn turn_ids_from_next(&self) -> impl Iterator<Item = PlayerId> {
-        let n_players = self.secured_players_info.len() + 1;
-        (self.player_id + 1..n_players).chain(0..=self.player_id)
-    }
-
-    pub fn to_owned(&self) -> OwnedPerspective {
-        todo!()
+        let n_players = self.other_players.len() + 1;
+        (self.player_id + 1..n_players).chain(0..self.player_id)
     }
 }
 
@@ -58,19 +55,26 @@ pub enum DevCardUsageError {
 }
 
 impl GameState {
-    pub fn get_perspective(&self, player_id: PlayerId) -> Perspective {
-        let opponents = self
+    pub fn perspective(&self, player_id: PlayerId) -> Perspective {
+        let other_players = self
             .players
             .iter()
-            .map(|p| SecuredPlayerData::from(&p))
-            .collect::<Vec<_>>();
+            .enumerate()
+            .filter(|(id, _)| *id != player_id)
+            .map(|(id, player)| VisiblePlayer {
+                player_id: id,
+                public_data: SecuredPlayerData::from(&player),
+            })
+            .collect();
 
         Perspective {
             player_id,
-            player_view: self.players.get(player_id),
-            field: &self.field,
-            bank: self.bank.view(),
-            secured_players_info: opponents,
+            player_view: self.players.get(player_id).resources().clone().into_player_data(
+                self.players.get(player_id).dev_cards().clone(),
+            ),
+            field: self.field.clone(),
+            bank: self.bank.public_view(),
+            other_players,
         }
     }
 
@@ -90,7 +94,7 @@ impl GameState {
         player_id: PlayerId,
     ) -> Result<(), BankResourceExchangeError> {
         ResourceCollection::transfer(
-            &mut self.players.get_mut(player_id).resources(),
+            self.players.get_mut(player_id).resources(),
             &mut self.bank.resources,
             resources,
             BankResourceExchangeError::AccountIsShort { id: player_id },
@@ -104,7 +108,7 @@ impl GameState {
     ) -> Result<(), BankResourceExchangeError> {
         ResourceCollection::transfer(
             &mut self.bank.resources,
-            &mut self.players.get_mut(player_id).resources(),
+            self.players.get_mut(player_id).resources(),
             resources,
             BankResourceExchangeError::BankIsShort,
         )
@@ -139,15 +143,12 @@ impl GameState {
             (_, false) => Err(PlayerResourceExchangeError::AccountIsShort { id: rhs.0 }),
             _ => {
                 self.players_resource_transfer(lhs.0, rhs.0, lhs.1)?;
-                self.players_resource_transfer(lhs.0, rhs.0, lhs.1)
+                self.players_resource_transfer(rhs.0, lhs.0, rhs.1)
             }
         }
     }
 
-    pub fn player_ids_starting_from(
-        &self,
-        start_id: PlayerId,
-    ) -> impl IntoIterator<Item = PlayerId> + use<> {
+    pub fn player_ids_starting_from(&self, start_id: PlayerId) -> Vec<PlayerId> {
         (start_id..self.players.count())
             .chain(0..start_id)
             .collect::<Vec<_>>()
@@ -179,9 +180,8 @@ impl GameState {
         self.builds[player_id].roads.find_longest_trail_length() as u16
     }
 
-    /// goes through the players and if one have >9 vp returns it
     pub fn check_win_condition(&self) -> Option<PlayerId> {
-        const VP_TO_WIN: u8 = 10; // TODO: move outside to config
+        const VP_TO_WIN: u8 = 10;
         for player_id in self.player_ids_starting_from(0) {
             let pure_vp = self.count_vp_without_track_and_army(player_id);
 
@@ -194,7 +194,7 @@ impl GameState {
             } else {
                 0
             };
-            if pure_vp + tract_pts + army_pts > VP_TO_WIN as u16 {
+            if pure_vp + tract_pts + army_pts >= VP_TO_WIN as u16 {
                 return Some(player_id);
             }
         }
@@ -210,21 +210,18 @@ impl GameState {
         score
     }
 
-    /// no, not in that way
     pub fn use_robbers(
         &mut self,
         rob_hex: Hex,
         robber_id: PlayerId,
         robbed_id: Option<PlayerId>,
     ) -> Result<(), DevCardUsageError> {
-        // move robbers
-        if self.field.field_radius < rob_hex.norm() as usize {
+        if (self.field.arrangement.field_radius as u32) < rob_hex.norm() {
             return Err(DevCardUsageError::InvalidHex);
         }
 
         self.field.robber_pos = rob_hex;
 
-        // steal card
         if let Some(robbed_id) = robbed_id {
             match self.builds.builds_on_hex(rob_hex).get(&robbed_id) {
                 Some(v) if !v.settlements.is_empty() || !v.cities.is_empty() => {
@@ -242,8 +239,8 @@ impl GameState {
         user: PlayerId,
     ) -> Result<(), DevCardUsageError> {
         match usage {
-            DevCardUsage::Knight(rob_hex) => {
-                self.use_robbers(rob_hex, user, todo!())?;
+            DevCardUsage::Knight(_rob_hex) => {
+                return Err(DevCardUsageError::InvalidRobbery);
             }
             DevCardUsage::YearOfPlenty(list) => {
                 self.use_year_of_plenty(list, user)?;
@@ -256,10 +253,11 @@ impl GameState {
             }
         }
 
-        if let Err(_) = self
+        if self
             .players
             .get_mut(user)
             .dev_cards_move_to_used(usage.card_kind())
+            .is_err()
         {
             return Err(DevCardUsageError::CardNotFoundInInventory);
         }
@@ -267,9 +265,6 @@ impl GameState {
         Ok(())
     }
 
-    /* private helper functions */
-
-    /// steal random card from another player
     fn steal(&mut self, robbed_id: PlayerId, robber_id: PlayerId) {
         let robbed_account = self.players.get(robbed_id).resources();
         let stolen = robbed_account.peek_random();
@@ -286,7 +281,7 @@ impl GameState {
         user: PlayerId,
     ) -> Result<(), DevCardUsageError> {
         for resource in list {
-            if let Err(_) = self.transfer_from_bank(resource.into(), user) {
+            if self.transfer_from_bank(resource.into(), user).is_err() {
                 return Err(DevCardUsageError::BankIsShort);
             }
         }
@@ -322,5 +317,22 @@ impl GameState {
         }
 
         Ok(())
+    }
+}
+
+trait IntoPlayerData {
+    fn into_player_data(self, dev_cards: crate::gameplay::primitives::dev_card::DevCardData)
+    -> PlayerData;
+}
+
+impl IntoPlayerData for ResourceCollection {
+    fn into_player_data(
+        self,
+        dev_cards: crate::gameplay::primitives::dev_card::DevCardData,
+    ) -> PlayerData {
+        PlayerData {
+            resources: self,
+            dev_cards,
+        }
     }
 }

@@ -1,12 +1,13 @@
 use std::fmt::Debug;
 
 use rand::{Rng, SeedableRng, rngs::SmallRng};
+use serde::{Deserialize, Serialize};
 
 use crate::math::probability::{Probability, Probable};
 
 /// Value that can be produced by rolling two D6's
 /// `DiceVal \in [2..12]` (11 possible states)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct DiceVal(u8);
 
 impl DiceVal {

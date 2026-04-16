@@ -15,7 +15,8 @@ impl Serialize for Intersection {
     where
         S: serde::Serializer,
     {
-        todo!()
+        let hexes: [Hex; 3] = self.0.into();
+        hexes.serialize(serializer)
     }
 }
 
@@ -24,13 +25,20 @@ impl<'de> Deserialize<'de> for Intersection {
     where
         D: serde::Deserializer<'de>,
     {
-        todo!()
+        let hexes = <[Hex; 3]>::deserialize(deserializer)?;
+        Self::try_from(hexes).map_err(serde::de::Error::custom)
     }
 }
 
 #[derive(Debug)]
 pub enum VertexConstructError {
     NotAdjacentHexes,
+}
+
+impl std::fmt::Display for VertexConstructError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self:?}")
+    }
 }
 
 impl TryFrom<(Hex, Hex, Hex)> for Intersection {

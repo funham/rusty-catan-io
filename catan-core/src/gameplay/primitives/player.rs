@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::gameplay::primitives::{
     dev_card::{
         DevCardData, DevCardDataPlayingError, DevCardKind, SecuredDevCardData, UsableDevCardKind,
@@ -7,13 +9,20 @@ use crate::gameplay::primitives::{
 
 pub type PlayerId = usize;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct PlayerDataContainer {
     players: Vec<PlayerData>,
     best_army: Option<PlayerId>,
 }
 
 impl PlayerDataContainer {
+    pub fn new(n_players: usize) -> Self {
+        Self {
+            players: vec![PlayerData::default(); n_players],
+            best_army: None,
+        }
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = PlayerDataProxy> {
         (0..self.players.len()).map(|id| self.get(id))
     }
@@ -98,7 +107,7 @@ impl PlayerDataContainer {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct PlayerData {
     pub resources: ResourceCollection,
     pub dev_cards: DevCardData,
@@ -160,6 +169,7 @@ impl<'a> PlayerDataProxyMut<'a> {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecuredPlayerData {
     pub dev_cards: SecuredDevCardData,
     pub resource_card_count: u16,

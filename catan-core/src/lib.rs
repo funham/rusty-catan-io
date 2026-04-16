@@ -7,15 +7,18 @@ pub mod topology;
 
 pub use gameplay::agent;
 
-use crate::gameplay::{
-    agent::Agent,
-    game::{init::GameInitializationState, state::GameState},
+use crate::{
+    gameplay::{
+        agent::Agent,
+        game::{controller::GameController, init::GameInitializationState, state::GameState},
+    },
+    math::dice::DiceRoller,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum GameEvent {}
 
-type Agents = [Box<dyn Agent>];
+// type Agents = [Box<dyn Agent>];
 type AgentsOwned = Vec<Box<dyn Agent>>;
 
 pub struct GameInitializer {
@@ -30,90 +33,19 @@ pub struct GameRunner {
 
 impl GameInitializer {
     pub fn new(state: GameInitializationState, agents: AgentsOwned) -> Self {
-        todo!()
+        Self { state, agents }
     }
 
-    pub fn init_game(&mut self) -> GameRunner {
-        todo!("init game logic");
+    pub fn init_game(self) -> GameRunner {
+        let mut agents = self.agents;
+        let state = GameController::init(self.state, &mut agents);
 
-        GameRunner {
-            state: self.state.promote(),
-            agents: self.agents,
-        }
+        GameRunner { state, agents }
     }
 }
 
 impl GameRunner {
-    pub fn run(&mut self) {
-        todo!()
+    pub fn run(&mut self, dice: &mut dyn DiceRoller) {
+        GameController::run(&mut self.state, &mut self.agents, dice);
     }
 }
-
-/*
-
-use clap::Parser;
-
-use crate::gameplay::{
-    agent::agent::Agent,
-    field::state::FieldBuildParam,
-    game::{
-        controller::{GameController, GameResult},
-        init::GameInitializationState,
-        state::GameState,
-    },
-};
-
-/// A simple program to greet a person
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
-pub struct Args {
-    /// strategy names
-    #[arg(short, long)]
-    pub strategies: Vec<String>,
-
-    /// field size
-    #[arg(short, long)]
-    pub field_size: usize,
-
-    /// filename from which field arrangement will be taken
-    #[arg(short, long)]
-    pub arrangement: String,
-
-    /// dice option
-    #[arg(short, long)]
-    pub dice: String,
-}
-
-pub struct GameStarter {
-    strats: Vec<Box<dyn Agent>>,
-    game: GameState,
-}
-
-impl GameStarter {
-    pub fn new(args: Args) -> Self {
-        let n_players = args.strategies.len();
-        let mut strats: Vec<Box<dyn Agent>> = Vec::new();
-        for strat_name in args.strategies {
-            strats.push(agent::agent::AgentFactory::fetch(&strat_name));
-        }
-
-        let field_build_param = FieldBuildParam::try_new(
-            n_players,
-            6,
-            todo!("read from file"),
-            todo!("read from file"),
-        )
-        .expect("Couldn't build the field: invalid arguments");
-
-        let game_init = GameInitializationState::new(field_build_param);
-        let game = GameController::init(game_init, &mut strats, todo!());
-
-        Self { strats, game }
-    }
-
-    pub fn run(mut self) -> GameResult {
-        GameController::run(&mut self.game, &mut self.strats)
-    }
-}
-
-*/

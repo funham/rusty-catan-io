@@ -5,7 +5,7 @@ use crate::topology::{Hex, Path};
 use num::Integer;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum UsableDevCardKind {
     Knight,
     YearOfPlenty,
@@ -13,13 +13,13 @@ pub enum UsableDevCardKind {
     Monopoly,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum DevCardKind {
     Usable(UsableDevCardKind),
     VictoryPoint,
 }
 
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct UsableDevCardCollection {
     data: [<UsableDevCardCollection as Index<UsableDevCardKind>>::Output; 4],
 }
@@ -61,7 +61,7 @@ impl IndexMut<UsableDevCardKind> for UsableDevCardCollection {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct DevCardData {
     pub queued: UsableDevCardCollection, // unavailable in current round
     pub active: UsableDevCardCollection, // ready to be played
@@ -99,6 +99,7 @@ impl DevCardData {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecuredDevCardData {
     pub(crate) queued: u16,
     pub(crate) active: u16,
@@ -124,7 +125,7 @@ impl DevCardUsage {
         match self {
             DevCardUsage::Knight(_) => UsableDevCardKind::Knight,
             DevCardUsage::YearOfPlenty(_) => UsableDevCardKind::YearOfPlenty,
-            DevCardUsage::RoadBuild(_) => UsableDevCardKind::YearOfPlenty,
+            DevCardUsage::RoadBuild(_) => UsableDevCardKind::RoadBuild,
             DevCardUsage::Monopoly(_) => UsableDevCardKind::Monopoly,
         }
     }

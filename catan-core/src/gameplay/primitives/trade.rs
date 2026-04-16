@@ -25,7 +25,7 @@ pub struct BankTrade {
     pub take: Resource,
     pub kind: BankTradeKind,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerTrade {
     pub give: ResourceCollection,
     pub take: ResourceCollection,

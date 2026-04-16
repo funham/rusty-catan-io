@@ -3,6 +3,7 @@ use std::thread;
 
 use catan_agents::remote_agent::RemoteAgent;
 use catan_core::agent::{Agent, AgentRequest, AgentResponse};
+use catan_core::math::dice::RandomDiceRoller;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use catan_core::GameInitializer;
@@ -43,8 +44,8 @@ pub fn spawn_game(mut from_player: Receiver<ClientToServer>, to_player: Sender<S
         // Build and run game (blocking)
         let agents: Vec<Box<dyn Agent>> = vec![Box::new(agent)];
         let init_state = GameInitializationState::default();
-        let mut runner = GameInitializer::new(init_state, agents);
+        let runner = GameInitializer::new(init_state, agents);
         let mut runner = runner.init_game();
-        let _ = runner.run();
+        let _ = runner.run(&mut RandomDiceRoller::new());
     });
 }

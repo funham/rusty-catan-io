@@ -27,7 +27,7 @@ impl Serialize for Path {
     where
         S: serde::Serializer,
     {
-        todo!()
+        self.as_arr().serialize(serializer)
     }
 }
 
@@ -36,7 +36,8 @@ impl<'de> Deserialize<'de> for Path {
     where
         D: serde::Deserializer<'de>,
     {
-        todo!()
+        let hexes = <[Hex; 2]>::deserialize(deserializer)?;
+        Self::try_from((hexes[0], hexes[1])).map_err(serde::de::Error::custom)
     }
 }
 
@@ -44,6 +45,12 @@ impl<'de> Deserialize<'de> for Path {
 pub enum EdgeConstructError {
     NotAdjacentHexes,
     NotNeighboringVertices,
+}
+
+impl std::fmt::Display for EdgeConstructError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self:?}")
+    }
 }
 
 impl TryFrom<(Hex, Hex)> for Path {

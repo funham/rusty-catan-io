@@ -1,33 +1,33 @@
 use std::{collections::BTreeSet, usize};
 
-use super::{HexArrangement, HexesByNum, PortArrangement, PortsByPlayer};
+use serde::{Deserialize, Serialize};
+
+use super::{FieldArrangement, HexesByNum, PortsByPlayer};
 use crate::gameplay::primitives::{
-    HexResource, PortKind,
+    HexInfo, PortKind,
     build::{City, Road, Settlement},
     player::PlayerId,
 };
 use crate::math::dice::DiceVal;
 use crate::topology::*;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct FieldCache {
     desert_pos: Hex,
     hex_by_num: HexesByNum,
     ports_by_player: PortsByPlayer, // may be moved to PlayerData later
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FieldState {
     pub n_players: usize,
-    pub field_radius: usize,
-    pub hexes: HexArrangement,  // (q, r) -> HexInfo
-    pub ports: PortArrangement, // e -> PortType
+    pub arrangement: FieldArrangement,
     pub robber_pos: Hex,
     cache_: FieldCache,
 }
 
 impl FieldCache {
-    fn new(n_players: usize, hexes: &HexArrangement) -> Self {
+    fn new(n_players: usize, hexes: &FieldArrangement) -> Self {
         let desert_pos = Self::find_desert_pos(hexes);
         let hex_by_num = Self::get_hex_by_num(hexes);
         let ports_by_player = Self::get_ports_by_player(n_players);
@@ -43,13 +43,23 @@ impl FieldCache {
         vec![BTreeSet::default(); n_players]
     }
 
-    fn get_hex_by_num(hexes: &HexArrangement) -> HexesByNum {
+    fn get_hex_by_num(arrangement: &FieldArrangement) -> HexesByNum {
         let mut hex_by_num = HexesByNum::default();
         for num in DiceVal::list() {
-            hex_by_num[num] = hexes
-                .iter()
-                .filter_map(|(pos, info)| (info.number == num).then_some(*pos))
-                .collect();
+            hex_by_num[num] = arrangement
+                .hex_enum_iter()
+                .filter_map(|(pos, hex)| {
+                    let x = match hex {
+                        HexInfo::Resource {
+                            resource: _,
+                            number,
+                        } => Some(number),
+                        HexInfo::River { number } => Some(number),
+                        HexInfo::Desert => None,
+                    };
+                    (x? == num).then_some(pos)
+                })
+                .collect()
         }
 
         assert!(
@@ -60,11 +70,11 @@ impl FieldCache {
         hex_by_num
     }
 
-    fn find_desert_pos(hexes: &HexArrangement) -> Hex {
+    fn find_desert_pos(hexes: &FieldArrangement) -> Hex {
         hexes
-            .iter()
-            .filter_map(|(k, v)| match v.hex_resource {
-                HexResource::Desert => Some(k),
+            .hex_enum_iter()
+            .filter_map(|(k, v)| match v {
+                HexInfo::Desert => Some(k),
                 _ => None,
             })
             .next()
@@ -73,21 +83,61 @@ impl FieldCache {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+struct FieldStateSerde {
+    n_players: usize,
+    arrangement: FieldArrangement,
+    robber_pos: Hex,
+}
+
+impl Serialize for FieldState {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        FieldStateSerde {
+            n_players: self.n_players,
+            arrangement: self.arrangement.clone(),
+            robber_pos: self.robber_pos,
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FieldState {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = FieldStateSerde::deserialize(deserializer)?;
+        let cache_ = FieldCache::new(raw.n_players, &raw.arrangement);
+
+        Ok(Self {
+            n_players: raw.n_players,
+            arrangement: raw.arrangement,
+            robber_pos: raw.robber_pos,
+            cache_,
+        })
+    }
+}
+
 #[derive(Debug)]
 pub struct FieldBuildParam {
     pub n_players: usize,
-    pub field_radius: usize,
-    pub hex_arrangement: HexArrangement,
-    pub port_arrangement: PortArrangement,
+    pub arrangement: FieldArrangement,
 }
 
 impl Default for FieldBuildParam {
     fn default() -> Self {
+        let default_arrangement_path =
+            std::path::Path::new("catan-core/data/default-hex-arrangement.json");
+        let n_players = 4;
+        let arrangement = super::ser::arrangement_from_json(default_arrangement_path)
+            .expect("default field arrangement should be readable");
+
         Self {
-            n_players: Default::default(),
-            field_radius: Default::default(),
-            hex_arrangement: Default::default(),
-            port_arrangement: Default::default(),
+            n_players,
+            arrangement,
         }
     }
 }
@@ -101,8 +151,7 @@ impl FieldBuildParam {
     pub fn try_new(
         n_players: usize,
         field_radius: usize,
-        hex_arrangement: HexArrangement,
-        port_arrangement: PortArrangement,
+        hex_arrangement: FieldArrangement,
     ) -> Result<Self, FieldBuildError> {
         if hex_arrangement.len() != FieldState::field_size_by_radius(field_radius) {
             return Err(FieldBuildError::WrongAmountOfHexesProvided);
@@ -110,9 +159,7 @@ impl FieldBuildParam {
 
         Ok(Self {
             n_players,
-            field_radius,
-            hex_arrangement,
-            port_arrangement,
+            arrangement: hex_arrangement,
         })
     }
 }
@@ -133,13 +180,11 @@ impl FieldState {
     }
 
     pub fn new(param: FieldBuildParam) -> Self {
-        let cache = FieldCache::new(param.n_players, &param.hex_arrangement);
+        let cache = FieldCache::new(param.n_players, &param.arrangement);
 
         Self {
             n_players: param.n_players,
-            hexes: param.hex_arrangement,
-            ports: param.port_arrangement,
-            field_radius: param.field_radius,
+            arrangement: param.arrangement,
             robber_pos: cache.desert_pos,
             cache_: cache,
         }

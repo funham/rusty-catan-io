@@ -3,10 +3,12 @@ use std::{
     ops::{Index, IndexMut},
 };
 
+use itertools::Itertools;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Resource {
     Brick,
     Wood,
@@ -19,6 +21,59 @@ impl Resource {
     pub fn list() -> [Resource; 5] {
         use Resource::*;
         [Brick, Wood, Wheat, Sheep, Ore]
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
+pub struct ResourceMap<T> {
+    pub brick: T,
+    pub wood: T,
+    pub wheat: T,
+    pub sheep: T,
+    pub ore: T,
+}
+
+impl<T> Index<Resource> for ResourceMap<T> {
+    type Output = T;
+
+    fn index(&self, resource: Resource) -> &Self::Output {
+        match resource {
+            Resource::Brick => &self.brick,
+            Resource::Wood => &self.wood,
+            Resource::Wheat => &self.wheat,
+            Resource::Sheep => &self.sheep,
+            Resource::Ore => &self.ore,
+        }
+    }
+}
+
+impl<T> IndexMut<Resource> for ResourceMap<T> {
+    fn index_mut(&mut self, resource: Resource) -> &mut Self::Output {
+        match resource {
+            Resource::Brick => &mut self.brick,
+            Resource::Wood => &mut self.wood,
+            Resource::Wheat => &mut self.wheat,
+            Resource::Sheep => &mut self.sheep,
+            Resource::Ore => &mut self.ore,
+        }
+    }
+}
+
+impl<T> TryFrom<&[(Resource, T)]> for ResourceMap<T> {
+    type Error = ResourceCollectionCollectError;
+
+    fn try_from(flat_map: &[(Resource, T)]) -> Result<Self, Self::Error> {
+        if flat_map
+            .iter()
+            .dedup_by(|x, y| x.0 != y.0)
+            .try_len()
+            .unwrap()
+            == flat_map.len()
+        {
+            return Err(ResourceCollectionCollectError::ResourceAppearTwice);
+        }
+
+        todo!()
     }
 }
 

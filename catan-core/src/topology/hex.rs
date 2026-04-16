@@ -159,8 +159,31 @@ impl Hex {
         Hex { q: 0, r: 0 }.neighbors()
     }
 
-    pub const fn ring_size(ring: u32) -> u32 {
-        ring * 6
+    pub const fn ring_size(ring: u8) -> u32 {
+        ring as u32 * 6
+    }
+
+    pub const fn cum_ring_size(ring: u8) -> u32 {
+        (1 + 3 * ring * (ring + 1)) as u32
+    }
+
+    pub const fn cum_ring_size_generic<const RING: u32>() -> u32 {
+        1 + 3 * RING * (RING + 1)
+    }
+
+    pub const fn from_spiral(spiral_index: usize) -> Self {
+        Self {
+            q: 0,
+            r: spiral_index as i32,
+        }
+    }
+
+    pub fn to_spiral(&self) -> usize {
+        todo!()
+    }
+
+    pub fn spiral() -> impl Iterator<Item = Hex> {
+        (0..).map(|i| Self::from_spiral(i))
     }
 
     // pub const fn spiral_index(&self) -> u32 {

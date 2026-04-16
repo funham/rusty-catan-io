@@ -28,7 +28,7 @@ pub enum PostDiceThrowAnswer {
     Build(Builds),
     EndMove,
 }
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum FinalStateAnswer {
     OfferPublicTrade(PublicTradeOffer),
     OfferPersonalTrade(PersonalTradeOffer),

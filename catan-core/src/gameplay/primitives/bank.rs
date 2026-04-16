@@ -1,7 +1,9 @@
+use serde::{Deserialize, Serialize};
+
 use crate::gameplay::primitives::{
     dev_card::{DevCardKind, UsableDevCardKind},
     player::PlayerId,
-    resource::{Resource, ResourceCollection},
+    resource::{Resource, ResourceCollection, ResourceMap},
 };
 
 #[derive(Debug)]
@@ -11,8 +13,22 @@ pub struct Bank {
 }
 
 impl Bank {
-    pub fn view(&self) -> BankView {
-        BankView { bank: self }
+    pub fn public_view(&self) -> BankViewOwned {
+        let mut resources = ResourceMap {
+            brick: DeckFullnessLevel::Empty,
+            wood: DeckFullnessLevel::Empty,
+            wheat: DeckFullnessLevel::Empty,
+            sheep: DeckFullnessLevel::Empty,
+            ore: DeckFullnessLevel::Empty,
+        };
+        for resource in Resource::list() {
+            resources[resource] = DeckFullnessLevel::new_or_panic(self.resources[resource]);
+        }
+
+        BankViewOwned {
+            resources,
+            dev_card_count: self.dev_cards.len() as u16,
+        }
     }
 }
 
@@ -28,11 +44,11 @@ impl Default for Bank {
 
         let mut dev_cards = Vec::new();
 
-        dev_cards.extend([DevCardKind::VictoryPoint; 5].iter());
-        dev_cards.extend([DevCardKind::Usable(UsableDevCardKind::Knight); 14].iter());
-        dev_cards.extend([DevCardKind::Usable(UsableDevCardKind::Monopoly); 2].iter());
-        dev_cards.extend([DevCardKind::Usable(UsableDevCardKind::YearOfPlenty); 2].iter());
-        dev_cards.extend([DevCardKind::Usable(UsableDevCardKind::RoadBuild); 2].iter());
+        dev_cards.extend([DevCardKind::VictoryPoint; 5]);
+        dev_cards.extend([DevCardKind::Usable(UsableDevCardKind::Knight); 14]);
+        dev_cards.extend([DevCardKind::Usable(UsableDevCardKind::Monopoly); 2]);
+        dev_cards.extend([DevCardKind::Usable(UsableDevCardKind::YearOfPlenty); 2]);
+        dev_cards.extend([DevCardKind::Usable(UsableDevCardKind::RoadBuild); 2]);
 
         Self {
             resources,
@@ -41,36 +57,23 @@ impl Default for Bank {
     }
 }
 
-#[derive(Debug)]
-pub struct BankView<'a> {
-    bank: &'a Bank,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BankViewOwned {
+    pub resources: ResourceMap<DeckFullnessLevel>,
+    pub dev_card_count: u16,
 }
 
-impl<'a> BankView<'a> {
+impl BankViewOwned {
     pub fn fullness(&self, resource: Resource) -> DeckFullnessLevel {
-        match DeckFullnessLevel::new(self.bank.resources[resource]) {
-            Some(lvl) => lvl,
-            None => {
-                log::error!(
-                    "too much cards in the bank: {}, where max is {}",
-                    self.bank.resources[resource],
-                    DeckFullnessLevel::High.max()
-                );
-                DeckFullnessLevel::High
-            }
-        }
+        self.resources[resource]
     }
 
     pub fn dev_cards_fullness(&self) -> u16 {
-        // Development Cards: The deck contains 25 cards:
-        //  - 14 Knight Cards
-        //  - 6 Progress Cards (2 of each type: Year of Plenty, Monopoly, Road Building)
-        //  - 5 Victory Point Cards
-        self.bank.dev_cards.len() as u16
+        self.dev_card_count
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DeckFullnessLevel {
     Empty,
     Low,
@@ -79,38 +82,25 @@ pub enum DeckFullnessLevel {
 }
 
 impl DeckFullnessLevel {
-    // none if n > max possible amount of cards of one resource
     pub fn new(n: u16) -> Option<Self> {
-        for lvl in [Self::Empty, Self::Low, Self::High, Self::High] {
-            if lvl.range().contains(&n) {
-                return Some(lvl);
-            }
-        }
-
-        None
+        [Self::Empty, Self::Low, Self::Medium, Self::High]
+            .into_iter()
+            .find(|lvl| lvl.range().contains(&n))
     }
 
     pub fn new_or_panic(n: u16) -> Self {
-        for lvl in [Self::Empty, Self::Low, Self::High, Self::High] {
-            if n <= lvl.max() {
-                return lvl;
-            }
-        }
-
-        unreachable!("too much cards")
+        Self::new(n).unwrap_or_else(|| panic!("too much cards in a resource deck: {n}"))
     }
 
-    /// min possible number of cards that a deck with this level can contain
     pub fn min(&self) -> u16 {
         match self {
             DeckFullnessLevel::Empty => 0,
-            DeckFullnessLevel::Low => DeckFullnessLevel::Empty.max() + 1,
-            DeckFullnessLevel::Medium => DeckFullnessLevel::Low.max() + 1,
-            DeckFullnessLevel::High => DeckFullnessLevel::Medium.max() + 1,
+            DeckFullnessLevel::Low => 1,
+            DeckFullnessLevel::Medium => 8,
+            DeckFullnessLevel::High => 14,
         }
     }
 
-    /// max possible number of cards that a deck with this level can contain
     pub fn max(&self) -> u16 {
         match self {
             DeckFullnessLevel::Empty => 0,
@@ -120,7 +110,6 @@ impl DeckFullnessLevel {
         }
     }
 
-    /// possible range in which number of cards can a deck with this level can contain
     pub fn range(&self) -> std::ops::RangeInclusive<u16> {
         self.min()..=self.max()
     }
