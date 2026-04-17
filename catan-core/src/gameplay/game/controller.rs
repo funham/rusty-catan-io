@@ -28,7 +28,7 @@ pub enum GameResult {
 pub struct TurnHandlingParams<'a, 'b, 'c> {
     pub(super) player_id: PlayerId,
     pub(super) game: &'a mut GameState,
-    pub(super) strategies: &'b mut Vec<Box<dyn Agent>>,
+    pub(super) agents: &'b mut Vec<Box<dyn Agent>>,
     pub(super) observer: &'c mut dyn GameObserver,
 }
 
@@ -92,23 +92,23 @@ impl GameController {
 
     pub fn run(
         game: &mut GameState,
-        strategies: &mut Vec<Box<dyn Agent>>,
+        agents: &mut Vec<Box<dyn Agent>>,
         dice: &mut dyn DiceRoller,
     ) -> GameResult {
         let mut observer = NoopObserver;
-        Self::run_with_observer(game, strategies, dice, &mut observer)
+        Self::run_with_observer(game, agents, dice, &mut observer)
     }
 
     pub fn run_with_observer(
         game: &mut GameState,
-        strategies: &mut Vec<Box<dyn Agent>>,
+        agents: &mut Vec<Box<dyn Agent>>,
         dice: &mut dyn DiceRoller,
         observer: &mut dyn GameObserver,
     ) -> GameResult {
         let mut params = TurnHandlingParams {
             player_id: 0,
             game,
-            strategies,
+            agents,
             observer,
         };
 
@@ -263,7 +263,7 @@ impl GameController {
     }
 
     fn request(params: &mut TurnHandlingParams, request: AgentRequest) -> AgentResponse {
-        params.strategies[params.player_id].respond(request)
+        params.agents[params.player_id].respond(request)
     }
 
     fn execute_bank_trade(params: &mut TurnHandlingParams, bank_trade: BankTrade) {
@@ -348,12 +348,12 @@ impl GameController {
     }
 
     fn execute_seven(params: &mut TurnHandlingParams) {
-        for id in 0..params.strategies.len() {
+        for id in 0..params.agents.len() {
             if params.game.players.get(id).resources().total() <= 7 {
                 continue;
             }
 
-            let to_drop = match params.strategies[id]
+            let to_drop = match params.agents[id]
                 .respond(AgentRequest::DropHalf(params.game.perspective(id)))
             {
                 AgentResponse::DropHalf(to_drop) => to_drop,

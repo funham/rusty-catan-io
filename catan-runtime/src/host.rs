@@ -35,7 +35,8 @@ pub fn run_match(config: MatchConfig) -> Result<(), String> {
     let mut observer = DisplayFanout::new(displays);
     let mut dice = build_dice(&config.dice);
     let init_state = build_initial_state(&config.field);
-    let mut runner = GameInitializer::new(init_state, agents).init_game_with_observer(&mut observer);
+    let mut runner =
+        GameInitializer::new(init_state, agents).init_game_with_observer(&mut observer);
     runner.run_with_observer(dice.as_mut(), &mut observer);
     Ok(())
 }

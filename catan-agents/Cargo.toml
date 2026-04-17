@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 catan-core = { path = "../catan-core" }
+log = "0.4.29"

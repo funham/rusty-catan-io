@@ -122,6 +122,14 @@ mod test {
     }
 
     #[test]
+    fn intersection_works() {
+        let v = Intersection::try_from((h(0, 0), h(1, 0), h(1, -1))).unwrap();
+        let u = Intersection::try_from((h(0, 0), h(1, -1), h(1, 0))).unwrap();
+
+        assert_eq!(v, u);
+    }
+
+    #[test]
     fn paths_work() {
         let v = Intersection::try_from((h(0, 0), h(1, 0), h(0, 1))).unwrap();
         let paths = v.paths().into_iter().collect::<BTreeSet<_>>();

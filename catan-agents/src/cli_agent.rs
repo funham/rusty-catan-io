@@ -5,10 +5,10 @@ use std::{
 
 use catan_core::{
     agent::{
+        Agent, AgentRequest, AgentResponse,
         action::{
             FinalStateAnswer, InitialAction, PostDevCardAction, PostDiceThrowAnswer, TradeAction,
         },
-        Agent, AgentRequest, AgentResponse,
     },
     gameplay::{
         game::state::Perspective,
@@ -246,7 +246,9 @@ impl TerminalUi {
                 .collect::<Result<Vec<_>, _>>();
             match parts {
                 Ok(parts) if parts.len() == 5 => {
-                    return ResourceCollection::new(parts[0], parts[1], parts[2], parts[3], parts[4]);
+                    return ResourceCollection::new(
+                        parts[0], parts[1], parts[2], parts[3], parts[4],
+                    );
                 }
                 _ => println!("expected five unsigned integers"),
             }
@@ -304,6 +306,12 @@ impl TerminalUi {
                         Hex::new(parts[2], parts[3]),
                         Hex::new(parts[4], parts[5]),
                     ]);
+                    match result {
+                        Ok(intersection) => return intersection,
+                        Err(_) => {
+                            log::error!("vertices are not adjacent");
+                        }
+                    }
                     if let Ok(intersection) = result {
                         return intersection;
                     }
