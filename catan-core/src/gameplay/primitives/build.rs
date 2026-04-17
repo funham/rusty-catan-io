@@ -340,12 +340,12 @@ pub mod data {
     }
 
     #[derive(Debug, Default, Clone)]
-    pub struct BuildDataContainer {
+    pub struct BoardBuildData {
         players: Vec<PlayerBuildData>,
         longest_road: Option<PlayerId>,
     }
 
-    impl BuildDataContainer {
+    impl BoardBuildData {
         pub fn new(n_players: usize) -> Self {
             Self {
                 players: (0..n_players).map(|_| PlayerBuildData::default()).collect(),
@@ -372,13 +372,13 @@ pub mod data {
         /* iterfaces */
 
         #[inline]
-        pub fn occupancy(&self) -> BuildContainerOccupancy<'_> {
-            BuildContainerOccupancy { container: self }
+        pub fn occupancy(&self) -> BuildDataOccupancy<'_> {
+            BuildDataOccupancy { container: self }
         }
 
         #[inline]
-        pub fn query(&self) -> BuildContainerQuery<'_> {
-            BuildContainerQuery { container: self }
+        pub fn query(&self) -> BuildDataQuery<'_> {
+            BuildDataQuery { container: self }
         }
 
         /* getters */
@@ -502,7 +502,7 @@ pub mod data {
         }
     }
 
-    impl Index<PlayerId> for BuildDataContainer {
+    impl Index<PlayerId> for BoardBuildData {
         type Output = PlayerBuildData;
 
         fn index(&self, index: PlayerId) -> &Self::Output {
@@ -510,7 +510,7 @@ pub mod data {
         }
     }
 
-    impl IndexMut<PlayerId> for BuildDataContainer {
+    impl IndexMut<PlayerId> for BoardBuildData {
         fn index_mut(&mut self, index: PlayerId) -> &mut Self::Output {
             &mut self.players[index]
         }
@@ -521,15 +521,15 @@ pub mod data {
 // Query
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-/// Read-only query utilities over the build container.
+/// Read-only query utilities over the build data.
 pub mod query {
     use super::*;
 
-    pub struct BuildContainerOccupancy<'a> {
-        pub(crate) container: &'a BuildDataContainer,
+    pub struct BuildDataOccupancy<'a> {
+        pub(crate) container: &'a BoardBuildData,
     }
 
-    impl<'a> BuildContainerOccupancy<'a> {
+    impl<'a> BuildDataOccupancy<'a> {
         pub fn builds_occupancy<Players>(&self, ids: Players) -> IntersectionOccupancy
         where
             Players: IntoIterator<Item = PlayerId> + Clone,
@@ -582,11 +582,11 @@ pub mod query {
         }
     }
 
-    pub struct BuildContainerQuery<'a> {
-        pub(crate) container: &'a BuildDataContainer,
+    pub struct BuildDataQuery<'a> {
+        pub(crate) container: &'a BoardBuildData,
     }
 
-    impl<'a> BuildContainerQuery<'a> {
+    impl<'a> BuildDataQuery<'a> {
         pub fn builds_on_hex(&self, hex: Hex) -> BTreeMap<PlayerId, BuildCollection> {
             self.container
                 .players()

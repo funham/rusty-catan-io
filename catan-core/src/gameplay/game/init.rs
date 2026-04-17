@@ -3,7 +3,7 @@ use crate::gameplay::{
     game::state::{GameState, Perspective, VisiblePlayer},
     primitives::{
         bank::Bank,
-        build::BuildDataContainer,
+        build::BoardBuildData,
         player::{PlayerDataContainer, PlayerId, SecuredPlayerData},
         turn::{BackAndForthCycle, GameTurn},
     },
@@ -14,7 +14,7 @@ pub struct GameInitializationState {
     pub turn: GameTurn<BackAndForthCycle>,
     pub bank: Bank,
     pub players: PlayerDataContainer,
-    pub builds: BuildDataContainer,
+    pub builds: BoardBuildData,
 }
 
 impl Default for GameInitializationState {
@@ -29,7 +29,7 @@ impl GameInitializationState {
         Self {
             turn: GameTurn::new(field.n_players as u8),
             players: PlayerDataContainer::new(field.n_players),
-            builds: BuildDataContainer::new(field.n_players),
+            builds: BoardBuildData::new(field.n_players),
             field,
             bank: Default::default(),
         }

@@ -4,7 +4,7 @@ use crate::{
     gameplay::field::state::BuildCollection,
     gameplay::primitives::{
         bank::{Bank, BankResourceExchangeError, BankViewOwned, PlayerResourceExchangeError},
-        build::{BuildDataContainer, Builds, City, Road, Settlement},
+        build::{BoardBuildData, Builds, City, Road, Settlement},
         dev_card::DevCardUsage,
         player::{PlayerData, PlayerDataContainer, PlayerId, SecuredPlayerData},
         resource::{Resource, ResourceCollection},
@@ -21,7 +21,7 @@ pub struct GameState {
     pub turn: GameTurn,
     pub bank: Bank,
     pub players: PlayerDataContainer,
-    pub builds: BuildDataContainer,
+    pub builds: BoardBuildData,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
