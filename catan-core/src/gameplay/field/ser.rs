@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     gameplay::{
         field::FieldArrangement,
-        primitives::{HexInfo, PortKind, resource::Resource},
+        primitives::{Tile, PortKind, resource::Resource},
     },
     math::dice::DiceVal,
     topology::Path,
@@ -21,7 +21,7 @@ enum HexTypeJsonVal {
 #[derive(Debug, Serialize, Deserialize)]
 struct FieldArrangementJsonVal {
     field_radius: u8,
-    hex_info: Vec<HexTypeJsonVal>,
+    tile_info: Vec<HexTypeJsonVal>,
     #[serde(default)]
     ports_info: BTreeMap<Path, PortKind>,
 }
@@ -31,14 +31,14 @@ impl Serialize for FieldArrangement {
     where
         S: serde::Serializer,
     {
-        let hex_info = self
+        let tile_info = self
             .iter()
             .map(|hex| match hex {
-                HexInfo::Desert => HexTypeJsonVal::Desert("desert".to_owned()),
-                HexInfo::Resource { resource, number } => {
+                Tile::Desert => HexTypeJsonVal::Desert("desert".to_owned()),
+                Tile::Resource { resource, number } => {
                     HexTypeJsonVal::Resource((resource, number.into()))
                 }
-                HexInfo::River { number } => {
+                Tile::River { number } => {
                     HexTypeJsonVal::Resource((Resource::Ore, number.into()))
                 }
             })
@@ -46,7 +46,7 @@ impl Serialize for FieldArrangement {
 
         FieldArrangementJsonVal {
             field_radius: self.field_radius,
-            hex_info,
+            tile_info,
             ports_info: self.ports().clone(),
         }
         .serialize(serializer)
@@ -59,20 +59,20 @@ impl<'de> Deserialize<'de> for FieldArrangement {
         D: serde::Deserializer<'de>,
     {
         let raw = FieldArrangementJsonVal::deserialize(deserializer)?;
-        let mut hex_info = Vec::with_capacity(raw.hex_info.len());
+        let mut tile_info = Vec::with_capacity(raw.tile_info.len());
 
-        for hex in raw.hex_info {
+        for hex in raw.tile_info {
             match hex {
-                HexTypeJsonVal::Desert(_) => hex_info.push(HexInfo::Desert),
+                HexTypeJsonVal::Desert(_) => tile_info.push(Tile::Desert),
                 HexTypeJsonVal::Resource((resource, number)) => {
                     let number = DiceVal::try_from(number)
                         .map_err(|_| serde::de::Error::custom("invalid dice value"))?;
-                    hex_info.push(HexInfo::Resource { resource, number });
+                    tile_info.push(Tile::Resource { resource, number });
                 }
             }
         }
 
-        FieldArrangement::new(raw.field_radius, hex_info, raw.ports_info)
+        FieldArrangement::new(raw.field_radius, tile_info, raw.ports_info)
             .map_err(|err| serde::de::Error::custom(format!("{err:?}")))
     }
 }

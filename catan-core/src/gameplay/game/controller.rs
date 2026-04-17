@@ -9,7 +9,7 @@ use crate::gameplay::primitives::dev_card::DevCardUsage;
 use crate::gameplay::primitives::player::PlayerId;
 use crate::gameplay::primitives::trade::BankTrade;
 use crate::gameplay::primitives::turn::GameTurn;
-use crate::gameplay::primitives::HexInfo;
+use crate::gameplay::primitives::Tile;
 use crate::math::dice::DiceRoller;
 use crate::topology::HasPos;
 use crate::{
@@ -305,7 +305,7 @@ impl GameController {
 
             for hex in hexes_to_harvest {
                 match params.game.field.arrangement[*hex] {
-                    HexInfo::Resource { resource, number: _ } => {
+                    Tile::Resource { resource, number: _ } => {
                         if let Err(e) = params
                             .game
                             .transfer_from_bank((resource, amount_to_harvest).into(), player_id)
@@ -313,8 +313,8 @@ impl GameController {
                             log::error!("{:?}", e);
                         }
                     }
-                    HexInfo::Desert => (),
-                    HexInfo::River { number: _ } => todo!("River support is not implemented yet"),
+                    Tile::Desert => (),
+                    Tile::River { number: _ } => todo!("River support is not implemented yet"),
                 }
             }
         }

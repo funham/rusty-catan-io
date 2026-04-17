@@ -44,15 +44,18 @@ impl GameInitializationState {
             .map(|(id, player)| VisiblePlayer {
                 player_id: id,
                 public_data: SecuredPlayerData::from(&player),
-                builds: self.builds.all_builds()[id].clone(),
+                builds: self.builds.query().all_builds()[id].clone(),
             })
             .collect();
 
         Perspective {
             player_id,
-            player_view: self.players.get(player_id).resources().clone().into_player_data(
-                self.players.get(player_id).dev_cards().clone(),
-            ),
+            player_view: self
+                .players
+                .get(player_id)
+                .resources()
+                .clone()
+                .into_player_data(self.players.get(player_id).dev_cards().clone()),
             field: self.field.clone(),
             bank: self.bank.public_view(),
             other_players,
@@ -65,8 +68,10 @@ impl GameInitializationState {
 }
 
 trait IntoPlayerData {
-    fn into_player_data(self, dev_cards: crate::gameplay::primitives::dev_card::DevCardData)
-    -> crate::gameplay::primitives::player::PlayerData;
+    fn into_player_data(
+        self,
+        dev_cards: crate::gameplay::primitives::dev_card::DevCardData,
+    ) -> crate::gameplay::primitives::player::PlayerData;
 }
 
 impl IntoPlayerData for crate::gameplay::primitives::resource::ResourceCollection {

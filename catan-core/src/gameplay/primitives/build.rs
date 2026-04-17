@@ -22,30 +22,78 @@ use crate::{
 
 /* traits & aliases */
 
+/// Set of intersections currently occupied by builds or roads.
+/// BTreeSet is used for deterministic ordering and efficient set operations.
 pub type IntersectionOccupancy = BTreeSet<Intersection>;
 
+/// Trait for objects that occupy intersections on the board.
+/// Used by collision and placement logic.
 pub trait Occupying {
     fn occupancy(&self) -> BTreeSet<Intersection>;
 }
 
+/// Marker trait for objects that can be built.
+/// Requires both a position (`HasPos`) and an occupancy definition.
 pub trait Buildable: HasPos + Occupying {}
 
 /* BuildData */
 
-#[derive(Debug, Default)]
+/// Build state belonging to a single player.
+#[derive(Debug, Default, Clone)]
+pub struct PlayerBuildData {
+    /// All settlements owned by the player.
+    pub settlements: BTreeSet<Settlement>,
+    /// All cities owned by the player.
+    pub cities: BTreeSet<City>,
+    /// Graph representation of the player's road network.
+    pub roads: graph::RoadGraph, // derives default
+}
+
+impl PlayerBuildData {
+    /// Helper to compute intersection occupancy for arbitrary build iterators.
+    pub fn generic_occupancy<Pos, Builds, BuildItem>(builds: Builds) -> IntersectionOccupancy
+    where
+        Builds: Iterator<Item = BuildItem>,
+        BuildItem: Buildable<Pos = Pos>,
+    {
+        builds.map(|b| b.occupancy()).flatten().collect()
+    }
+
+    /// Occupied intersections by settlements and cities.
+    pub fn builds_occupancy(&self) -> IntersectionOccupancy {
+        Self::generic_occupancy(self.settlements.iter())
+            .union(&mut Self::generic_occupancy(self.cities.iter()))
+            .copied()
+            .collect()
+    }
+
+    /// Road occupancy representation (both intersections and path edges).
+    pub fn roads_occupancy(&self) -> PathOccupancy {
+        PathOccupancy {
+            occupancy: Self::generic_occupancy(self.roads.iter()),
+            paths: self.roads.edges().clone(),
+        }
+    }
+
+    /// Combined occupancy for the player.
+    pub fn occupancy(&self) -> AggregateOccupancy {
+        AggregateOccupancy {
+            builds_occupancy: self.builds_occupancy(),
+            roads_occupancy: self.roads_occupancy(),
+        }
+    }
+}
+
+/// Global container storing build state for all players.
+#[derive(Debug, Default, Clone)]
 pub struct BuildDataContainer {
     players: Vec<PlayerBuildData>,
     longest_road: Option<PlayerId>,
 }
 
-#[derive(Debug, Default)]
-pub struct PlayerBuildData {
-    pub settlements: BTreeSet<Settlement>,
-    pub cities: BTreeSet<City>,
-    pub roads: graph::RoadGraph, // derives default
-}
-
-impl BuildDataContainer {
+impl BuildDataContainer 
+{
+    /// Creates a new container for `n_players`.
     pub fn new(n_players: usize) -> Self {
         Self {
             players: (0..n_players).map(|_| PlayerBuildData::default()).collect(),
@@ -53,63 +101,49 @@ impl BuildDataContainer {
         }
     }
 
-    /* occupancy */
-    pub fn builds_occupancy<Players>(&self, ids: Players) -> IntersectionOccupancy
-    where
-        Players: IntoIterator<Item = PlayerId>,
-    {
-        ids.into_iter()
-            .map(|id| self.players[id].roads_occupancy().occupancy)
-            .fold(BTreeSet::default(), |acc, x| {
-                acc.union(&x).copied().collect()
-            })
-    }
-
-    pub fn roads_occupancy<Players>(&self, ids: Players) -> PathOccupancy
-    where
-        Players: IntoIterator<Item = PlayerId>,
-    {
-        ids.into_iter()
-            .map(|id| self.players[id].roads_occupancy())
-            .fold(PathOccupancy::default(), |acc, x| acc.union(&x))
-    }
-
-    pub fn occupancy<Players>(&self, ids: Players) -> AggregateOccupancy
-    where
-        Players: IntoIterator<Item = PlayerId>,
-    {
-        let ids = ids.into_iter().collect::<Vec<_>>();
-        AggregateOccupancy {
-            builds_occupancy: self.builds_occupancy(ids.clone()),
-            roads_occupancy: self.roads_occupancy(ids),
+    /// Constructs build data from an existing collection representation.
+    pub fn from_build_collections(players: Vec<BuildCollection>) -> Self {
+        Self {
+            players: players
+                .into_iter()
+                .map(|player| PlayerBuildData {
+                    settlements: player.settlements.into_iter().collect(),
+                    cities: player.cities.into_iter().collect(),
+                    roads: graph::RoadGraph::from_roads(
+                        player.roads.into_iter().map(|road| road.pos),
+                    ),
+                })
+                .collect(),
+            longest_road: None,
         }
     }
 
-    pub fn builds_occupancy_full(&self) -> IntersectionOccupancy {
-        self.builds_occupancy(0..self.players.len())
+    /* helper views */
+
+    #[inline]
+    pub fn occupancy(&self) -> BuildContainerOccupancy<'_> {
+        BuildContainerOccupancy { container: self }
     }
 
-    pub fn roads_occupancy_full(&self) -> PathOccupancy {
-        self.roads_occupancy(0..self.players.len())
-    }
-
-    pub fn occupancy_full(&self) -> AggregateOccupancy {
-        AggregateOccupancy {
-            builds_occupancy: self.builds_occupancy_full(),
-            roads_occupancy: self.roads_occupancy_full(),
-        }
+    #[inline]
+    pub fn query(&self) -> BuildContainerQuery<'_> {
+        BuildContainerQuery { container: self }
     }
 
     /* getters */
+
     pub fn longest_road(&self) -> Option<PlayerId> {
         self.longest_road
     }
 
     /* modifiers */
+
     pub fn try_build(&mut self, player_id: PlayerId, build: Builds) -> Result<(), BuildingError> {
-        let checker = &CollisionChecker {
-            other_occupancy: &self.occupancy((0..self.players.len()).filter(|id| id != &player_id)),
-            this_occupancy: &self.occupancy([player_id]),
+        let occ = self.occupancy();
+
+        let checker = CollisionChecker {
+            other_occupancy: &occ.occupancy((0..self.players.len()).filter(|id| id != &player_id)),
+            this_occupancy: &occ.occupancy([player_id]),
         };
 
         match build {
@@ -117,16 +151,18 @@ impl BuildDataContainer {
                 Ok(_) => Ok(()),
                 Err(err) => Err(BuildingError::Road(err)),
             },
+
             Builds::Settlement(settlement) => match checker.can_place(&settlement) {
                 true => Ok({
                     self.players[player_id]
                         .settlements
                         .insert(settlement)
                         .not()
-                        .then(|| log::warn!("seems like settlement was placed on top of another"));
+                        .then(|| log::warn!("settlement was placed on top of another"));
                 }),
                 false => Err(BuildingError::Settlement()),
             },
+
             Builds::City(city) => {
                 match self.players[player_id]
                     .settlements
@@ -137,7 +173,7 @@ impl BuildDataContainer {
                             .settlements
                             .remove(&Settlement { pos: city.pos })
                             .not()
-                            .then(|| log::warn!("settlement non-existent"));
+                            .then(|| log::warn!("settlement is non-existent"));
 
                         self.players[player_id]
                             .cities
@@ -157,9 +193,11 @@ impl BuildDataContainer {
         road: Road,
         settlement: Settlement,
     ) -> Result<(), BuildingError> {
-        let checker = &CollisionChecker {
-            other_occupancy: &self.occupancy((0..self.players.len()).filter(|id| id != &player_id)),
-            this_occupancy: &self.occupancy([player_id]),
+        let occ = self.occupancy();
+
+        let checker = CollisionChecker {
+            other_occupancy: &occ.occupancy((0..self.players.len()).filter(|id| id != &player_id)),
+            this_occupancy: &occ.occupancy([player_id]),
         };
 
         let settlement_ok = checker
@@ -167,31 +205,95 @@ impl BuildDataContainer {
             .builds_occupancy
             .is_disjoint(&checker.building_deadzone(&settlement));
 
-        match settlement_ok {
-            true => {
-                self[player_id].settlements.insert(settlement);
-            }
-            false => return Err(BuildingError::InitSettlement()),
+        if !settlement_ok {
+            return Err(BuildingError::InitSettlement());
         }
 
+        self[player_id].settlements.insert(settlement);
+
         let road_ok = road.pos.intersections_iter().any(|v| v == settlement.pos)
-            && !checker.full_occupancy().roads_occupancy.paths.contains(&road.pos);
+            && !checker
+                .full_occupancy()
+                .roads_occupancy
+                .paths
+                .contains(&road.pos);
 
-        road_ok
-            .not()
-            .then(|| log::error!("invalid initial road placement"));
+        if !road_ok {
+            log::error!("invalid initial road placement");
+            return Err(BuildingError::InitRoad());
+        }
 
-        match road_ok {
-            true => Ok({
-                self[player_id].roads.add_edge(&road.pos);
-            }),
-            false => Err(BuildingError::InitRoad()),
+        self[player_id].roads.add_edge(&road.pos);
+
+        Ok(())
+    }
+}
+
+pub struct BuildContainerOccupancy<'a> {
+    pub(crate) container: &'a BuildDataContainer,
+}
+
+impl<'a> BuildContainerOccupancy<'a> {
+    pub fn builds_occupancy<Players>(&self, ids: Players) -> IntersectionOccupancy
+    where
+        Players: IntoIterator<Item = PlayerId> + Clone,
+    {
+        ids.into_iter()
+            .flat_map(|id| {
+                let player = &self.container.players[id];
+
+                player
+                    .settlements
+                    .iter()
+                    .map(|s| s.pos)
+                    .chain(player.cities.iter().map(|c| c.pos))
+            })
+            .collect()
+    }
+
+    pub fn roads_occupancy<Players>(&self, ids: Players) -> PathOccupancy
+    where
+        Players: IntoIterator<Item = PlayerId>,
+    {
+        ids.into_iter()
+            .map(|id| self.container.players[id].roads_occupancy())
+            .fold(PathOccupancy::default(), |acc, x| acc.union(&x))
+    }
+
+    pub fn occupancy<Players>(&self, ids: Players) -> AggregateOccupancy
+    where
+        Players: IntoIterator<Item = PlayerId> + Clone,
+    {
+        AggregateOccupancy {
+            builds_occupancy: self.builds_occupancy(ids.clone()),
+            roads_occupancy: self.roads_occupancy(ids),
         }
     }
 
-    /* queries */
+    pub fn builds_occupancy_full(&self) -> IntersectionOccupancy {
+        self.builds_occupancy(0..self.container.players.len())
+    }
+
+    pub fn roads_occupancy_full(&self) -> PathOccupancy {
+        self.roads_occupancy(0..self.container.players.len())
+    }
+
+    pub fn occupancy_full(&self) -> AggregateOccupancy {
+        AggregateOccupancy {
+            builds_occupancy: self.builds_occupancy_full(),
+            roads_occupancy: self.roads_occupancy_full(),
+        }
+    }
+}
+
+pub struct BuildContainerQuery<'a> {
+    pub(crate) container: &'a BuildDataContainer,
+}
+
+impl<'a> BuildContainerQuery<'a> {
     pub fn builds_on_hex(&self, hex: Hex) -> BTreeMap<PlayerId, BuildCollection> {
-        self.players
+        self.container
+            .players
             .iter()
             .enumerate()
             .filter_map(|(player_id, player)| {
@@ -199,18 +301,20 @@ impl BuildDataContainer {
                     .settlements
                     .iter()
                     .copied()
-                    .filter(|settlement| settlement.pos.as_set().contains(&hex))
+                    .filter(|s| s.pos.as_set().contains(&hex))
                     .collect::<Vec<_>>();
+
                 let cities = player
                     .cities
                     .iter()
                     .copied()
-                    .filter(|city| city.pos.as_set().contains(&hex))
+                    .filter(|c| c.pos.as_set().contains(&hex))
                     .collect::<Vec<_>>();
+
                 let roads = player
                     .roads
                     .iter()
-                    .filter(|road| road.pos.as_set().contains(&hex))
+                    .filter(|r| r.pos.as_set().contains(&hex))
                     .collect::<Vec<_>>();
 
                 if settlements.is_empty() && cities.is_empty() && roads.is_empty() {
@@ -230,7 +334,8 @@ impl BuildDataContainer {
     }
 
     pub fn all_builds(&self) -> Vec<BuildCollection> {
-        self.players
+        self.container
+            .players
             .iter()
             .map(|player| BuildCollection {
                 settlements: player.settlements.iter().copied().collect(),
@@ -245,9 +350,12 @@ impl BuildDataContainer {
         field: &FieldState,
         player_id: PlayerId,
     ) -> Vec<(Settlement, Road)> {
+        let occ = self.container.occupancy();
+
         let checker = CollisionChecker {
-            other_occupancy: &self.occupancy((0..self.players.len()).filter(|id| id != &player_id)),
-            this_occupancy: &self.occupancy([player_id]),
+            other_occupancy: &occ
+                .occupancy((0..self.container.players.len()).filter(|id| id != &player_id)),
+            this_occupancy: &occ.occupancy([player_id]),
         };
 
         let intersections = field
@@ -276,43 +384,15 @@ impl BuildDataContainer {
     }
 }
 
-impl PlayerBuildData {
-    pub fn generic_occupancy<Pos, Builds, BuildItem>(builds: Builds) -> IntersectionOccupancy
-    where
-        Builds: Iterator<Item = BuildItem>,
-        BuildItem: Buildable<Pos = Pos>,
-    {
-        builds.map(|b| b.occupancy()).flatten().collect()
-    }
-    pub fn builds_occupancy(&self) -> IntersectionOccupancy {
-        Self::generic_occupancy(self.settlements.iter())
-            .union(&mut Self::generic_occupancy(self.cities.iter()))
-            .copied()
-            .collect()
-    }
-
-    pub fn roads_occupancy(&self) -> PathOccupancy {
-        PathOccupancy {
-            occupancy: Self::generic_occupancy(self.roads.iter()),
-            paths: self.roads.edges().clone(),
-        }
-    }
-
-    pub fn occupancy(&self) -> AggregateOccupancy {
-        AggregateOccupancy {
-            builds_occupancy: self.builds_occupancy(),
-            roads_occupancy: self.roads_occupancy(),
-        }
-    }
-}
-
 /* primitives */
 
+/// Combined occupancy structure used in collision checking.
 pub struct AggregateOccupancy {
     pub builds_occupancy: IntersectionOccupancy,
     pub roads_occupancy: PathOccupancy,
 }
 
+/// Occupancy of roads represented both as intersections and full paths.
 #[derive(Debug, Default)]
 pub struct PathOccupancy {
     pub occupancy: IntersectionOccupancy,
@@ -320,6 +400,7 @@ pub struct PathOccupancy {
 }
 
 impl PathOccupancy {
+    /// Union of two road occupancy sets.
     pub fn union(&self, other: &Self) -> Self {
         Self {
             occupancy: self.occupancy.union(&other.occupancy).copied().collect(),
@@ -329,10 +410,12 @@ impl PathOccupancy {
 }
 
 impl AggregateOccupancy {
+    /// Type-driven accessor for occupancy subsets.
     pub fn get_for<T: OccupancyGetter>(&self) -> &T::OccupancyType {
         <T as OccupancyGetter>::get(self)
     }
 
+    /// Union of two aggregate occupancies.
     pub fn union(&self, other: &AggregateOccupancy) -> AggregateOccupancy {
         AggregateOccupancy {
             builds_occupancy: self
@@ -358,6 +441,7 @@ impl AggregateOccupancy {
     }
 }
 
+/// Allows retrieving correct occupancy type depending on build type.
 pub trait OccupancyGetter: Occupying {
     type OccupancyType;
     fn get<'a>(x: &'a AggregateOccupancy) -> &'a Self::OccupancyType;
@@ -383,6 +467,7 @@ pub struct Settlement {
 }
 
 impl Settlement {
+    /// Settlements harvest 1 resource from adjacent hexes.
     pub const fn harvesting_rate() -> u16 {
         1
     }
@@ -394,6 +479,7 @@ pub struct City {
 }
 
 impl City {
+    /// Cities harvest double resources.
     pub const fn harvesting_rate() -> u16 {
         2
     }
@@ -404,6 +490,7 @@ pub struct Road {
     pub pos: Path,
 }
 
+/// Enum representing any build action.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Builds {
     Settlement(Settlement),
@@ -411,6 +498,7 @@ pub enum Builds {
     Road(Road),
 }
 
+/// Errors that may occur during building.
 #[derive(Debug)]
 pub enum BuildingError {
     Road(EdgeInsertationError),
@@ -422,6 +510,7 @@ pub enum BuildingError {
 
 /* impls */
 
+/// Allows indexing `BuildDataContainer[player_id]`.
 impl Index<PlayerId> for BuildDataContainer {
     type Output = PlayerBuildData;
 
@@ -436,6 +525,7 @@ impl IndexMut<PlayerId> for BuildDataContainer {
     }
 }
 
+/// Delegates cost lookup to the underlying build type.
 impl HasCost for Builds {
     fn cost(&self) -> ResourceCollection {
         (self as &dyn HasCost).cost()
@@ -458,18 +548,21 @@ impl<T: Occupying> Occupying for &T {
     }
 }
 
+/// Settlement occupies a single intersection.
 impl Occupying for Settlement {
     fn occupancy(&self) -> IntersectionOccupancy {
         IntersectionOccupancy::from([self.get_pos()])
     }
 }
 
+/// Road occupies both intersections of its path.
 impl Occupying for Road {
     fn occupancy(&self) -> IntersectionOccupancy {
         self.get_pos().intersections_iter().collect()
     }
 }
 
+/// City occupies the same intersection as the replaced settlement.
 impl Occupying for City {
     fn occupancy(&self) -> IntersectionOccupancy {
         IntersectionOccupancy::from([self.get_pos()])
@@ -501,6 +594,7 @@ impl HasPos for Road {
 
 /* HasCost impls */
 
+/// Standard Catan settlement cost.
 impl HasCost for Settlement {
     fn cost(&self) -> ResourceCollection {
         ResourceCollection {
@@ -513,6 +607,7 @@ impl HasCost for Settlement {
     }
 }
 
+/// Standard Catan city upgrade cost.
 impl HasCost for City {
     fn cost(&self) -> ResourceCollection {
         ResourceCollection {
@@ -523,6 +618,7 @@ impl HasCost for City {
     }
 }
 
+/// Standard Catan road cost.
 impl HasCost for Road {
     fn cost(&self) -> ResourceCollection {
         ResourceCollection {

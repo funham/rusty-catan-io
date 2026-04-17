@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{FieldArrangement, HexesByNum, PortsByPlayer};
 use crate::gameplay::primitives::{
-    HexInfo, PortKind,
+    Tile, PortKind,
     build::{City, Road, Settlement},
     player::PlayerId,
 };
@@ -50,12 +50,12 @@ impl FieldCache {
                 .hex_enum_iter()
                 .filter_map(|(pos, hex)| {
                     let x = match hex {
-                        HexInfo::Resource {
+                        Tile::Resource {
                             resource: _,
                             number,
                         } => Some(number),
-                        HexInfo::River { number } => Some(number),
-                        HexInfo::Desert => None,
+                        Tile::River { number } => Some(number),
+                        Tile::Desert => None,
                     };
                     (x? == num).then_some(pos)
                 })
@@ -74,7 +74,7 @@ impl FieldCache {
         hexes
             .hex_enum_iter()
             .filter_map(|(k, v)| match v {
-                HexInfo::Desert => Some(k),
+                Tile::Desert => Some(k),
                 _ => None,
             })
             .next()

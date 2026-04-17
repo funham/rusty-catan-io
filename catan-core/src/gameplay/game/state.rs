@@ -88,7 +88,7 @@ impl GameState {
                 .map(|(player_id, player)| PublicPlayerState {
                     player_id,
                     public_data: SecuredPlayerData::from(&player),
-                    builds: self.builds.all_builds()[player_id].clone(),
+                    builds: self.builds.query().all_builds()[player_id].clone(),
                 })
                 .collect(),
             longest_road_owner: self.builds.longest_road(),
@@ -105,7 +105,7 @@ impl GameState {
             .map(|(id, player)| VisiblePlayer {
                 player_id: id,
                 public_data: SecuredPlayerData::from(&player),
-                builds: self.builds.all_builds()[id].clone(),
+                builds: self.builds.query().all_builds()[id].clone(),
             })
             .collect();
 
@@ -263,7 +263,7 @@ impl GameState {
         self.field.robber_pos = rob_hex;
 
         if let Some(robbed_id) = robbed_id {
-            match self.builds.builds_on_hex(rob_hex).get(&robbed_id) {
+            match self.builds.query().builds_on_hex(rob_hex).get(&robbed_id) {
                 Some(v) if !v.settlements.is_empty() || !v.cities.is_empty() => {
                     self.steal(robbed_id, robber_id)
                 }
@@ -361,12 +361,19 @@ impl GameState {
 }
 
 trait IntoPlayerData {
-    fn into_player_data(self, dev_cards: crate::gameplay::primitives::dev_card::DevCardData)
-    -> PlayerData;
+    fn into_player_data(
+        self,
+        dev_cards: crate::gameplay::primitives::dev_card::DevCardData,
+    ) -> PlayerData;
 }
 
-fn player_data_from_view(player: crate::gameplay::primitives::player::PlayerDataProxy<'_>) -> PlayerData {
-    player.resources().clone().into_player_data(player.dev_cards().clone())
+fn player_data_from_view(
+    player: crate::gameplay::primitives::player::PlayerDataProxy<'_>,
+) -> PlayerData {
+    player
+        .resources()
+        .clone()
+        .into_player_data(player.dev_cards().clone())
 }
 
 impl IntoPlayerData for ResourceCollection {

@@ -9,13 +9,21 @@ use crate::{
 // (better than v -> {v}, cause edge's invariant enforces correctness of a graph)
 
 /// Not oriented graph
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct RoadGraph {
     edges: BTreeSet<Path>,
     out: BTreeMap<Intersection, BTreeSet<Path>>,
 }
 
 impl RoadGraph {
+    pub fn from_roads(roads: impl IntoIterator<Item = Path>) -> Self {
+        let mut graph = Self::default();
+        for road in roads {
+            graph.add_edge(&road);
+        }
+        graph
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = Road> {
         self.edges.iter().map(|p| Road { pos: p.clone() })
     }

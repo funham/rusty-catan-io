@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    gameplay::primitives::{HexInfo, PortKind},
+    gameplay::primitives::{Tile, PortKind},
     math::dice::DiceVal,
     topology::{Hex, Path},
 };
@@ -14,7 +14,7 @@ pub type PortsByPlayer = Vec<BTreeSet<PortKind>>;
 #[derive(Debug, Clone)]
 pub struct FieldArrangement {
     pub field_radius: u8,
-    hex_info: Vec<HexInfo>,
+    tiles: Vec<Tile>,
     ports_info: BTreeMap<Path, PortKind>,
 }
 
@@ -26,32 +26,32 @@ pub enum HexArrangementError {
 impl FieldArrangement {
     pub fn new(
         field_radius: u8,
-        hex_info: Vec<HexInfo>,
+        tiles: Vec<Tile>,
         ports_info: BTreeMap<Path, PortKind>,
     ) -> Result<Self, HexArrangementError> {
-        if Hex::cum_ring_size(field_radius) as usize != hex_info.len() {
+        if Hex::cum_ring_size(field_radius) as usize != tiles.len() {
             return Err(HexArrangementError::InconsistentSizes("".to_string()));
         }
 
         Ok(Self {
             field_radius,
-            hex_info,
+            tiles,
             ports_info,
         })
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = HexInfo> {
-        self.hex_info.iter().copied()
+    pub fn iter(&self) -> impl Iterator<Item = Tile> {
+        self.tiles.iter().copied()
     }
 
-    pub fn enum_iter(&self) -> impl Iterator<Item = (usize, HexInfo)> {
-        self.hex_info.iter().copied().enumerate()
+    pub fn enum_iter(&self) -> impl Iterator<Item = (usize, Tile)> {
+        self.tiles.iter().copied().enumerate()
     }
 
-    pub fn hex_enum_iter(&self) -> impl Iterator<Item = (Hex, HexInfo)> {
+    pub fn hex_enum_iter(&self) -> impl Iterator<Item = (Hex, Tile)> {
         (0..)
             .map(|index| Hex::from_spiral(index))
-            .zip(self.hex_info.iter().copied())
+            .zip(self.tiles.iter().copied())
     }
 
     pub fn ports(&self) -> &BTreeMap<Path, PortKind> {
@@ -59,20 +59,20 @@ impl FieldArrangement {
     }
 
     pub fn len(&self) -> usize {
-        self.hex_info.len()
+        self.tiles.len()
     }
 }
 
 impl Index<usize> for FieldArrangement {
-    type Output = HexInfo;
+    type Output = Tile;
 
     fn index(&self, index: usize) -> &Self::Output {
-        &self.hex_info[index]
+        &self.tiles[index]
     }
 }
 
 impl Index<Hex> for FieldArrangement {
-    type Output = HexInfo;
+    type Output = Tile;
 
     fn index(&self, index: Hex) -> &Self::Output {
         &self[index.to_spiral()]

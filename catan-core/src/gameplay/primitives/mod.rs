@@ -17,7 +17,7 @@ pub enum PortKind {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub enum HexInfo {
+pub enum Tile {
     Resource { resource: Resource, number: DiceVal },
     River { number: DiceVal },
     Desert,
