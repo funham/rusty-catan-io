@@ -101,9 +101,9 @@ impl DevCardData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecuredDevCardData {
-    pub(crate) queued: u16,
-    pub(crate) active: u16,
-    pub(crate) played: UsableDevCardCollection,
+    pub queued: u16,
+    pub active: u16,
+    pub played: UsableDevCardCollection,
 }
 
 impl SecuredDevCardData {

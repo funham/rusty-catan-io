@@ -1,0 +1,13 @@
+{
+  "players": [
+    { "kind": "cli" },
+    { "kind": "lazy" },
+    { "kind": "lazy" },
+    { "kind": "lazy" }
+  ],
+  "displays": [
+    { "kind": "ascii" }
+  ],
+  "field": { "kind": "default" },
+  "dice": { "kind": "random" }
+}

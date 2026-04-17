@@ -29,9 +29,9 @@ impl GameInitializationState {
         Self {
             turn: GameTurn::new(field.n_players as u8),
             players: PlayerDataContainer::new(field.n_players),
+            builds: BuildDataContainer::new(field.n_players),
             field,
             bank: Default::default(),
-            builds: Default::default(),
         }
     }
 
@@ -44,6 +44,7 @@ impl GameInitializationState {
             .map(|(id, player)| VisiblePlayer {
                 player_id: id,
                 public_data: SecuredPlayerData::from(&player),
+                builds: self.builds.all_builds()[id].clone(),
             })
             .collect();
 

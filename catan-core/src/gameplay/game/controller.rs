@@ -16,6 +16,7 @@ use crate::{
     gameplay::primitives::resource::ResourceCollection,
     math::dice::DiceVal,
     topology::{Hex, Intersection},
+    GameEvent, GameObserver, NoopObserver,
 };
 use std::collections::BTreeSet;
 
@@ -24,10 +25,11 @@ pub enum GameResult {
     Interrupted,
 }
 
-pub struct TurnHandlingParams<'a, 'b> {
+pub struct TurnHandlingParams<'a, 'b, 'c> {
     pub(super) player_id: PlayerId,
     pub(super) game: &'a mut GameState,
     pub(super) strategies: &'b mut Vec<Box<dyn Agent>>,
+    pub(super) observer: &'c mut dyn GameObserver,
 }
 
 #[derive(Debug, Default)]
@@ -35,8 +37,17 @@ pub struct GameController {}
 
 impl GameController {
     pub fn init(
+        game_init: GameInitializationState,
+        strategies: &mut Vec<Box<dyn Agent>>,
+    ) -> GameState {
+        let mut observer = NoopObserver;
+        Self::init_with_observer(game_init, strategies, &mut observer)
+    }
+
+    pub fn init_with_observer(
         mut game_init: GameInitializationState,
         strategies: &mut Vec<Box<dyn Agent>>,
+        observer: &mut dyn GameObserver,
     ) -> GameState {
         while game_init.turn.get_rounds_played() < 2 {
             let player_id = game_init.turn.get_turn_index();
@@ -64,13 +75,19 @@ impl GameController {
             game_init.turn.next();
         }
 
-        GameState {
+        let state = GameState {
             turn: GameTurn::new(game_init.field.n_players as u8),
             field: game_init.field,
             bank: game_init.bank,
             players: game_init.players,
             builds: game_init.builds,
-        }
+        };
+
+        observer.on_event(&GameEvent::GameStarted {
+            snapshot: state.snapshot(),
+        });
+
+        state
     }
 
     pub fn run(
@@ -78,14 +95,29 @@ impl GameController {
         strategies: &mut Vec<Box<dyn Agent>>,
         dice: &mut dyn DiceRoller,
     ) -> GameResult {
+        let mut observer = NoopObserver;
+        Self::run_with_observer(game, strategies, dice, &mut observer)
+    }
+
+    pub fn run_with_observer(
+        game: &mut GameState,
+        strategies: &mut Vec<Box<dyn Agent>>,
+        dice: &mut dyn DiceRoller,
+        observer: &mut dyn GameObserver,
+    ) -> GameResult {
         let mut params = TurnHandlingParams {
             player_id: 0,
             game,
             strategies,
+            observer,
         };
 
         loop {
             if let Some(winner_id) = params.game.check_win_condition() {
+                params.observer.on_event(&GameEvent::GameFinished {
+                    winner_id,
+                    snapshot: params.game.snapshot(),
+                });
                 return GameResult::Win(winner_id);
             };
 
@@ -101,12 +133,19 @@ impl GameController {
         GameResult::Interrupted
     }
 
-    fn handle_turn(params: &mut TurnHandlingParams, dice: &mut dyn DiceRoller) -> Result<(), ()> {
+    fn handle_turn(
+        params: &mut TurnHandlingParams,
+        dice: &mut dyn DiceRoller,
+    ) -> Result<(), ()> {
         params
             .game
             .players
             .get_mut(params.player_id)
             .dev_cards_reset_queue();
+
+        params.observer.on_event(&GameEvent::TurnStarted {
+            snapshot: params.game.snapshot(),
+        });
 
         let _ = GameController::handle_move_init(params, dice);
         Ok(())
@@ -238,8 +277,14 @@ impl GameController {
     }
 
     fn execute_build(params: &mut TurnHandlingParams, buildable: Builds) {
-        if let Err(err) = params.game.builds.try_build(params.player_id, buildable) {
+        if let Err(err) = params.game.builds.try_build(params.player_id, buildable.clone()) {
             log::error!("Invalid building try: {:?}", err)
+        } else {
+            params.observer.on_event(&GameEvent::BuildPlaced {
+                player_id: params.player_id,
+                build: buildable,
+                snapshot: params.game.snapshot(),
+            });
         }
     }
 
@@ -330,6 +375,12 @@ impl GameController {
                     .bank_resource_exchange(id, to_drop, ResourceCollection::default())
             {
                 log::error!("{:?}", e);
+            } else {
+                params.observer.on_event(&GameEvent::PlayerDiscarded {
+                    player_id: id,
+                    discarded: to_drop,
+                    snapshot: params.game.snapshot(),
+                });
             }
         }
 
@@ -347,7 +398,12 @@ impl GameController {
             .game
             .use_robbers(robbery_hex, params.player_id, robbed_id)
         {
-            Ok(_) => (),
+            Ok(_) => params.observer.on_event(&GameEvent::RobberMoved {
+                player_id: params.player_id,
+                hex: robbery_hex,
+                robbed_id,
+                snapshot: params.game.snapshot(),
+            }),
             Err(e) => log::error!("strategy sent invalid rob request: {:?}", e),
         }
     }
@@ -367,7 +423,14 @@ impl GameController {
     }
 
     fn execute_dice_trow(params: &mut TurnHandlingParams, dice: &mut dyn DiceRoller) {
-        match dice.roll() {
+        let roll = dice.roll();
+        params.observer.on_event(&GameEvent::DiceRolled {
+            player_id: params.player_id,
+            value: roll,
+            snapshot: params.game.snapshot(),
+        });
+
+        match roll {
             seven if seven == DiceVal::seven() => Self::execute_seven(params),
             other => Self::execute_harvesting(params, other),
         }

@@ -189,6 +189,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "catan-runtime"
+version = "0.1.0"
+dependencies = [
+ "catan-agents",
+ "catan-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "catan-server"
 version = "0.1.0"
 dependencies = [

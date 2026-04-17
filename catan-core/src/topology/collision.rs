@@ -94,6 +94,6 @@ impl Placeble for Road {
 
         self.pos
             .intersections_iter()
-            .all(|v| connected(v) && !broken(v))
+            .any(|v| connected(v) && !broken(v))
     }
 }

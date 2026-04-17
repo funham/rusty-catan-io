@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    gameplay::field::state::BuildCollection,
     gameplay::primitives::{
         bank::{Bank, BankResourceExchangeError, BankViewOwned, PlayerResourceExchangeError},
         build::{BuildDataContainer, Builds, City, Road, Settlement},
@@ -27,6 +28,25 @@ pub struct GameState {
 pub struct VisiblePlayer {
     pub player_id: PlayerId,
     pub public_data: SecuredPlayerData,
+    pub builds: BuildCollection,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PublicPlayerState {
+    pub player_id: PlayerId,
+    pub public_data: SecuredPlayerData,
+    pub builds: BuildCollection,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GameSnapshot {
+    pub current_player_id: PlayerId,
+    pub rounds_played: u16,
+    pub field: FieldState,
+    pub bank: BankViewOwned,
+    pub players: Vec<PublicPlayerState>,
+    pub longest_road_owner: Option<PlayerId>,
+    pub largest_army_owner: Option<PlayerId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,6 +75,27 @@ pub enum DevCardUsageError {
 }
 
 impl GameState {
+    pub fn snapshot(&self) -> GameSnapshot {
+        GameSnapshot {
+            current_player_id: self.turn.get_turn_index(),
+            rounds_played: self.turn.get_rounds_played(),
+            field: self.field.clone(),
+            bank: self.bank.public_view(),
+            players: self
+                .players
+                .iter()
+                .enumerate()
+                .map(|(player_id, player)| PublicPlayerState {
+                    player_id,
+                    public_data: SecuredPlayerData::from(&player),
+                    builds: self.builds.all_builds()[player_id].clone(),
+                })
+                .collect(),
+            longest_road_owner: self.builds.longest_road(),
+            largest_army_owner: self.players.best_army(),
+        }
+    }
+
     pub fn perspective(&self, player_id: PlayerId) -> Perspective {
         let other_players = self
             .players
@@ -64,14 +105,13 @@ impl GameState {
             .map(|(id, player)| VisiblePlayer {
                 player_id: id,
                 public_data: SecuredPlayerData::from(&player),
+                builds: self.builds.all_builds()[id].clone(),
             })
             .collect();
 
         Perspective {
             player_id,
-            player_view: self.players.get(player_id).resources().clone().into_player_data(
-                self.players.get(player_id).dev_cards().clone(),
-            ),
+            player_view: player_data_from_view(self.players.get(player_id)),
             field: self.field.clone(),
             bank: self.bank.public_view(),
             other_players,
@@ -323,6 +363,10 @@ impl GameState {
 trait IntoPlayerData {
     fn into_player_data(self, dev_cards: crate::gameplay::primitives::dev_card::DevCardData)
     -> PlayerData;
+}
+
+fn player_data_from_view(player: crate::gameplay::primitives::player::PlayerDataProxy<'_>) -> PlayerData {
+    player.resources().clone().into_player_data(player.dev_cards().clone())
 }
 
 impl IntoPlayerData for ResourceCollection {

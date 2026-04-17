@@ -10,13 +10,58 @@ pub use gameplay::agent;
 use crate::{
     gameplay::{
         agent::Agent,
-        game::{controller::GameController, init::GameInitializationState, state::GameState},
+        game::{
+            controller::GameController,
+            init::GameInitializationState,
+            state::{GameSnapshot, GameState},
+        },
+        primitives::{build::Builds, player::PlayerId, resource::ResourceCollection},
     },
-    math::dice::DiceRoller,
+    math::dice::{DiceRoller, DiceVal},
+    topology::Hex,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum GameEvent {}
+pub enum GameEvent {
+    GameStarted { snapshot: GameSnapshot },
+    TurnStarted { snapshot: GameSnapshot },
+    DiceRolled {
+        player_id: PlayerId,
+        value: DiceVal,
+        snapshot: GameSnapshot,
+    },
+    BuildPlaced {
+        player_id: PlayerId,
+        build: Builds,
+        snapshot: GameSnapshot,
+    },
+    PlayerDiscarded {
+        player_id: PlayerId,
+        discarded: ResourceCollection,
+        snapshot: GameSnapshot,
+    },
+    RobberMoved {
+        player_id: PlayerId,
+        hex: Hex,
+        robbed_id: Option<PlayerId>,
+        snapshot: GameSnapshot,
+    },
+    GameFinished {
+        winner_id: PlayerId,
+        snapshot: GameSnapshot,
+    },
+}
+
+pub trait GameObserver {
+    fn on_event(&mut self, event: &GameEvent);
+}
+
+#[derive(Debug, Default)]
+pub struct NoopObserver;
+
+impl GameObserver for NoopObserver {
+    fn on_event(&mut self, _: &GameEvent) {}
+}
 
 // type Agents = [Box<dyn Agent>];
 type AgentsOwned = Vec<Box<dyn Agent>>;
@@ -42,10 +87,26 @@ impl GameInitializer {
 
         GameRunner { state, agents }
     }
+
+    pub fn init_game_with_observer(self, observer: &mut dyn GameObserver) -> GameRunner {
+        let mut agents = self.agents;
+        let state = GameController::init_with_observer(self.state, &mut agents, observer);
+
+        GameRunner { state, agents }
+    }
 }
 
 impl GameRunner {
     pub fn run(&mut self, dice: &mut dyn DiceRoller) {
-        GameController::run(&mut self.state, &mut self.agents, dice);
+        let mut observer = NoopObserver;
+        GameController::run_with_observer(&mut self.state, &mut self.agents, dice, &mut observer);
+    }
+
+    pub fn run_with_observer(
+        &mut self,
+        dice: &mut dyn DiceRoller,
+        observer: &mut dyn GameObserver,
+    ) {
+        GameController::run_with_observer(&mut self.state, &mut self.agents, dice, observer);
     }
 }

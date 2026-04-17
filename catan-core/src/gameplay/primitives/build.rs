@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     gameplay::{
-        field::state::BuildCollection,
+        field::state::{BuildCollection, FieldState},
         primitives::{
             player::PlayerId,
             resource::{HasCost, ResourceCollection},
@@ -38,7 +38,7 @@ pub struct BuildDataContainer {
     longest_road: Option<PlayerId>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct PlayerBuildData {
     pub settlements: BTreeSet<Settlement>,
     pub cities: BTreeSet<City>,
@@ -46,6 +46,13 @@ pub struct PlayerBuildData {
 }
 
 impl BuildDataContainer {
+    pub fn new(n_players: usize) -> Self {
+        Self {
+            players: (0..n_players).map(|_| PlayerBuildData::default()).collect(),
+            longest_road: None,
+        }
+    }
+
     /* occupancy */
     pub fn builds_occupancy<Players>(&self, ids: Players) -> IntersectionOccupancy
     where
@@ -167,11 +174,8 @@ impl BuildDataContainer {
             false => return Err(BuildingError::InitSettlement()),
         }
 
-        let road_ok = checker
-            .full_occupancy()
-            .roads_occupancy
-            .paths
-            .contains(&road.pos);
+        let road_ok = road.pos.intersections_iter().any(|v| v == settlement.pos)
+            && !checker.full_occupancy().roads_occupancy.paths.contains(&road.pos);
 
         road_ok
             .not()
@@ -186,8 +190,89 @@ impl BuildDataContainer {
     }
 
     /* queries */
-    pub fn builds_on_hex(&self, _hex: Hex) -> BTreeMap<PlayerId, BuildCollection> {
-        todo!("do I really need that?")
+    pub fn builds_on_hex(&self, hex: Hex) -> BTreeMap<PlayerId, BuildCollection> {
+        self.players
+            .iter()
+            .enumerate()
+            .filter_map(|(player_id, player)| {
+                let settlements = player
+                    .settlements
+                    .iter()
+                    .copied()
+                    .filter(|settlement| settlement.pos.as_set().contains(&hex))
+                    .collect::<Vec<_>>();
+                let cities = player
+                    .cities
+                    .iter()
+                    .copied()
+                    .filter(|city| city.pos.as_set().contains(&hex))
+                    .collect::<Vec<_>>();
+                let roads = player
+                    .roads
+                    .iter()
+                    .filter(|road| road.pos.as_set().contains(&hex))
+                    .collect::<Vec<_>>();
+
+                if settlements.is_empty() && cities.is_empty() && roads.is_empty() {
+                    None
+                } else {
+                    Some((
+                        player_id,
+                        BuildCollection {
+                            settlements,
+                            cities,
+                            roads,
+                        },
+                    ))
+                }
+            })
+            .collect()
+    }
+
+    pub fn all_builds(&self) -> Vec<BuildCollection> {
+        self.players
+            .iter()
+            .map(|player| BuildCollection {
+                settlements: player.settlements.iter().copied().collect(),
+                cities: player.cities.iter().copied().collect(),
+                roads: player.roads.iter().collect(),
+            })
+            .collect()
+    }
+
+    pub fn possible_initial_placements(
+        &self,
+        field: &FieldState,
+        player_id: PlayerId,
+    ) -> Vec<(Settlement, Road)> {
+        let checker = CollisionChecker {
+            other_occupancy: &self.occupancy((0..self.players.len()).filter(|id| id != &player_id)),
+            this_occupancy: &self.occupancy([player_id]),
+        };
+
+        let intersections = field
+            .arrangement
+            .hex_enum_iter()
+            .flat_map(|(hex, _)| hex.vertices().collect::<Vec<_>>())
+            .collect::<BTreeSet<_>>();
+
+        intersections
+            .into_iter()
+            .map(|pos| Settlement { pos })
+            .filter(|settlement| {
+                checker
+                    .full_occupancy()
+                    .builds_occupancy
+                    .is_disjoint(&checker.building_deadzone(settlement))
+            })
+            .flat_map(|settlement| {
+                settlement
+                    .pos
+                    .paths()
+                    .into_iter()
+                    .map(move |path| (settlement, Road { pos: path }))
+            })
+            .collect()
     }
 }
 
@@ -314,12 +399,12 @@ impl City {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Road {
     pub pos: Path,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Builds {
     Settlement(Settlement),
     City(City),
