@@ -111,6 +111,15 @@ impl GameTurn<BackAndForthCycle> {
             self.rounds_played.inc();
         }
     }
+
+    pub fn into_regular(self) -> GameTurn<RegularCycle> {
+        GameTurn {
+            n_players: self.n_players,
+            rounds_played: 0,
+            turn_index: 0,
+            _p: PhantomData::default(),
+        }
+    }
 }
 
 impl<T> Into<PlayerId> for GameTurn<T> {

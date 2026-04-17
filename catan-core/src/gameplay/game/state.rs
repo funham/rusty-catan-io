@@ -18,8 +18,8 @@ use crate::{gameplay::field::state::FieldState, topology::Path};
 #[derive(Debug)]
 pub struct GameState {
     pub field: FieldState,
-    pub bank: Bank,
     pub turn: GameTurn,
+    pub bank: Bank,
     pub players: PlayerDataContainer,
     pub builds: BuildDataContainer,
 }

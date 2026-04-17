@@ -62,8 +62,14 @@ impl GameInitializationState {
         }
     }
 
-    pub fn promote(self) -> GameState {
-        todo!()
+    pub fn finish(self) -> GameState {
+        GameState {
+            field: self.field,
+            turn: self.turn.into_regular(),
+            bank: self.bank,
+            players: self.players,
+            builds: self.builds,
+        }
     }
 }
 
