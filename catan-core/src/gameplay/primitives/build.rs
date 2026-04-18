@@ -101,8 +101,8 @@ pub mod builds {
         Road(EdgeInsertationError),
         Settlement(),
         City(),
-        InitRoad(),
-        InitSettlement(),
+        InitRoad(Path),
+        InitSettlement(Intersection),
     }
 
     /* Buildable impls */
@@ -270,6 +270,59 @@ pub mod occupancy {
         type OccupancyType = IntersectionOccupancy;
         fn get<'a>(x: &'a AggregateOccupancy) -> &'a Self::OccupancyType {
             &x.builds_occupancy
+        }
+    }
+
+    pub struct BuildDataOccupancy<'a> {
+        pub(crate) container: &'a BoardBuildData,
+    }
+
+    impl<'a> BuildDataOccupancy<'a> {
+        pub fn builds_occupancy<Players>(&self, ids: Players) -> IntersectionOccupancy
+        where
+            Players: IntoIterator<Item = PlayerId> + Clone,
+        {
+            ids.into_iter()
+                .flat_map(|id| {
+                    let player = &self.container.players()[id];
+
+                    player.establishments.iter().map(|s| s.pos)
+                })
+                .collect()
+        }
+
+        pub fn roads_occupancy<Players>(&self, ids: Players) -> PathOccupancy
+        where
+            Players: IntoIterator<Item = PlayerId>,
+        {
+            ids.into_iter()
+                .map(|id| self.container.players()[id].roads_occupancy())
+                .fold(PathOccupancy::default(), |acc, x| acc.union(&x))
+        }
+
+        pub fn occupancy<Players>(&self, ids: Players) -> AggregateOccupancy
+        where
+            Players: IntoIterator<Item = PlayerId> + Clone,
+        {
+            AggregateOccupancy {
+                builds_occupancy: self.builds_occupancy(ids.clone()),
+                roads_occupancy: self.roads_occupancy(ids),
+            }
+        }
+
+        pub fn builds_occupancy_full(&self) -> IntersectionOccupancy {
+            self.builds_occupancy(0..self.container.players().len())
+        }
+
+        pub fn roads_occupancy_full(&self) -> PathOccupancy {
+            self.roads_occupancy(0..self.container.players().len())
+        }
+
+        pub fn occupancy_full(&self) -> AggregateOccupancy {
+            AggregateOccupancy {
+                builds_occupancy: self.builds_occupancy_full(),
+                roads_occupancy: self.roads_occupancy_full(),
+            }
         }
     }
 }
@@ -457,10 +510,10 @@ pub mod data {
             let settlement_ok = checker
                 .full_occupancy()
                 .builds_occupancy
-                .is_disjoint(&checker.building_deadzone(&establishment));
+                .is_disjoint(&checker.building_deadzone(establishment.pos));
 
             if !settlement_ok {
-                return Err(BuildingError::InitSettlement());
+                return Err(BuildingError::InitSettlement(establishment.pos));
             }
 
             self[player_id].establishments.insert(establishment);
@@ -477,7 +530,7 @@ pub mod data {
 
             if !road_ok {
                 log::error!("invalid initial road placement");
-                return Err(BuildingError::InitRoad());
+                return Err(BuildingError::InitRoad(road.pos));
             }
 
             self[player_id].roads.add_edge(&road.pos);
@@ -508,59 +561,6 @@ pub mod data {
 /// Read-only query utilities over the build data.
 pub mod query {
     use super::*;
-
-    pub struct BuildDataOccupancy<'a> {
-        pub(crate) container: &'a BoardBuildData,
-    }
-
-    impl<'a> BuildDataOccupancy<'a> {
-        pub fn builds_occupancy<Players>(&self, ids: Players) -> IntersectionOccupancy
-        where
-            Players: IntoIterator<Item = PlayerId> + Clone,
-        {
-            ids.into_iter()
-                .flat_map(|id| {
-                    let player = &self.container.players()[id];
-
-                    player.establishments.iter().map(|s| s.pos)
-                })
-                .collect()
-        }
-
-        pub fn roads_occupancy<Players>(&self, ids: Players) -> PathOccupancy
-        where
-            Players: IntoIterator<Item = PlayerId>,
-        {
-            ids.into_iter()
-                .map(|id| self.container.players()[id].roads_occupancy())
-                .fold(PathOccupancy::default(), |acc, x| acc.union(&x))
-        }
-
-        pub fn occupancy<Players>(&self, ids: Players) -> AggregateOccupancy
-        where
-            Players: IntoIterator<Item = PlayerId> + Clone,
-        {
-            AggregateOccupancy {
-                builds_occupancy: self.builds_occupancy(ids.clone()),
-                roads_occupancy: self.roads_occupancy(ids),
-            }
-        }
-
-        pub fn builds_occupancy_full(&self) -> IntersectionOccupancy {
-            self.builds_occupancy(0..self.container.players().len())
-        }
-
-        pub fn roads_occupancy_full(&self) -> PathOccupancy {
-            self.roads_occupancy(0..self.container.players().len())
-        }
-
-        pub fn occupancy_full(&self) -> AggregateOccupancy {
-            AggregateOccupancy {
-                builds_occupancy: self.builds_occupancy_full(),
-                roads_occupancy: self.roads_occupancy_full(),
-            }
-        }
-    }
 
     pub struct BuildDataQuery<'a> {
         pub(crate) container: &'a BoardBuildData,
@@ -627,28 +627,46 @@ pub mod query {
 
             let intersections = field
                 .arrangement
-                .hex_enum_iter()
-                .flat_map(|(hex, _)| hex.vertices().collect::<Vec<_>>())
+                .intersections()
+                .into_iter()
+                .collect::<Vec<_>>();
+
+            // plan:
+            // build_deadzone = full_occupancy.builds_occupancy.map(|v| v.deadzone()).union()
+            // intersections = intersections.substract(build_deadzone)
+            //
+            // path_deadzone = occ.occupancy_full().roads_occupancy.paths()
+            // poissible_placements = intersections.flat_map(|v| v.paths().substract(path_deadzone).map(|p| (v, p)))
+
+            let build_deadzone = occ
+                .occupancy_full()
+                .builds_occupancy
+                .iter()
+                .flat_map(|v| checker.building_deadzone(*v))
                 .collect::<BTreeSet<_>>();
 
-            intersections
+            let available_intersections = intersections
                 .into_iter()
-                .map(|pos| Establishment {
-                    pos,
-                    stage: EstablishmentType::Settlement,
-                })
-                .filter(|settlement| {
-                    checker
-                        .full_occupancy()
-                        .builds_occupancy
-                        .is_disjoint(&checker.building_deadzone(settlement))
-                })
-                .flat_map(|settlement| {
-                    settlement
-                        .pos
-                        .paths()
-                        .into_iter()
-                        .map(move |path| (settlement, Road { pos: path }))
+                .filter(|v| !build_deadzone.contains(v));
+
+            let path_deadzone = &occ.occupancy_full().roads_occupancy.paths;
+
+            // log::debug!("build_deadzone: {:?}", build_deadzone);
+
+            let possible_placements = available_intersections.flat_map(|v| {
+                let paths = v.paths().into_iter().filter(|p| !path_deadzone.contains(p));
+                paths.map(move |p| (v, p))
+            });
+
+            possible_placements
+                .map(|(v, p)| {
+                    (
+                        Establishment {
+                            pos: v,
+                            stage: EstablishmentType::Settlement,
+                        },
+                        Road { pos: p },
+                    )
                 })
                 .collect()
         }

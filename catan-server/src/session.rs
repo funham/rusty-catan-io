@@ -34,7 +34,7 @@ impl PlayerSession {
 
                 Some(msg) = self.from_game.recv() => {
                     let text = serde_json::to_string(&msg).unwrap();
-                    self.socket.send(Message::Text(text)).await.unwrap();
+                    self.socket.send(Message::Text(text.into())).await.unwrap();
                 }
             }
         }

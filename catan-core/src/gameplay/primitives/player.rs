@@ -23,7 +23,7 @@ impl PlayerDataContainer {
         }
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = PlayerDataProxy> {
+    pub fn iter(&self) -> impl Iterator<Item = PlayerDataProxy<'_>> {
         (0..self.players.len()).map(|id| self.get(id))
     }
 
@@ -59,7 +59,7 @@ impl PlayerDataContainer {
         SecuredPlayerData::from(&self.get(player_id))
     }
 
-    pub fn get(&self, player_id: PlayerId) -> PlayerDataProxy {
+    pub fn get(&self, player_id: PlayerId) -> PlayerDataProxy<'_> {
         PlayerDataProxy {
             player_id,
             container: self,
@@ -68,7 +68,7 @@ impl PlayerDataContainer {
         }
     }
 
-    pub fn get_mut(&mut self, player_id: PlayerId) -> PlayerDataProxyMut {
+    pub fn get_mut(&mut self, player_id: PlayerId) -> PlayerDataProxyMut<'_> {
         PlayerDataProxyMut {
             player_id,
             container: self,

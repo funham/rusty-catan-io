@@ -30,16 +30,8 @@ impl<'a, 'b> CollisionChecker<'a, 'b> {
             .any(|_| true)
     }
 
-    pub fn building_deadzone(
-        &self,
-        build: &impl HasPos<Pos = Intersection>,
-    ) -> IntersectionOccupancy {
-        build
-            .pos()
-            .neighbors()
-            .into_iter()
-            .chain([build.pos()])
-            .collect()
+    pub fn building_deadzone(&self, pos: Intersection) -> IntersectionOccupancy {
+        pos.neighbors().into_iter().chain([pos]).collect()
     }
 }
 
@@ -72,7 +64,7 @@ pub trait Placeble: OccupancyGetter + HasPos {
 
 impl<T: OccupancyGetter + HasPos<Pos = Intersection>> Placeble for T {
     fn placeble(&self, checker: &CollisionChecker) -> bool {
-        let dead_zone = checker.building_deadzone(self);
+        let dead_zone = checker.building_deadzone(self.pos());
         checker.connected(self)
             && checker
                 .full_occupancy()

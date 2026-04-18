@@ -269,7 +269,7 @@ impl GameState {
         robber_id: PlayerId,
         robbed_id: Option<PlayerId>,
     ) -> Result<(), DevCardUsageError> {
-        if (self.field.arrangement.field_radius as u32) < rob_hex.norm() {
+        if (self.field.arrangement.field_radius as usize) < rob_hex.norm() {
             return Err(DevCardUsageError::InvalidHex);
         }
 

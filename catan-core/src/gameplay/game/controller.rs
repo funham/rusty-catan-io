@@ -28,6 +28,11 @@ pub struct TurnHandlingParams<'a, 'b, 'c> {
     pub(super) agents: &'b mut Vec<Box<dyn Agent>>,
     pub(super) observer: &'c mut dyn GameObserver,
 }
+#[derive(Debug)]
+pub enum RobError {
+    AutoRob { id: PlayerId },
+    WrongAgentResponseType(AgentResponse),
+}
 
 #[derive(Debug, Default)]
 pub struct GameController {}
@@ -61,10 +66,10 @@ impl GameController {
 
             match game_init.builds.try_init_place(player_id, road, settlement) {
                 Err(err) => match err {
-                    BuildingError::InitRoad() => {
+                    BuildingError::InitRoad(_) => {
                         log::error!("invalid initial road placement {:?}", err)
                     }
-                    BuildingError::InitSettlement() => {
+                    BuildingError::InitSettlement(_) => {
                         log::error!("invalid initial settlement placement {:?}", err)
                     }
                     _ => unreachable!(),
@@ -382,12 +387,25 @@ impl GameController {
             }
         }
 
-        let robbery_hex = match Self::request(
-            params,
-            AgentRequest::RobHex(params.game.perspective(params.player_id)),
-        ) {
-            AgentResponse::RobHex(robbery_hex) => robbery_hex,
-            other => panic!("expected rob-hex response, got {other:?}"),
+        let robbery_hex = loop {
+            // validate response type
+            let robbery_hex = loop {
+                match Self::request(
+                    params,
+                    AgentRequest::RobHex(params.game.perspective(params.player_id)),
+                ) {
+                    AgentResponse::RobHex(robbery_hex) => break robbery_hex,
+                    other => log::error!("Expected rob-hex response, got {other:?}"),
+                };
+            };
+
+            // validate response data
+            if robbery_hex == params.game.field.robber_pos {
+                log::error!("Robbers are already there. Repeat request");
+                continue;
+            }
+
+            break robbery_hex;
         };
 
         let robbed_id = Self::get_robbed_id(params, robbery_hex);
@@ -407,15 +425,31 @@ impl GameController {
     }
 
     fn get_robbed_id(params: &mut TurnHandlingParams, rob_hex: Hex) -> Option<PlayerId> {
+        loop {
+            let robbed_id = Self::get_robbed_id_helper(params, rob_hex);
+
+            match robbed_id {
+                Ok(robbed_id) => break robbed_id,
+                Err(err) => log::error!("Robbing error, trying again. Error: {:?}", err),
+            }
+        }
+    }
+
+    fn get_robbed_id_helper(
+        params: &mut TurnHandlingParams,
+        rob_hex: Hex,
+    ) -> Result<Option<PlayerId>, RobError> {
         match params.game.players_on_hex(rob_hex).as_slice() {
-            [] => None,
-            [robbed_id] => Some(*robbed_id),
+            [] => Ok(None),
+            [robbed_id] if robbed_id == &params.player_id => Ok(None),
+            [robbed_id] => Ok(Some(*robbed_id)),
             _ => match Self::request(
                 params,
                 AgentRequest::RobPlayer(params.game.perspective(params.player_id)),
             ) {
-                AgentResponse::RobPlayer(id) => Some(id),
-                other => panic!("expected rob-player response, got {other:?}"),
+                AgentResponse::RobPlayer(id) if id != params.player_id => Ok(Some(id)),
+                AgentResponse::RobPlayer(id) => Err(RobError::AutoRob { id }),
+                other => Err(RobError::WrongAgentResponseType(other)),
             },
         }
     }

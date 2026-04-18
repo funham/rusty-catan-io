@@ -4,9 +4,9 @@ use std::{
 };
 
 use crate::{
-    gameplay::primitives::{Tile, PortKind},
+    gameplay::primitives::{PortKind, Tile},
     math::dice::DiceVal,
-    topology::{Hex, Path},
+    topology::{Hex, HexIndex, Intersection, Path},
 };
 
 pub type PortsByPlayer = Vec<BTreeSet<PortKind>>;
@@ -29,7 +29,7 @@ impl FieldArrangement {
         tiles: Vec<Tile>,
         ports_info: BTreeMap<Path, PortKind>,
     ) -> Result<Self, HexArrangementError> {
-        if Hex::cum_ring_size(field_radius) as usize != tiles.len() {
+        if HexIndex::spiral_start_of_ring(field_radius as usize + 1) != tiles.len() {
             return Err(HexArrangementError::InconsistentSizes("".to_string()));
         }
 
@@ -48,10 +48,18 @@ impl FieldArrangement {
         self.tiles.iter().copied().enumerate()
     }
 
+    pub fn hex_iter(&self) -> impl Iterator<Item = Hex> {
+        (0..self.tiles.len()).map(|index| HexIndex::spiral_to_hex(index))
+    }
+
     pub fn hex_enum_iter(&self) -> impl Iterator<Item = (Hex, Tile)> {
-        (0..)
-            .map(|index| Hex::from_spiral(index))
-            .zip(self.tiles.iter().copied())
+        self.hex_iter().zip(self.tiles.iter().copied())
+    }
+
+    pub fn intersections(&self) -> impl IntoIterator<Item = Intersection> {
+        self.hex_enum_iter()
+            .flat_map(|(hex, _)| hex.vertices_arr())
+            .collect::<BTreeSet<_>>()
     }
 
     pub fn ports(&self) -> &BTreeMap<Path, PortKind> {
@@ -75,7 +83,7 @@ impl Index<Hex> for FieldArrangement {
     type Output = Tile;
 
     fn index(&self, index: Hex) -> &Self::Output {
-        &self[index.to_spiral()]
+        &self[index.index().to_spiral()]
     }
 }
 

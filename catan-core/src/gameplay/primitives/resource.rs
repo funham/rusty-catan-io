@@ -4,7 +4,7 @@ use std::{
 };
 
 use itertools::Itertools;
-use rand::Rng;
+use rand::RngExt;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -122,7 +122,7 @@ impl ResourceCollection {
     }
 
     pub fn empty(&self) -> bool {
-        self.total() != 0
+        self.total() == 0
     }
 
     pub fn total(&self) -> u16 {
@@ -167,9 +167,11 @@ impl ResourceCollection {
             return None;
         }
 
+        log::debug!("self.total={}", self.total());
+
         // Generate random number
         let mut rng = rand::rng();
-        let mut rand_val: u16 = rng.random_range(0..self.total());
+        let mut rand_val: u16 = rng.random_range(..self.total());
 
         // Find which resource corresponds to the random value
         for (resource, count) in self.unroll() {

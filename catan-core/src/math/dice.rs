@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use rand::{Rng, SeedableRng, rngs::SmallRng};
+use rand::{RngExt, SeedableRng, rngs::SmallRng};
 use serde::{Deserialize, Serialize};
 
 use crate::math::probability::{Probability, Probable};

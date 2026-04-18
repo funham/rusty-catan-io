@@ -2,12 +2,13 @@ use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeSet;
+use std::fmt;
 
 use crate::common::FixedSet;
 use crate::topology::hex::*;
 use crate::topology::path::*;
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Intersection(FixedSet<Hex, 3>);
 
 impl Serialize for Intersection {
@@ -17,6 +18,29 @@ impl Serialize for Intersection {
     {
         let hexes: [Hex; 3] = self.0.into();
         hexes.serialize(serializer)
+    }
+}
+
+impl fmt::Debug for Intersection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let hs: [Hex; 3] = self.0.into();
+
+        // f.debug_struct("Intersection")
+        //     .field("q0", &hs[0].q)
+        //     .field("r0", &hs[0].r)
+        //     .field("q1", &hs[1].q)
+        //     .field("r1", &hs[1].r)
+        //     .field("q2", &hs[2].q)
+        //     .field("r2", &hs[2].r)
+        //     .finish()
+
+        let mut dbg = f.debug_struct("Intersection");
+
+        for i in 0..3 {
+            dbg.field(&format!("{}", i), &Into::<(i32, i32)>::into(hs[i]));
+        }
+
+        dbg.finish()
     }
 }
 

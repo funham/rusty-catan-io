@@ -5,7 +5,9 @@ mod host;
 
 use std::path::PathBuf;
 
+
 fn main() {
+    env_logger::init();
     let path = std::env::args()
         .nth(1)
         .map(PathBuf::from)

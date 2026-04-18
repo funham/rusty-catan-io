@@ -63,7 +63,7 @@ impl Hex {
         -self.q - self.r
     }
 
-    pub const fn norm(&self) -> u32 {
+    pub const fn norm(&self) -> usize {
         self.distance(&Self::new(0, 0))
     }
 
@@ -130,12 +130,11 @@ impl Hex {
         self.neighbors().into_iter().collect()
     }
 
-    pub fn vertices(&self) -> impl Iterator<Item = Intersection> {
-        // assumptions: neighbors are listed in counter or clockwise order
+    pub fn vertices(&self) -> impl Iterator<Item = Intersection> + use<'_> {
+        // assumptions: neighbors are listed in counter or clockwise order starting with the North-East
         self.neighbors()
             .into_iter()
-            .chain(self.neighbors())
-            .take(1)
+            .chain(self.neighbors().into_iter().take(1))
             .tuple_windows()
             .map(|(h1, h2)| {
                 Intersection::try_from((h1, h2, *self))
@@ -143,12 +142,19 @@ impl Hex {
             })
     }
 
-    pub const fn distance(&self, other: &Self) -> u32 {
+    pub fn vertices_arr(&self) -> [Intersection; 6] {
+        self.vertices()
+            .collect::<Vec<_>>()
+            .try_into()
+            .expect("Hexagon has 6 vertices. Duh.")
+    }
+
+    pub const fn distance(&self, other: &Self) -> usize {
         let dq = self.q - other.q;
         let dr = self.r - other.r;
         let ds = self.get_s() - other.get_s();
 
-        (dq.abs() + dr.abs() + ds.abs()) as u32 / 2
+        (dq.abs() + dr.abs() + ds.abs()) as usize / 2
     }
 
     pub const fn are_neighbors(&self, other: &Self) -> bool {
@@ -159,56 +165,82 @@ impl Hex {
         Hex { q: 0, r: 0 }.neighbors()
     }
 
-    pub const fn ring_size(ring: u8) -> u32 {
-        ring as u32 * 6
+    pub const fn index(&self) -> HexIndex {
+        HexIndex { hex: *self }
     }
+}
 
-    pub const fn cum_ring_size(ring: u8) -> u32 {
-        (1 + 3 * ring * (ring + 1)) as u32
-    }
+pub struct HexIndex {
+    pub hex: Hex,
+}
 
-    pub const fn cum_ring_size_generic<const RING: u32>() -> u32 {
-        1 + 3 * RING * (RING + 1)
-    }
-
-    pub const fn from_spiral(spiral_index: usize) -> Self {
-        Self {
-            q: 0,
-            r: spiral_index as i32,
+impl HexIndex {
+    pub const fn ring_size(radius: usize) -> usize {
+        match radius {
+            0 => 1,
+            radius => radius * 6,
         }
     }
 
-    pub fn to_spiral(&self) -> usize {
-        todo!()
+    pub fn hex_ring(center: Hex, radius: usize) -> Vec<Hex> {
+        if radius == 0 {
+            return vec![center];
+        }
+
+        let mut results = Vec::new();
+        let mut hex = center + Hex::directions()[4] * radius as i32;
+
+        for i in 0..6 {
+            for _ in 0..radius {
+                results.push(hex);
+                hex = hex.neighbors()[i];
+            }
+        }
+
+        results
     }
 
     pub fn spiral() -> impl Iterator<Item = Hex> {
-        (0..).map(|i| Self::from_spiral(i))
+        (0..).map(|i| Self::spiral_to_hex(i))
     }
 
-    // pub const fn spiral_index(&self) -> u32 {
-    //     let mut dir = Self::directions();
-    //     let mut d2 = [Hex { q: 0, r: 0 }; 6];
+    pub fn spiral_to_hex(index: usize) -> Hex {
+        let center = Hex::new(0, 0);
+        let radius = Self::spiral_to_radius(index);
+        let ring_start = Self::spiral_start_of_ring(radius);
 
-    //     let mut i = 0;
-    //     while i < 6 {
-    //         d2[i] = dir[i] * 6;
-    //         i += 1;
-    //     }
+        Self::hex_ring(center, radius)[index - ring_start]
+    }
 
-    //     // East, Northeast, Northwest, West, Southwest, Southeast
-    //     let (pos, side) = match (self.q, self.r, self.get_s()) {
-    //         (_, _, s) if dir[0].get_s() == s => (self.q, 0),
-    //         (_, r, _) if dir[1].r == r => (-self.get_s(), 1),
-    //         (q, _, _) if dir[2].q == q => (self.r, 2),
-    //         (_, _, s) if dir[3].get_s() == s => (-self.q, 3),
-    //         (_, r, _) if dir[4].r == r => (self.get_s(), 4),
-    //         (q, _, _) if dir[5].q == q => (-self.r, 5),
-    //         _ => unreachable!(),
-    //     };
+    pub fn hex_to_spiral(hex: Hex) -> usize {
+        let center = Hex::new(0, 0);
+        let radius = hex.distance(&center) as usize;
+        let ring_hexes = Self::hex_ring(center, radius);
+        for i in 0..ring_hexes.len() {
+            if hex == ring_hexes[i] {
+                return i + Self::spiral_start_of_ring(radius);
+            }
+        }
+        unreachable!("trust me bro")
+    }
 
-    //     1 + 3 * self.norm() * (self.norm() - 1) + side * 6 + pos as u32
-    // }
+    pub fn to_spiral(&self) -> usize {
+        Self::hex_to_spiral(self.hex)
+    }
+
+    pub const fn spiral_start_of_ring(radius: usize) -> usize {
+        match radius {
+            0 => 0,
+            radius => 1 + 3 * radius * (radius - 1),
+        }
+    }
+
+    pub const fn spiral_to_radius(index: usize) -> usize {
+        match index {
+            0 => 0,
+            index => ((12 * index - 3).isqrt() + 3) / 6,
+        }
+    }
 }
 
 impl std::fmt::Display for Hex {
@@ -226,6 +258,90 @@ impl Hash for Hex {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    fn h(q: i32, r: i32) -> Hex {
+        Hex::new(q, r)
+    }
+
+    fn v(h1: Hex, h2: Hex, h3: Hex) -> Intersection {
+        Intersection::try_from((h1, h2, h3)).unwrap()
+    }
+
     #[test]
-    fn it_works() {}
+    fn hex_vertices() {
+        let h1 = Hex::new(0, 0);
+        let vs = h1.vertices().collect::<Vec<_>>();
+        assert_eq!(vs, [v(h(0, 0), h(-1, 0), h(0, -1))]); // TODO: edit test
+    }
+
+    #[test]
+    fn hex_index_ring_basic() {
+        assert_eq!(HexIndex::ring_size(0), 1);
+        assert_eq!(HexIndex::ring_size(1), 6);
+        assert_eq!(HexIndex::ring_size(1), 12);
+        assert_eq!(HexIndex::hex_ring(h(32, -12), 1), h(32, -12).neighbors());
+    }
+
+    #[test]
+    fn hex_index_ring_advanced() {
+        let radius: i32 = 3;
+
+        let mut ring_brute = Vec::new();
+        for q in -radius * 2..=radius * 2 {
+            for r in -radius * 2..=radius * 2 {
+                if h(q, r).norm() == radius as usize {
+                    ring_brute.push(h(q, r));
+                }
+            }
+        }
+
+        assert_eq!(
+            ring_brute.iter().sorted().collect::<Vec<_>>(),
+            HexIndex::hex_ring(h(0, 0), radius as usize)
+                .iter()
+                .sorted()
+                .collect::<Vec<_>>()
+        );
+
+        let center = h(123, -434);
+
+        let radius: i32 = 5;
+
+        let mut ring_brute = Vec::new();
+        for q in center.q - radius * 2..=center.q + radius * 2 {
+            for r in center.r - radius * 2..=center.r + radius * 2 {
+                if h(q, r).distance(&center) == radius as usize {
+                    ring_brute.push(h(q, r));
+                }
+            }
+        }
+
+        assert_eq!(
+            ring_brute.iter().sorted().collect::<Vec<_>>(),
+            HexIndex::hex_ring(center, radius as usize)
+                .iter()
+                .sorted()
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn spiral_index() {
+        // spiral to hex
+        assert_eq!(HexIndex::spiral_to_hex(0), h(0, 0));
+        assert_eq!(HexIndex::spiral_to_hex(1), h(-1, 1));
+        assert_eq!(HexIndex::spiral_to_hex(2), h(0, 1));
+        assert_eq!(HexIndex::spiral_to_hex(3), h(1, 0));
+        assert_eq!(HexIndex::spiral_to_hex(4), h(1, -1));
+        assert_eq!(HexIndex::spiral_to_hex(5), h(0, -1));
+        assert_eq!(HexIndex::spiral_to_hex(6), h(-1, 0));
+        assert_eq!(HexIndex::spiral_to_hex(7), h(-2, 2));
+
+        // hex to spiral
+        for i in 0..69 {
+            let hex = HexIndex::spiral_to_hex(i);
+            assert_eq!(i, HexIndex::hex_to_spiral(hex));
+        }
+    }
 }
