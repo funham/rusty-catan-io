@@ -83,7 +83,7 @@ pub mod builds {
         pub stage: EstablishmentType,
     }
 
-    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
     pub struct Road {
         pub pos: Path,
     }

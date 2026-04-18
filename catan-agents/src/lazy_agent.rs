@@ -1,17 +1,11 @@
 use catan_core::{
     agent::{
-        Agent, AgentRequest, AgentResponse, action::{
+        Agent, AgentRequest, AgentResponse,
+        action::{
             FinalStateAnswer, InitialAction, PostDevCardAction, PostDiceThrowAnswer, TradeAction,
-        }
-    },
-    gameplay::{
-        game::state::Perspective,
-        primitives::{
-            build::{Establishment, EstablishmentType, Road},
-            resource::ResourceCollection,
         },
     },
-    topology::Intersection,
+    gameplay::{game::state::Perspective, primitives::resource::ResourceCollection},
 };
 
 #[derive(Debug, Default)]
@@ -19,48 +13,17 @@ pub struct LazyAgent;
 
 impl LazyAgent {
     fn choose_initial(perspective: &Perspective) -> AgentResponse {
-        let occupied = perspective
-            .other_players
-            .iter()
-            .flat_map(|player| {
-                player
-                    .builds
-                    .establishments
-                    .iter()
-                    .map(|settlement| settlement.pos)
-            })
-            .collect::<std::collections::BTreeSet<_>>();
-
-        let placement = perspective
-            .field
-            .arrangement
-            .hex_enum_iter()
-            .flat_map(|(hex, _)| hex.vertices().collect::<Vec<_>>())
-            .collect::<std::collections::BTreeSet<_>>()
-            .into_iter()
-            .find(|candidate| {
-                let deadzone = candidate
-                    .neighbors()
-                    .into_iter()
-                    .chain([*candidate])
-                    .collect::<std::collections::BTreeSet<Intersection>>();
-                occupied.is_disjoint(&deadzone)
-            })
-            .expect("field should have at least one intersection");
-
-        let road = placement
-            .paths()
-            .into_iter()
-            .next()
-            .expect("intersection should have at least one path");
-
-
-        // TODO: remove the logic above and use logic from primitives/build and topology/graph maybe
-        // perspective.builds.
+        let (establishment, road) = perspective
+            .builds
+            .query()
+            .possible_initial_placements(&perspective.field, perspective.player_id)
+            .first()
+            .expect("there must be a place")
+            .clone();
 
         AgentResponse::Initialization {
-            establishment: Establishment { pos: placement, stage: EstablishmentType::Settlement },
-            road: Road { pos: road },
+            establishment,
+            road,
         }
     }
 }
