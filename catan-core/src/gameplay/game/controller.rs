@@ -4,7 +4,7 @@ use crate::gameplay::agent::{
     agent::{Agent, AgentRequest, AgentResponse},
 };
 use crate::gameplay::game::init::GameInitializationState;
-use crate::gameplay::primitives::build::{BuildingError, Builds, City, Settlement};
+use crate::gameplay::primitives::build::{BuildingError, Build, City, Settlement};
 use crate::gameplay::primitives::dev_card::DevCardUsage;
 use crate::gameplay::primitives::player::PlayerId;
 use crate::gameplay::primitives::trade::BankTrade;
@@ -276,7 +276,7 @@ impl GameController {
         }
     }
 
-    fn execute_build(params: &mut TurnHandlingParams, buildable: Builds) {
+    fn execute_build(params: &mut TurnHandlingParams, buildable: Build) {
         if let Err(err) = params.game.builds.try_build(params.player_id, buildable.clone()) {
             log::error!("Invalid building try: {:?}", err)
         } else {
@@ -297,7 +297,7 @@ impl GameController {
     ) {
         for build_pos in buildings
             .into_iter()
-            .map(|b| b.get_pos())
+            .map(|b| b.pos())
             .collect::<Vec<_>>()
         {
             let coincidential_hexes = build_pos.as_set();

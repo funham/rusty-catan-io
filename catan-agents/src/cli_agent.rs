@@ -13,7 +13,7 @@ use catan_core::{
     gameplay::{
         game::state::Perspective,
         primitives::{
-            build::{Builds, City, Road, Settlement},
+            build::{Build, City, Road, Settlement},
             player::PlayerId,
             resource::{Resource, ResourceCollection},
             trade::{BankTrade, BankTradeKind},
@@ -176,7 +176,7 @@ impl TerminalUi {
         }
     }
 
-    fn parse_build(line: &str) -> Option<Builds> {
+    fn parse_build(line: &str) -> Option<Build> {
         let parts = line.split_whitespace().collect::<Vec<_>>();
         match parts.as_slice() {
             ["build", "road", q1, r1, q2, r2] => {
@@ -185,7 +185,7 @@ impl TerminalUi {
                     Hex::new(q2.parse().ok()?, r2.parse().ok()?),
                 ))
                 .ok()?;
-                Some(Builds::Road(Road { pos: path }))
+                Some(Build::Road(Road { pos: path }))
             }
             ["build", "settlement", q1, r1, q2, r2, q3, r3] => {
                 let pos = Intersection::try_from([
@@ -194,7 +194,7 @@ impl TerminalUi {
                     Hex::new(q3.parse().ok()?, r3.parse().ok()?),
                 ])
                 .ok()?;
-                Some(Builds::Settlement(Settlement { pos }))
+                Some(Build::Settlement(Settlement { pos }))
             }
             ["build", "city", q1, r1, q2, r2, q3, r3] => {
                 let pos = Intersection::try_from([
@@ -203,7 +203,7 @@ impl TerminalUi {
                     Hex::new(q3.parse().ok()?, r3.parse().ok()?),
                 ])
                 .ok()?;
-                Some(Builds::City(City { pos }))
+                Some(Build::City(City { pos }))
             }
             _ => None,
         }

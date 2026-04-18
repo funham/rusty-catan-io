@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
@@ -9,7 +10,7 @@ use crate::{
 // (better than v -> {v}, cause edge's invariant enforces correctness of a graph)
 
 /// Not oriented graph
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct RoadGraph {
     edges: BTreeSet<Path>,
     out: BTreeMap<Intersection, BTreeSet<Path>>,

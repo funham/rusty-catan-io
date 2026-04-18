@@ -15,7 +15,7 @@ use crate::{
             init::GameInitializationState,
             state::{GameSnapshot, GameState},
         },
-        primitives::{build::Builds, player::PlayerId, resource::ResourceCollection},
+        primitives::{build::Build, player::PlayerId, resource::ResourceCollection},
     },
     math::dice::{DiceRoller, DiceVal},
     topology::Hex,
@@ -32,7 +32,7 @@ pub enum GameEvent {
     },
     BuildPlaced {
         player_id: PlayerId,
-        build: Builds,
+        build: Build,
         snapshot: GameSnapshot,
     },
     PlayerDiscarded {

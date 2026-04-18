@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::gameplay::primitives::{
-    build::Builds,
+    build::Build,
     dev_card::DevCardUsage,
     trade::{BankTrade, PersonalTradeOffer, PublicTradeOffer},
 };
@@ -25,7 +25,7 @@ pub enum PostDiceThrowAnswer {
     OfferPublicTrade(PublicTradeOffer),
     OfferPersonalTrade(PersonalTradeOffer),
     TradeWithBank(BankTrade),
-    Build(Builds),
+    Build(Build),
     EndMove,
 }
 #[derive(Debug, Serialize, Deserialize)]
@@ -33,6 +33,6 @@ pub enum FinalStateAnswer {
     OfferPublicTrade(PublicTradeOffer),
     OfferPersonalTrade(PersonalTradeOffer),
     TradeWithBank(BankTrade),
-    Build(Builds),
+    Build(Build),
     EndMove,
 }

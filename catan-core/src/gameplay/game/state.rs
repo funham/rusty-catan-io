@@ -4,7 +4,7 @@ use crate::{
     gameplay::field::state::BuildCollection,
     gameplay::primitives::{
         bank::{Bank, BankResourceExchangeError, BankViewOwned, PlayerResourceExchangeError},
-        build::{BoardBuildData, Builds, City, Road, Settlement},
+        build::{BoardBuildData, Build, City, Road, Settlement},
         dev_card::DevCardUsage,
         player::{PlayerData, PlayerDataContainer, PlayerId, SecuredPlayerData},
         resource::{Resource, ResourceCollection},
@@ -55,6 +55,8 @@ pub struct Perspective {
     pub player_view: PlayerData,
     pub field: FieldState,
     pub bank: BankViewOwned,
+    pub builds: BoardBuildData,
+    // TODO: change to just visible_players so that there'd be one source of information for how player's occuring to the opponents
     pub other_players: Vec<VisiblePlayer>,
 }
 
@@ -114,6 +116,7 @@ impl GameState {
             player_view: player_data_from_view(self.players.get(player_id)),
             field: self.field.clone(),
             bank: self.bank.public_view(),
+            builds: self.builds.clone(),
             other_players,
         }
     }
@@ -331,7 +334,7 @@ impl GameState {
 
     fn use_roadbuild(&mut self, poses: [Path; 2], user: PlayerId) -> Result<(), DevCardUsageError> {
         for pos in poses {
-            if let Err(err) = self.builds.try_build(user, Builds::Road(Road { pos })) {
+            if let Err(err) = self.builds.try_build(user, Build::Road(Road { pos })) {
                 log::info!("invalid placement try: {:?}", err);
                 return Err(DevCardUsageError::InvalidEdge);
             }

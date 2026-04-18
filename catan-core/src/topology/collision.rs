@@ -1,6 +1,6 @@
 use crate::{
     gameplay::primitives::build::{
-        AggregateOccupancy, Buildable, IntersectionOccupancy, OccupancyGetter, Road,
+        AggregateOccupancy, IntersectionOccupancy, OccupancyGetter, Occupying, Road,
     },
     topology::{HasPos, Intersection},
 };
@@ -35,24 +35,24 @@ impl<'a, 'b> CollisionChecker<'a, 'b> {
         build: &impl HasPos<Pos = Intersection>,
     ) -> IntersectionOccupancy {
         build
-            .get_pos()
+            .pos()
             .neighbors()
             .into_iter()
-            .chain([build.get_pos()])
+            .chain([build.pos()])
             .collect()
     }
 }
 
-pub trait Containable: Buildable {
+pub trait Containable: HasPos {
     fn contained(&self, checker: &CollisionChecker) -> bool;
 }
 
-impl<T: Buildable + HasPos<Pos = Intersection>> Containable for T {
+impl<T: Occupying + HasPos<Pos = Intersection>> Containable for T {
     fn contained(&self, checker: &CollisionChecker) -> bool {
         checker
             .this_occupancy
             .builds_occupancy
-            .contains(&self.get_pos())
+            .contains(&self.pos())
     }
 }
 
@@ -62,7 +62,7 @@ impl Containable for Road {
             .this_occupancy
             .roads_occupancy
             .paths
-            .contains(&self.get_pos())
+            .contains(&self.pos())
     }
 }
 

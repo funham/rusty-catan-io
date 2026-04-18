@@ -56,6 +56,10 @@ impl LazyAgent {
             .next()
             .expect("intersection should have at least one path");
 
+
+        // TODO: remove the logic above and use logic from primitives/build and topology/graph maybe
+        // perspective.builds.
+
         AgentResponse::Initialization {
             settlement: Settlement { pos: placement },
             road: Road { pos: road },

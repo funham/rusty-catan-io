@@ -57,7 +57,10 @@ pub mod builds {
 
     /// Marker trait for objects that can be built.
     /// Requires both a position (`HasPos`) and an occupancy definition.
-    pub trait Buildable: HasPos + Occupying {}
+    // pub trait Buildable: HasPos + Occupying {}
+
+    // TODO: merge Settlement and City in a single type like `Establishment`
+    // with an enum field `stage` or `kind` that can hold either `Settelement` or `City`
 
     #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Serialize, Deserialize)]
     pub struct Settlement {
@@ -90,7 +93,7 @@ pub mod builds {
 
     /// Enum representing any build action.
     #[derive(Debug, Clone, Serialize, Deserialize)]
-    pub enum Builds {
+    pub enum Build {
         Settlement(Settlement),
         City(City),
         Road(Road),
@@ -108,11 +111,11 @@ pub mod builds {
 
     /* Buildable impls */
 
-    impl<T: Buildable> Buildable for &T {}
+    // impl<T: Buildable> Buildable for &T {}
 
-    impl Buildable for Settlement {}
-    impl Buildable for Road {}
-    impl Buildable for City {}
+    // impl Buildable for Settlement {}
+    // impl Buildable for Road {}
+    // impl Buildable for City {}
 
     /* Occupying impls */
 
@@ -125,21 +128,20 @@ pub mod builds {
     /// Settlement occupies a single intersection.
     impl Occupying for Settlement {
         fn occupancy(&self) -> IntersectionOccupancy {
-            IntersectionOccupancy::from([self.get_pos()])
+            IntersectionOccupancy::from([self.pos()])
         }
     }
 
     /// Road occupies both intersections of its path.
     impl Occupying for Road {
         fn occupancy(&self) -> IntersectionOccupancy {
-            self.get_pos().intersections_iter().collect()
+            self.pos().intersections_iter().collect()
         }
     }
 
-    /// City occupies the same intersection as the replaced settlement.
     impl Occupying for City {
         fn occupancy(&self) -> IntersectionOccupancy {
-            IntersectionOccupancy::from([self.get_pos()])
+            IntersectionOccupancy::from([self.pos()])
         }
     }
 
@@ -147,28 +149,28 @@ pub mod builds {
 
     impl HasPos for Settlement {
         type Pos = Intersection;
-        fn get_pos(&self) -> Self::Pos {
+        fn pos(&self) -> Self::Pos {
             self.pos
         }
     }
 
     impl HasPos for City {
         type Pos = Intersection;
-        fn get_pos(&self) -> Self::Pos {
+        fn pos(&self) -> Self::Pos {
             self.pos
         }
     }
 
     impl HasPos for Road {
         type Pos = Path;
-        fn get_pos(&self) -> Self::Pos {
+        fn pos(&self) -> Self::Pos {
             self.pos.clone()
         }
     }
 
     /* HasCost impls */
 
-    impl HasCost for Builds {
+    impl HasCost for Build {
         fn cost(&self) -> ResourceCollection {
             (self as &dyn HasCost).cost()
         }
@@ -301,7 +303,7 @@ pub mod occupancy {
 pub mod data {
     use super::*;
 
-    #[derive(Debug, Default, Clone)]
+    #[derive(Debug, Default, Clone, Serialize, Deserialize)]
     pub struct PlayerBuildData {
         pub settlements: BTreeSet<Settlement>,
         pub cities: BTreeSet<City>,
@@ -309,10 +311,10 @@ pub mod data {
     }
 
     impl PlayerBuildData {
-        pub fn generic_occupancy<Pos, Builds, BuildItem>(builds: Builds) -> IntersectionOccupancy
+        pub fn generic_occupancy<Builds, BuildItem>(builds: Builds) -> IntersectionOccupancy
         where
             Builds: Iterator<Item = BuildItem>,
-            BuildItem: Buildable<Pos = Pos>,
+            BuildItem: Occupying,
         {
             builds.map(|b| b.occupancy()).flatten().collect()
         }
@@ -339,7 +341,7 @@ pub mod data {
         }
     }
 
-    #[derive(Debug, Default, Clone)]
+    #[derive(Debug, Default, Clone, Serialize, Deserialize)]
     pub struct BoardBuildData {
         players: Vec<PlayerBuildData>,
         longest_road: Option<PlayerId>,
@@ -406,7 +408,7 @@ pub mod data {
         pub fn try_build(
             &mut self,
             player_id: PlayerId,
-            build: Builds,
+            build: Build,
         ) -> Result<(), BuildingError> {
             let occ = self.occupancy();
 
@@ -417,14 +419,14 @@ pub mod data {
             };
 
             match build {
-                Builds::Road(road) => {
+                Build::Road(road) => {
                     match self.players[player_id].roads.extend(&road.pos, &checker) {
                         Ok(_) => Ok(()),
                         Err(err) => Err(BuildingError::Road(err)),
                     }
                 }
 
-                Builds::Settlement(settlement) => match checker.can_place(&settlement) {
+                Build::Settlement(settlement) => match checker.can_place(&settlement) {
                     true => Ok({
                         self.players[player_id]
                             .settlements
@@ -435,7 +437,7 @@ pub mod data {
                     false => Err(BuildingError::Settlement()),
                 },
 
-                Builds::City(city) => {
+                Build::City(city) => {
                     match self.players[player_id]
                         .settlements
                         .contains(&Settlement { pos: city.pos })

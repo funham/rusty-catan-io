@@ -58,6 +58,7 @@ impl GameInitializationState {
                 .into_player_data(self.players.get(player_id).dev_cards().clone()),
             field: self.field.clone(),
             bank: self.bank.public_view(),
+            builds: self.builds.clone(),
             other_players,
         }
     }
