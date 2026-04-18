@@ -1,4 +1,7 @@
-use catan_core::{GameEvent, GameObserver, gameplay::game::state::GameSnapshot};
+use catan_core::{
+    GameEvent, GameObserver,
+    gameplay::{game::state::GameSnapshot, primitives::build::EstablishmentType},
+};
 
 #[derive(Default)]
 pub struct AsciiDisplay;
@@ -14,8 +17,18 @@ impl AsciiDisplay {
                 "player {} => cards={}, settlements={}, cities={}, roads={}",
                 player.player_id,
                 player.public_data.resource_card_count,
-                player.builds.settlements.len(),
-                player.builds.cities.len(),
+                player
+                    .builds
+                    .establishments
+                    .iter()
+                    .filter(|est| est.stage == EstablishmentType::Settlement)
+                    .count(),
+                player
+                    .builds
+                    .establishments
+                    .iter()
+                    .filter(|est| est.stage == EstablishmentType::City)
+                    .count(),
                 player.builds.roads.len(),
             );
         }
@@ -30,7 +43,10 @@ impl GameObserver for AsciiDisplay {
                 Self::print_snapshot(snapshot);
             }
             GameEvent::TurnStarted { snapshot } => {
-                println!("\n== turn started: player {} ==", snapshot.current_player_id);
+                println!(
+                    "\n== turn started: player {} ==",
+                    snapshot.current_player_id
+                );
                 Self::print_snapshot(snapshot);
             }
             GameEvent::DiceRolled {
@@ -70,7 +86,10 @@ impl GameObserver for AsciiDisplay {
                 );
                 Self::print_snapshot(snapshot);
             }
-            GameEvent::GameFinished { winner_id, snapshot } => {
+            GameEvent::GameFinished {
+                winner_id,
+                snapshot,
+            } => {
                 println!("\n== game finished: winner {} ==", winner_id);
                 Self::print_snapshot(snapshot);
             }

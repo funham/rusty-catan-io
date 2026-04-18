@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use super::{FieldArrangement, HexesByNum, PortsByPlayer};
 use crate::gameplay::primitives::{
     Tile, PortKind,
-    build::{City, Road, Settlement},
+    build::{Road, Establishment},
     player::PlayerId,
 };
 use crate::math::dice::DiceVal;
@@ -171,8 +171,7 @@ pub enum FieldPromotingError {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BuildCollection {
-    pub settlements: Vec<Settlement>,
-    pub cities: Vec<City>,
+    pub establishments: Vec<Establishment>,
     pub roads: Vec<Road>,
 }
 

@@ -4,7 +4,7 @@ use crate::{
     gameplay::field::state::BuildCollection,
     gameplay::primitives::{
         bank::{Bank, BankResourceExchangeError, BankViewOwned, PlayerResourceExchangeError},
-        build::{BoardBuildData, Build, City, Road, Settlement},
+        build::{BoardBuildData, Build, Road},
         dev_card::DevCardUsage,
         player::{PlayerData, PlayerDataContainer, PlayerId, SecuredPlayerData},
         resource::{Resource, ResourceCollection},
@@ -199,12 +199,11 @@ impl GameState {
 
     pub fn is_player_on_hex(&self, player_id: PlayerId, hex: Hex) -> bool {
         for v in hex.vertices() {
-            let good = self.builds[player_id]
-                .settlements
-                .contains(&Settlement { pos: v })
-                || self.builds[player_id].cities.contains(&City { pos: v });
-
-            if good {
+            let has_build_on_intersection = self.builds[player_id]
+                .establishments
+                .iter()
+                .any(|est| est.pos == v);
+            if has_build_on_intersection {
                 return true;
             }
         }
@@ -226,7 +225,7 @@ impl GameState {
     pub fn check_win_condition(&self) -> Option<PlayerId> {
         const VP_TO_WIN: u8 = 10;
         for player_id in self.player_ids_starting_from(0) {
-            let pure_vp = self.count_vp_without_track_and_army(player_id);
+            let pure_vp = self.count_dev_card_build_vp(player_id);
 
             let tract_pts = match self.builds.longest_road() {
                 Some(id) if id == player_id => 2,
@@ -245,11 +244,22 @@ impl GameState {
         None
     }
 
-    pub fn count_vp_without_track_and_army(&self, player_id: PlayerId) -> u16 {
+    pub fn count_dev_card_build_vp(&self, player_id: PlayerId) -> u16 {
         let mut score = 0;
+
+        // dev card victory points
         score += self.players.get(player_id).dev_cards().victory_pts;
-        score += self.builds[player_id].settlements.len() as u16;
-        score += self.builds[player_id].cities.len() as u16 * 2;
+
+        // build victory points
+        score += self.builds[player_id]
+            .establishments
+            .iter()
+            .map(|est| match est.stage {
+                crate::gameplay::primitives::build::EstablishmentType::Settlement => 1,
+                crate::gameplay::primitives::build::EstablishmentType::City => 2,
+            })
+            .sum::<u16>();
+
         score
     }
 
@@ -267,9 +277,7 @@ impl GameState {
 
         if let Some(robbed_id) = robbed_id {
             match self.builds.query().builds_on_hex(rob_hex).get(&robbed_id) {
-                Some(v) if !v.settlements.is_empty() || !v.cities.is_empty() => {
-                    self.steal(robbed_id, robber_id)
-                }
+                Some(v) if !v.establishments.is_empty() => self.steal(robbed_id, robber_id),
                 _ => return Err(DevCardUsageError::InvalidRobbery),
             }
         }

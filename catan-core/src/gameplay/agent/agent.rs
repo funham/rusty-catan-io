@@ -4,7 +4,7 @@ use crate::{
     gameplay::{
         game::state::Perspective,
         primitives::{
-            build::{Road, Settlement},
+            build::{Establishment, Road},
             player::PlayerId,
             resource::ResourceCollection,
             trade::PlayerTrade,
@@ -41,7 +41,10 @@ pub enum AgentResponse {
     Rest(FinalStateAnswer),
     RobHex(Hex),
     RobPlayer(PlayerId),
-    Initialization { settlement: Settlement, road: Road },
+    Initialization {
+        establishment: Establishment,
+        road: Road,
+    },
     AnswerTrade(TradeAction),
     DropHalf(ResourceCollection),
 }

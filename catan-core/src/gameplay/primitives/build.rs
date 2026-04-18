@@ -9,7 +9,7 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet},
-    ops::{Index, IndexMut, Not},
+    ops::{Index, IndexMut},
 };
 
 use serde::{Deserialize, Serialize};
@@ -63,27 +63,24 @@ pub mod builds {
     // with an enum field `stage` or `kind` that can hold either `Settelement` or `City`
 
     #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Serialize, Deserialize)]
-    pub struct Settlement {
-        pub pos: Intersection,
+    pub enum EstablishmentType {
+        Settlement,
+        City,
     }
 
-    impl Settlement {
-        /// Settlements harvest 1 resource from adjacent hexes.
-        pub const fn harvesting_rate() -> u16 {
-            1
+    impl EstablishmentType {
+        pub const fn harvest_amount(&self) -> u8 {
+            match self {
+                Self::Settlement => 1,
+                Self::City => 2,
+            }
         }
     }
 
     #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Serialize, Deserialize)]
-    pub struct City {
+    pub struct Establishment {
         pub pos: Intersection,
-    }
-
-    impl City {
-        /// Cities harvest double resources.
-        pub const fn harvesting_rate() -> u16 {
-            2
-        }
+        pub stage: EstablishmentType,
     }
 
     #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -94,8 +91,7 @@ pub mod builds {
     /// Enum representing any build action.
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub enum Build {
-        Settlement(Settlement),
-        City(City),
+        Establishment(Establishment),
         Road(Road),
     }
 
@@ -126,7 +122,7 @@ pub mod builds {
     }
 
     /// Settlement occupies a single intersection.
-    impl Occupying for Settlement {
+    impl Occupying for Establishment {
         fn occupancy(&self) -> IntersectionOccupancy {
             IntersectionOccupancy::from([self.pos()])
         }
@@ -139,22 +135,9 @@ pub mod builds {
         }
     }
 
-    impl Occupying for City {
-        fn occupancy(&self) -> IntersectionOccupancy {
-            IntersectionOccupancy::from([self.pos()])
-        }
-    }
-
     /* HasPos impls */
 
-    impl HasPos for Settlement {
-        type Pos = Intersection;
-        fn pos(&self) -> Self::Pos {
-            self.pos
-        }
-    }
-
-    impl HasPos for City {
+    impl HasPos for Establishment {
         type Pos = Intersection;
         fn pos(&self) -> Self::Pos {
             self.pos
@@ -177,25 +160,21 @@ pub mod builds {
     }
 
     /// Standard Catan settlement cost.
-    impl HasCost for Settlement {
+    impl HasCost for EstablishmentType {
         fn cost(&self) -> ResourceCollection {
-            ResourceCollection {
-                brick: 1,
-                wood: 1,
-                wheat: 1,
-                sheep: 1,
-                ore: 0,
-            }
-        }
-    }
-
-    /// Standard Catan city upgrade cost.
-    impl HasCost for City {
-        fn cost(&self) -> ResourceCollection {
-            ResourceCollection {
-                ore: 3,
-                wheat: 2,
-                ..Default::default()
+            match self {
+                Self::Settlement => ResourceCollection {
+                    brick: 1,
+                    wood: 1,
+                    wheat: 1,
+                    sheep: 1,
+                    ore: 0,
+                },
+                Self::City => ResourceCollection {
+                    ore: 3,
+                    wheat: 2,
+                    ..Default::default()
+                },
             }
         }
     }
@@ -305,8 +284,7 @@ pub mod data {
 
     #[derive(Debug, Default, Clone, Serialize, Deserialize)]
     pub struct PlayerBuildData {
-        pub settlements: BTreeSet<Settlement>,
-        pub cities: BTreeSet<City>,
+        pub establishments: BTreeSet<Establishment>,
         pub roads: graph::RoadGraph,
     }
 
@@ -320,9 +298,8 @@ pub mod data {
         }
 
         pub fn builds_occupancy(&self) -> IntersectionOccupancy {
-            Self::generic_occupancy(self.settlements.iter())
-                .union(&mut Self::generic_occupancy(self.cities.iter()))
-                .copied()
+            Self::generic_occupancy(self.establishments.iter())
+                .into_iter()
                 .collect()
         }
 
@@ -360,8 +337,7 @@ pub mod data {
                 players: players
                     .into_iter()
                     .map(|player| PlayerBuildData {
-                        settlements: player.settlements.into_iter().collect(),
-                        cities: player.cities.into_iter().collect(),
+                        establishments: player.establishments.into_iter().collect(),
                         roads: graph::RoadGraph::from_roads(
                             player.roads.into_iter().map(|road| road.pos),
                         ),
@@ -426,38 +402,41 @@ pub mod data {
                     }
                 }
 
-                Build::Settlement(settlement) => match checker.can_place(&settlement) {
-                    true => Ok({
-                        self.players[player_id]
-                            .settlements
-                            .insert(settlement)
-                            .not()
-                            .then(|| log::warn!("settlement was placed on top of another"));
-                    }),
-                    false => Err(BuildingError::Settlement()),
-                },
-
-                Build::City(city) => {
-                    match self.players[player_id]
-                        .settlements
-                        .contains(&Settlement { pos: city.pos })
-                    {
+                Build::Establishment(establishment) => match establishment.stage {
+                    EstablishmentType::Settlement => match checker.can_place(&establishment) {
                         true => Ok({
-                            self.players[player_id]
-                                .settlements
-                                .remove(&Settlement { pos: city.pos })
-                                .not()
-                                .then(|| log::warn!("settlement is non-existent"));
-
-                            self.players[player_id]
-                                .cities
-                                .insert(city)
-                                .not()
-                                .then(|| log::warn!("city already exists"));
+                            assert!(
+                                self.players[player_id].establishments.insert(establishment),
+                                "checker malfunction"
+                            );
                         }),
-                        false => todo!(),
-                    }
-                }
+                        false => Err(BuildingError::Settlement()), // invalid placement for a settlement
+                    },
+                    EstablishmentType::City => match self.players[player_id]
+                        .establishments
+                        .contains(&Establishment {
+                            pos: establishment.pos,
+                            stage: EstablishmentType::Settlement,
+                        }) {
+                        true => Ok({
+                            assert!(
+                                self.players[player_id]
+                                    .establishments
+                                    .remove(&Establishment {
+                                        pos: establishment.pos,
+                                        stage: EstablishmentType::Settlement,
+                                    }),
+                                "set handling logic error"
+                            );
+
+                            assert!(
+                                self.players[player_id].establishments.insert(establishment),
+                                "set handling logic error"
+                            );
+                        }),
+                        false => Err(BuildingError::City()), // no settlement to upgrade into a city
+                    },
+                },
             }
         }
 
@@ -465,7 +444,7 @@ pub mod data {
             &mut self,
             player_id: PlayerId,
             road: Road,
-            settlement: Settlement,
+            establishment: Establishment,
         ) -> Result<(), BuildingError> {
             let occ = self.occupancy();
 
@@ -478,15 +457,18 @@ pub mod data {
             let settlement_ok = checker
                 .full_occupancy()
                 .builds_occupancy
-                .is_disjoint(&checker.building_deadzone(&settlement));
+                .is_disjoint(&checker.building_deadzone(&establishment));
 
             if !settlement_ok {
                 return Err(BuildingError::InitSettlement());
             }
 
-            self[player_id].settlements.insert(settlement);
+            self[player_id].establishments.insert(establishment);
 
-            let road_ok = road.pos.intersections_iter().any(|v| v == settlement.pos)
+            let road_ok = road
+                .pos
+                .intersections_iter()
+                .any(|v| v == establishment.pos)
                 && !checker
                     .full_occupancy()
                     .roads_occupancy
@@ -540,11 +522,7 @@ pub mod query {
                 .flat_map(|id| {
                     let player = &self.container.players()[id];
 
-                    player
-                        .settlements
-                        .iter()
-                        .map(|s| s.pos)
-                        .chain(player.cities.iter().map(|c| c.pos))
+                    player.establishments.iter().map(|s| s.pos)
                 })
                 .collect()
         }
@@ -595,15 +573,8 @@ pub mod query {
                 .iter()
                 .enumerate()
                 .filter_map(|(player_id, player)| {
-                    let settlements = player
-                        .settlements
-                        .iter()
-                        .copied()
-                        .filter(|s| s.pos.as_set().contains(&hex))
-                        .collect::<Vec<_>>();
-
-                    let cities = player
-                        .cities
+                    let establishments = player
+                        .establishments
                         .iter()
                         .copied()
                         .filter(|c| c.pos.as_set().contains(&hex))
@@ -615,14 +586,13 @@ pub mod query {
                         .filter(|r| r.pos.as_set().contains(&hex))
                         .collect::<Vec<_>>();
 
-                    if settlements.is_empty() && cities.is_empty() && roads.is_empty() {
+                    if establishments.is_empty() && roads.is_empty() {
                         None
                     } else {
                         Some((
                             player_id,
                             BuildCollection {
-                                settlements,
-                                cities,
+                                establishments,
                                 roads,
                             },
                         ))
@@ -636,8 +606,7 @@ pub mod query {
                 .players()
                 .iter()
                 .map(|player| BuildCollection {
-                    settlements: player.settlements.iter().copied().collect(),
-                    cities: player.cities.iter().copied().collect(),
+                    establishments: player.establishments.iter().copied().collect(),
                     roads: player.roads.iter().collect(),
                 })
                 .collect()
@@ -647,7 +616,7 @@ pub mod query {
             &self,
             field: &FieldState,
             player_id: PlayerId,
-        ) -> Vec<(Settlement, Road)> {
+        ) -> Vec<(Establishment, Road)> {
             let occ = self.container.occupancy();
 
             let checker = CollisionChecker {
@@ -664,7 +633,10 @@ pub mod query {
 
             intersections
                 .into_iter()
-                .map(|pos| Settlement { pos })
+                .map(|pos| Establishment {
+                    pos,
+                    stage: EstablishmentType::Settlement,
+                })
                 .filter(|settlement| {
                     checker
                         .full_occupancy()

@@ -4,19 +4,16 @@ use crate::gameplay::agent::{
     agent::{Agent, AgentRequest, AgentResponse},
 };
 use crate::gameplay::game::init::GameInitializationState;
-use crate::gameplay::primitives::build::{BuildingError, Build, City, Settlement};
+use crate::gameplay::primitives::Tile;
+use crate::gameplay::primitives::build::{Build, BuildingError, Establishment};
 use crate::gameplay::primitives::dev_card::DevCardUsage;
 use crate::gameplay::primitives::player::PlayerId;
 use crate::gameplay::primitives::trade::BankTrade;
 use crate::gameplay::primitives::turn::GameTurn;
-use crate::gameplay::primitives::Tile;
 use crate::math::dice::DiceRoller;
-use crate::topology::HasPos;
 use crate::{
-    gameplay::primitives::resource::ResourceCollection,
-    math::dice::DiceVal,
-    topology::{Hex, Intersection},
-    GameEvent, GameObserver, NoopObserver,
+    GameEvent, GameObserver, NoopObserver, gameplay::primitives::resource::ResourceCollection,
+    math::dice::DiceVal, topology::Hex,
 };
 use std::collections::BTreeSet;
 
@@ -52,10 +49,13 @@ impl GameController {
         while game_init.turn.get_rounds_played() < 2 {
             let player_id = game_init.turn.get_turn_index();
 
-            let (settlement, road) = match strategies[player_id]
-                .respond(AgentRequest::Initialization(game_init.perspective(player_id)))
-            {
-                AgentResponse::Initialization { settlement, road } => (settlement, road),
+            let (settlement, road) = match strategies[player_id].respond(
+                AgentRequest::Initialization(game_init.perspective(player_id)),
+            ) {
+                AgentResponse::Initialization {
+                    establishment,
+                    road,
+                } => (establishment, road),
                 other => panic!("expected initialization response, got {other:?}"),
             };
 
@@ -133,10 +133,7 @@ impl GameController {
         GameResult::Interrupted
     }
 
-    fn handle_turn(
-        params: &mut TurnHandlingParams,
-        dice: &mut dyn DiceRoller,
-    ) -> Result<(), ()> {
+    fn handle_turn(params: &mut TurnHandlingParams, dice: &mut dyn DiceRoller) -> Result<(), ()> {
         params
             .game
             .players
@@ -155,7 +152,10 @@ impl GameController {
         params: &mut TurnHandlingParams,
         dice: &mut dyn DiceRoller,
     ) -> Result<(), ()> {
-        match Self::request(params, AgentRequest::Init(params.game.perspective(params.player_id))) {
+        match Self::request(
+            params,
+            AgentRequest::Init(params.game.perspective(params.player_id)),
+        ) {
             AgentResponse::Init(action::InitialAction::ThrowDice) => {
                 Self::execute_dice_trow(params, dice);
                 Self::handle_dice_thrown(params)
@@ -172,9 +172,9 @@ impl GameController {
             params,
             AgentRequest::AfterDiceThrow(params.game.perspective(params.player_id)),
         ) {
-            AgentResponse::AfterDiceThrow(action::PostDiceThrowAnswer::UseDevCard(dev_card_usage))
-                if matches!(dev_card_usage, DevCardUsage::Knight(_)) =>
-            {
+            AgentResponse::AfterDiceThrow(action::PostDiceThrowAnswer::UseDevCard(
+                dev_card_usage,
+            )) if matches!(dev_card_usage, DevCardUsage::Knight(_)) => {
                 let DevCardUsage::Knight(rob_hex) = dev_card_usage else {
                     unreachable!()
                 };
@@ -198,7 +198,9 @@ impl GameController {
             AgentResponse::AfterDiceThrow(action::PostDiceThrowAnswer::OfferPersonalTrade(_)) => {
                 log::warn!("Trades are not implemented yet")
             }
-            AgentResponse::AfterDiceThrow(action::PostDiceThrowAnswer::TradeWithBank(bank_trade)) => {
+            AgentResponse::AfterDiceThrow(action::PostDiceThrowAnswer::TradeWithBank(
+                bank_trade,
+            )) => {
                 Self::execute_bank_trade(params, bank_trade);
             }
             AgentResponse::AfterDiceThrow(action::PostDiceThrowAnswer::Build(buildable)) => {
@@ -236,7 +238,10 @@ impl GameController {
     }
 
     fn handle_rest(params: &mut TurnHandlingParams) -> Result<(), ()> {
-        match Self::request(params, AgentRequest::Rest(params.game.perspective(params.player_id))) {
+        match Self::request(
+            params,
+            AgentRequest::Rest(params.game.perspective(params.player_id)),
+        ) {
             AgentResponse::Rest(action::FinalStateAnswer::OfferPublicTrade(_)) => {
                 log::warn!("Trades are not implemented yet")
             }
@@ -277,7 +282,11 @@ impl GameController {
     }
 
     fn execute_build(params: &mut TurnHandlingParams, buildable: Build) {
-        if let Err(err) = params.game.builds.try_build(params.player_id, buildable.clone()) {
+        if let Err(err) = params
+            .game
+            .builds
+            .try_build(params.player_id, buildable.clone())
+        {
             log::error!("Invalid building try: {:?}", err)
         } else {
             params.observer.on_event(&GameEvent::BuildPlaced {
@@ -292,24 +301,22 @@ impl GameController {
         params: &mut TurnHandlingParams,
         player_id: PlayerId,
         bounding_set: &BTreeSet<Hex>,
-        buildings: impl IntoIterator<Item = impl HasPos<Pos = Intersection>>,
-        amount_to_harvest: u16,
+        establishments: impl IntoIterator<Item = Establishment>,
     ) {
-        for build_pos in buildings
-            .into_iter()
-            .map(|b| b.pos())
-            .collect::<Vec<_>>()
-        {
-            let coincidential_hexes = build_pos.as_set();
+        for est in establishments {
+            let coincidential_hexes = est.pos.as_set();
             let hexes_to_harvest = coincidential_hexes.intersection(bounding_set);
 
             for hex in hexes_to_harvest {
                 match params.game.field.arrangement[*hex] {
-                    Tile::Resource { resource, number: _ } => {
-                        if let Err(e) = params
-                            .game
-                            .transfer_from_bank((resource, amount_to_harvest).into(), player_id)
-                        {
+                    Tile::Resource {
+                        resource,
+                        number: _,
+                    } => {
+                        if let Err(e) = params.game.transfer_from_bank(
+                            (resource, est.stage.harvest_amount() as u16).into(),
+                            player_id,
+                        ) {
                             log::error!("{:?}", e);
                         }
                     }
@@ -333,16 +340,7 @@ impl GameController {
                 params,
                 player_id,
                 &hexes_with_num,
-                params.game.builds[player_id].settlements.clone(),
-                Settlement::harvesting_rate(),
-            );
-
-            Self::execute_harvesting_for_one_player(
-                params,
-                player_id,
-                &hexes_with_num,
-                params.game.builds[player_id].cities.clone(),
-                City::harvesting_rate(),
+                params.game.builds[player_id].establishments.clone(),
             );
         }
     }

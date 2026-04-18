@@ -13,7 +13,7 @@ use catan_core::{
     gameplay::{
         game::state::Perspective,
         primitives::{
-            build::{Build, City, Road, Settlement},
+            build::{Build, Establishment, EstablishmentType, Road},
             player::PlayerId,
             resource::{Resource, ResourceCollection},
             trade::{BankTrade, BankTradeKind},
@@ -91,13 +91,17 @@ impl TerminalUi {
             }
             AgentRequest::Initialization(perspective) => {
                 Self::print_perspective("Initialization", &perspective);
-                let settlement = Settlement {
+                let establishment = Establishment {
                     pos: Self::read_intersection("settlement (q1 r1 q2 r2 q3 r3): "),
+                    stage: EstablishmentType::Settlement,
                 };
                 let road = Road {
                     pos: Self::read_path("road (q1 r1 q2 r2): "),
                 };
-                AgentResponse::Initialization { settlement, road }
+                AgentResponse::Initialization {
+                    establishment,
+                    road,
+                }
             }
             AgentRequest::AnswerTrade { perspective, trade } => {
                 Self::print_perspective("AnswerTrade", &perspective);
@@ -194,7 +198,10 @@ impl TerminalUi {
                     Hex::new(q3.parse().ok()?, r3.parse().ok()?),
                 ])
                 .ok()?;
-                Some(Build::Settlement(Settlement { pos }))
+                Some(Build::Establishment(Establishment {
+                    pos,
+                    stage: EstablishmentType::Settlement,
+                }))
             }
             ["build", "city", q1, r1, q2, r2, q3, r3] => {
                 let pos = Intersection::try_from([
@@ -203,7 +210,10 @@ impl TerminalUi {
                     Hex::new(q3.parse().ok()?, r3.parse().ok()?),
                 ])
                 .ok()?;
-                Some(Build::City(City { pos }))
+                Some(Build::Establishment(Establishment {
+                    pos,
+                    stage: EstablishmentType::City,
+                }))
             }
             _ => None,
         }

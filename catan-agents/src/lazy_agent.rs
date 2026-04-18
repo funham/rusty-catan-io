@@ -1,14 +1,13 @@
 use catan_core::{
     agent::{
-        action::{
+        Agent, AgentRequest, AgentResponse, action::{
             FinalStateAnswer, InitialAction, PostDevCardAction, PostDiceThrowAnswer, TradeAction,
-        },
-        Agent, AgentRequest, AgentResponse,
+        }
     },
     gameplay::{
         game::state::Perspective,
         primitives::{
-            build::{Road, Settlement},
+            build::{Establishment, EstablishmentType, Road},
             resource::ResourceCollection,
         },
     },
@@ -26,10 +25,9 @@ impl LazyAgent {
             .flat_map(|player| {
                 player
                     .builds
-                    .settlements
+                    .establishments
                     .iter()
                     .map(|settlement| settlement.pos)
-                    .chain(player.builds.cities.iter().map(|city| city.pos))
             })
             .collect::<std::collections::BTreeSet<_>>();
 
@@ -61,7 +59,7 @@ impl LazyAgent {
         // perspective.builds.
 
         AgentResponse::Initialization {
-            settlement: Settlement { pos: placement },
+            establishment: Establishment { pos: placement, stage: EstablishmentType::Settlement },
             road: Road { pos: road },
         }
     }
