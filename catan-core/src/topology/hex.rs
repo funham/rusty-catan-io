@@ -205,10 +205,11 @@ pub enum SignedAxis {
     SN,
 }
 
+/// Q: [_], R: [/], S: [\\]
 pub enum Axis {
-    Q, // horisontal
-    R, // top-left -- bottom-right
-    S, // bottom-left -- top-right
+    Q,
+    R,
+    S,
 }
 
 impl SignedAxis {

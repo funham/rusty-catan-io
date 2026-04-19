@@ -188,32 +188,29 @@ pub fn axis_path_buf(axis: Axis) -> Buffer {
 
 pub fn path_anchor(path: Path) -> CursorPosition {
     match path.axis() {
-        // /
         Axis::Q => {
             let (h1, h2) = path.as_pair();
-            let (x0, y0) = hex_anchor_shifted(h1.q, h1.r);
-            let (x1, y1) = hex_anchor_shifted(h2.q, h2.r);
-            let (x, y) = (x0, y0).max((x1, y1));
+            let (x, y0) = hex_anchor_shifted(h1.q, h1.r);
+            let (_, y1) = hex_anchor_shifted(h2.q, h2.r);
+            let y = y0.max(y1);
 
-            CursorPosition { x, y: y + 1 }
+            CursorPosition { x: x + 2, y }
         }
-        // \
         Axis::R => {
             let (h1, h2) = path.as_pair();
             let (x0, y0) = hex_anchor_shifted(h1.q, h1.r);
             let (x1, y1) = hex_anchor_shifted(h2.q, h2.r);
             let (y, x) = (y0, x0).max((y1, x1));
 
-            CursorPosition { x, y: y + 3 }
+            CursorPosition { x, y: y + 1 }
         }
-        // _
         Axis::S => {
             let (h1, h2) = path.as_pair();
-            let (x, y0) = hex_anchor_shifted(h1.q, h1.r);
-            let (_, y1) = hex_anchor_shifted(h2.q, h2.r);
-            let y = i32::min(y0, y1);
+            let (x0, y0) = hex_anchor_shifted(h1.q, h1.r);
+            let (x1, y1) = hex_anchor_shifted(h2.q, h2.r);
+            let (y, x) = (y0, x0).min((y1, x1));
 
-            CursorPosition { x, y }
+            CursorPosition { x, y: y + 3 }
         }
     }
 }
@@ -233,18 +230,6 @@ pub const fn hex_anchor(q: i32, r: i32) -> (i32, i32) {
 
     ((q + r) * 9, (q - r) * 2)
 }
-
-// pub const fn hex_anchor_shifted(q: i32, r: i32) -> (i32, i32) {
-//     // supposing (-3, 1) -> (0, 0)
-//     //
-//     // (+1, +0) -> (+9, +2)  (y-axis inverted)
-//     // (+0, +1) -> (+9, -2)
-
-//     let q = q + 3;
-//     let r = r - 1;
-
-//     ((q + r) * 9, (q - r) * 2)
-// }
 
 pub const fn hex_anchor_shifted(q: i32, r: i32) -> (i32, i32) {
     // supposing (-2, -1) -> (0, 0)
@@ -294,12 +279,6 @@ pub fn draw_paths() {
     let (x, y) = hex_anchor_shifted(-2, -1);
     buf.paste_at(x as isize, y as isize, &hexagon);
 
-    let (x, y) = hex_anchor_shifted(0, 0);
-    buf.paste_at(x as isize, y as isize, &hexagon);
-
-    let (x, y) = hex_anchor_shifted(1, 0);
-    buf.paste_at(x as isize, y as isize, &hexagon);
-
     let hexes = HexIndex::hex_ring(Hex::new(0, 0), 2);
 
     for h in hexes {
@@ -307,17 +286,17 @@ pub fn draw_paths() {
         buf.paste_at(x as isize, y as isize, &hexagon);
     }
 
-    // for (i, path) in Hex::new(0, 0).paths_arr().iter().enumerate() {
-    //     let mut path_indexed_buf = path_buf(*path);
+    for (i, path) in Hex::new(0, 0).paths_arr().iter().enumerate().take(6) {
+        let mut path_indexed_buf = path_buf(*path);
 
-    //     *path_indexed_buf.buf.at_mut(0, 0) = (i as u8) + (b'0');
+        // *path_indexed_buf.buf.at_mut(0, 0) = (i as u8) + (b'0');
 
-    //     buf.paste_at(
-    //         path_indexed_buf.pos.x as isize,
-    //         path_indexed_buf.pos.y as isize,
-    //         &path_indexed_buf.buf,
-    //     );
-    // }
+        buf.paste_at(
+            path_indexed_buf.pos.x as isize,
+            path_indexed_buf.pos.y as isize,
+            &path_indexed_buf.buf,
+        );
+    }
 
     buf.print();
 }
