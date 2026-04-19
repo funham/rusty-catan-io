@@ -178,6 +178,10 @@ impl Path<repr::Canon> {
         self.0.clone().into()
     }
 
+    pub fn axis(&self) -> Axis {
+        Axis::from_path(*self)
+    }
+
     pub fn dual(&self) -> Path<repr::Dual> {
         let n0 = self.as_pair().0.neighbors_set();
         let n1 = self.as_pair().1.neighbors_set();

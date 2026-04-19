@@ -1,9 +1,9 @@
-use std::{collections::BTreeSet, hash::Hash};
+use std::{collections::BTreeSet, hash::Hash, sync::OnceLock};
 
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
-use crate::topology::Intersection;
+use crate::topology::{Intersection, Path};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Hex {
@@ -36,9 +36,20 @@ impl std::ops::Add for Hex {
     type Output = Hex;
 
     fn add(self, rhs: Self) -> Self::Output {
-        Hex {
+        Self::Output {
             q: self.q + rhs.q,
             r: self.r + rhs.r,
+        }
+    }
+}
+
+impl std::ops::Sub for Hex {
+    type Output = Hex;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self::Output {
+            q: self.q - rhs.q,
+            r: self.r - rhs.r,
         }
     }
 }
@@ -149,6 +160,16 @@ impl Hex {
             .expect("Hexagon has 6 vertices. Duh.")
     }
 
+    pub fn paths_arr(&self) -> [Path; 6] {
+        TryInto::<[Path; 6]>::try_into(
+            self.neighbors()
+                .iter()
+                .map(|h| Path::try_from((*self, *h)).unwrap())
+                .collect::<Vec<_>>(),
+        )
+        .expect("6 paths around a hex. Duh.")
+    }
+
     pub const fn distance(&self, other: &Self) -> usize {
         let dq = self.q - other.q;
         let dr = self.r - other.r;
@@ -165,8 +186,87 @@ impl Hex {
         Hex { q: 0, r: 0 }.neighbors()
     }
 
+    pub fn direction(index: usize) -> Hex {
+        static CACHE: OnceLock<[Hex; 6]> = OnceLock::new();
+        CACHE.get_or_init(|| Self::directions())[index]
+    }
+
     pub const fn index(&self) -> HexIndex {
         HexIndex { hex: *self }
+    }
+}
+
+pub enum SignedAxis {
+    QP, // Q+
+    QN, // Q-
+    RP,
+    RN,
+    SP,
+    SN,
+}
+
+pub enum Axis {
+    Q, // horisontal
+    R, // top-left -- bottom-right
+    S, // bottom-left -- top-right
+}
+
+impl SignedAxis {
+    pub const fn unorient(&self) -> Axis {
+        match self {
+            SignedAxis::QP => Axis::Q,
+            SignedAxis::QN => Axis::Q,
+            SignedAxis::RP => Axis::R,
+            SignedAxis::RN => Axis::R,
+            SignedAxis::SP => Axis::S,
+            SignedAxis::SN => Axis::S,
+        }
+    }
+
+    pub const fn dir_index(&self) -> usize {
+        match self {
+            SignedAxis::QP => 2,
+            SignedAxis::QN => 5,
+            SignedAxis::RP => 0,
+            SignedAxis::RN => 3,
+            SignedAxis::SP => 1,
+            SignedAxis::SN => 4,
+        }
+    }
+
+    pub fn dir(&self) -> Hex {
+        Hex::direction(self.dir_index())
+    }
+}
+
+impl Axis {
+    pub fn from_dir(dir_index: usize) -> Axis {
+        assert!((0..6).contains(&dir_index));
+
+        match dir_index % 3 {
+            0 => Axis::R,
+            1 => Axis::S,
+            2 => Axis::Q,
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn from_path(path: Path) -> Axis {
+        let (h1, h2) = path.as_pair();
+        let dir_index = Hex::directions()
+            .iter()
+            .position(|d| *d == (h1 - h2))
+            .expect("must be one of those");
+
+        Self::from_dir(dir_index)
+    }
+
+    pub const fn to_dir(&self) -> usize {
+        match self {
+            Axis::Q => 2,
+            Axis::R => 0,
+            Axis::S => 1,
+        }
     }
 }
 
