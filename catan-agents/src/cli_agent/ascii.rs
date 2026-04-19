@@ -234,16 +234,27 @@ pub const fn hex_anchor(q: i32, r: i32) -> (i32, i32) {
     ((q + r) * 9, (q - r) * 2)
 }
 
+// pub const fn hex_anchor_shifted(q: i32, r: i32) -> (i32, i32) {
+//     // supposing (-3, 1) -> (0, 0)
+//     //
+//     // (+1, +0) -> (+9, +2)  (y-axis inverted)
+//     // (+0, +1) -> (+9, -2)
+
+//     let q = q + 3;
+//     let r = r - 1;
+
+//     ((q + r) * 9, (q - r) * 2)
+// }
+
 pub const fn hex_anchor_shifted(q: i32, r: i32) -> (i32, i32) {
-    // supposing (-3, 1) -> (0, 0)
+    // supposing (-2, -1) -> (0, 0)
     //
     // (+1, +0) -> (+9, +2)  (y-axis inverted)
-    // (+0, +1) -> (+9, -2)
+    // (+0, +1) -> (+0, +4)
 
-    let q = q + 3;
-    let r = r - 1;
+    let (q, r) = (q + 2, r + 1);
 
-    ((q + r) * 9, (q - r) * 2)
+    (q * 9, q * 2 + r * 4)
 }
 
 pub fn draw_field() {
@@ -280,10 +291,8 @@ pub fn draw_paths() {
     let (x, y) = hex_anchor_shifted(-3, 1);
     buf.paste_at(x as isize, y as isize, &hexagon);
 
-    let (x, y) = hex_anchor_shifted(-2, -2);
-    // buf.paste_at(x as isize, y as isize, &hexagon);
-
-    println!("-2, -2 anchor: {:?}", (x, y));
+    let (x, y) = hex_anchor_shifted(-2, -1);
+    buf.paste_at(x as isize, y as isize, &hexagon);
 
     let (x, y) = hex_anchor_shifted(0, 0);
     buf.paste_at(x as isize, y as isize, &hexagon);
