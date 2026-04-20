@@ -1,6 +1,3 @@
-use crate::cli_agent::ascii::{buffer::Buffer, cursor::CursorPosition};
-use catan_core::topology::{Axis, Hex, HexIndex, Path, repr::Canon};
-
 pub mod cursor {
     use std::ops::{Add, Mul, Sub};
 
@@ -68,30 +65,55 @@ pub mod cursor {
 pub mod buffer {
     use std::ops::{Index, IndexMut};
 
+    use termcolor::Color;
+
     use crate::cli_agent::ascii::cursor::CursorPosition;
 
-    pub struct Buffer {
-        width: usize,
-        height: usize,
-        buf: Vec<u8>,
+    pub trait Bufferable: Sized + PartialEq + Clone + Copy {
+        fn blank() -> Self;
+        fn is_blank(&self) -> bool {
+            *self == Self::blank()
+        }
     }
 
-    impl Buffer {
-        pub fn new(width: usize, height: usize) -> Self {
+    impl Bufferable for u8 {
+        fn blank() -> Self {
+            b' '
+        }
+    }
+
+    impl Bufferable for Color {
+        fn blank() -> Self {
+            Color::White
+        }
+    }
+
+    pub struct Buffer<T: Bufferable = u8> {
+        width: usize,
+        height: usize,
+        buf: Vec<T>,
+    }
+
+    impl<T: Bufferable> Buffer<T> {
+        pub fn new_with(width: usize, height: usize, value: T) -> Self {
             Self {
                 width,
                 height,
-                buf: vec![b' '; width * height],
+                buf: vec![value; width * height],
             }
         }
 
-        pub fn from_string(width: usize, height: usize, s: &str) -> Self {
-            assert_eq!(s.as_bytes().len(), width * height);
-            let mut result: Buffer = Self::new(width, height);
+        pub fn new(width: usize, height: usize) -> Self {
+            Self::new_with(width, height, T::blank())
+        }
+
+        pub fn from_string(width: usize, height: usize, s: &[T]) -> Self {
+            assert_eq!(s.len(), width * height);
+            let mut result = Self::new(width, height);
 
             for y in 0..height {
                 for x in 0..width {
-                    *result.at_mut(x, y) = s.as_bytes()[y * width + x];
+                    *result.at_mut(x, y) = s[y * width + x];
                 }
             }
 
@@ -106,15 +128,15 @@ pub mod buffer {
             self.height
         }
 
-        pub fn at(&self, x: usize, y: usize) -> u8 {
-            self.buf[y * self.width + x]
+        pub fn at(&self, x: usize, y: usize) -> &T {
+            &self.buf[y * self.width + x]
         }
 
-        pub fn at_mut(&mut self, x: usize, y: usize) -> &mut u8 {
+        pub fn at_mut(&mut self, x: usize, y: usize) -> &mut T {
             &mut self.buf[y * self.width + x]
         }
 
-        pub fn paste_at(&mut self, x0: isize, y0: isize, paste: &Buffer) {
+        pub fn paste_at(&mut self, x0: isize, y0: isize, paste: &Self) {
             for y in 0..paste.height {
                 for x in 0..paste.width {
                     let xb = (x0 + x as isize) as usize;
@@ -124,15 +146,33 @@ pub mod buffer {
                         continue;
                     }
 
-                    if paste.at(x, y) == b' ' {
+                    if paste.at(x, y).is_blank() {
                         continue;
                     }
 
-                    *self.at_mut(xb, yb) = paste.at(x, y);
+                    *self.at_mut(xb, yb) = *paste.at(x, y);
                 }
             }
         }
 
+        pub fn paste(&mut self, paste: &BufFragment<T>) {
+            self.paste_at(paste.pos.x as isize, paste.pos.y as isize, &paste.fragment);
+        }
+
+        pub fn clear(&mut self) {
+            self.fill(T::blank());
+        }
+
+        pub fn fill(&mut self, val: T) {
+            self.buf.fill(val);
+        }
+
+        pub fn get_slice(&self) -> &[T] {
+            &self.buf[..]
+        }
+    }
+
+    impl Buffer<u8> {
         pub fn print(&self) {
             print!(" ");
             for x in 0..self.width {
@@ -171,144 +211,189 @@ pub mod buffer {
             &self.buf[(index.y * self.width as i32 + index.x) as usize]
         }
     }
-}
 
-pub struct IndexedBuffer {
-    buf: Buffer,
-    pos: CursorPosition,
-}
-
-pub fn axis_path_buf(axis: Axis) -> Buffer {
-    match axis {
-        Axis::Q => Buffer::from_string(7, 1, r"_______"),
-        Axis::R => Buffer::from_string(2, 2, r" // "),
-        Axis::S => Buffer::from_string(2, 2, r"\  \"),
+    pub struct BufFragment<T: Bufferable = u8> {
+        pub fragment: Buffer<T>,
+        pub pos: CursorPosition,
     }
 }
 
-pub fn path_anchor(path: Path) -> CursorPosition {
-    match path.axis() {
-        Axis::Q => {
-            let (h1, h2) = path.as_pair();
-            let (x, y0) = hex_anchor_shifted(h1.q, h1.r);
-            let (_, y1) = hex_anchor_shifted(h2.q, h2.r);
-            let y = y0.max(y1);
+pub mod field_render {
+    use catan_core::topology::Path;
+    use std::io::Write;
+    use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 
-            CursorPosition { x: x + 2, y }
+    use crate::cli_agent::ascii::buffer::Buffer;
+
+    mod utils {
+        use catan_core::topology::{Axis, Path};
+        use termcolor::Color;
+
+        use crate::cli_agent::ascii::{
+            buffer::{BufFragment, Buffer},
+            cursor::CursorPosition,
+        };
+
+        pub fn axis_path_buf(axis: Axis) -> Buffer {
+            match axis {
+                Axis::Q => Buffer::from_string(7, 1, r"_______".as_bytes()),
+                Axis::R => Buffer::from_string(2, 2, r" // ".as_bytes()),
+                Axis::S => Buffer::from_string(2, 2, r"\  \".as_bytes()),
+            }
         }
-        Axis::R => {
-            let (h1, h2) = path.as_pair();
-            let (x0, y0) = hex_anchor_shifted(h1.q, h1.r);
-            let (x1, y1) = hex_anchor_shifted(h2.q, h2.r);
-            let (y, x) = (y0, x0).max((y1, x1));
 
-            CursorPosition { x, y: y + 1 }
+        pub fn path_anchor(path: Path) -> CursorPosition {
+            match path.axis() {
+                Axis::Q => {
+                    let (h1, h2) = path.as_pair();
+                    let (x, y0) = hex_anchor_shifted(h1.q, h1.r);
+                    let (_, y1) = hex_anchor_shifted(h2.q, h2.r);
+                    let y = y0.max(y1);
+
+                    CursorPosition { x: x + 2, y }
+                }
+                Axis::R => {
+                    let (h1, h2) = path.as_pair();
+                    let (x0, y0) = hex_anchor_shifted(h1.q, h1.r);
+                    let (x1, y1) = hex_anchor_shifted(h2.q, h2.r);
+                    let (y, x) = (y0, x0).max((y1, x1));
+
+                    CursorPosition { x, y: y + 1 }
+                }
+                Axis::S => {
+                    let (h1, h2) = path.as_pair();
+                    let (x0, y0) = hex_anchor_shifted(h1.q, h1.r);
+                    let (x1, y1) = hex_anchor_shifted(h2.q, h2.r);
+                    let (y, x) = (y0, x0).min((y1, x1));
+
+                    CursorPosition { x, y: y + 3 }
+                }
+            }
         }
-        Axis::S => {
-            let (h1, h2) = path.as_pair();
-            let (x0, y0) = hex_anchor_shifted(h1.q, h1.r);
-            let (x1, y1) = hex_anchor_shifted(h2.q, h2.r);
-            let (y, x) = (y0, x0).min((y1, x1));
 
-            CursorPosition { x, y: y + 3 }
+        pub fn path_buf(path: Path) -> BufFragment {
+            BufFragment {
+                fragment: axis_path_buf(path.axis()),
+                pos: path_anchor(path),
+            }
         }
-    }
-}
 
-pub fn path_buf(path: Path) -> IndexedBuffer {
-    IndexedBuffer {
-        buf: axis_path_buf(path.axis()),
-        pos: path_anchor(path),
-    }
-}
+        pub fn path_buf_clr(path: Path, color: Color) -> BufFragment<Color> {
+            let (width, height) = match path.axis() {
+                Axis::Q => (7, 1),
+                _ => (2, 2),
+            };
+            BufFragment::<Color> {
+                fragment: Buffer::<Color>::new_with(width, height, color),
+                pos: path_anchor(path),
+            }
+        }
 
-pub const fn hex_anchor(q: i32, r: i32) -> (i32, i32) {
-    // supposing (0, 0) -> (0, 0)
-    //
-    // (+1, +0) -> (+9, +2)
-    // (+0, +1) -> (+9, -2)
+        pub const fn hex_anchor_shifted(q: i32, r: i32) -> (i32, i32) {
+            // supposing (-2, -1) -> (0, 0)
+            //
+            // (+1, +0) -> (+9, +2)  (y-axis inverted)
+            // (+0, +1) -> (+0, +4)
 
-    ((q + r) * 9, (q - r) * 2)
-}
+            let (q, r) = (q + 2, r + 1);
 
-pub const fn hex_anchor_shifted(q: i32, r: i32) -> (i32, i32) {
-    // supposing (-2, -1) -> (0, 0)
-    //
-    // (+1, +0) -> (+9, +2)  (y-axis inverted)
-    // (+0, +1) -> (+0, +4)
-
-    let (q, r) = (q + 2, r + 1);
-
-    (q * 9, q * 2 + r * 4)
-}
-
-pub fn draw_field() {
-    let hexagon = r"  _______   /       \ /         \\         / \_______/ ";
-    // let hexagon = r".._______.../.......\./.........\\........./.\_______/.";
-
-    let hexagon = Buffer::from_string(11, 5, hexagon);
-    let mut buf = Buffer::new(47, 21);
-    // let mut buf = Buffer::new(30, 20);
-
-    let (x, y) = hex_anchor_shifted(-3, 1);
-    buf.paste_at(x as isize, y as isize, &hexagon);
-
-    for radius in 0..=2 {
-        let hexes = HexIndex::hex_ring(Hex::new(0, 0), radius);
-
-        for h in hexes {
-            let (x, y) = hex_anchor_shifted(h.q, h.r);
-            buf.paste_at(x as isize, y as isize, &hexagon);
+            (q * 9, q * 2 + r * 4)
         }
     }
 
-    buf.print();
-}
-
-pub fn draw_paths() {
-    let hexagon = r"  _______   /       \ /         \\         / \_______/ ";
-    // let hexagon = r".._______.../.......\./.........\\........./.\_______/.";
-
-    let hexagon = Buffer::from_string(11, 5, hexagon);
-    let mut buf = Buffer::new(47, 21);
-    // let mut buf = Buffer::new(30, 20);
-
-    let (x, y) = hex_anchor_shifted(-3, 1);
-    buf.paste_at(x as isize, y as isize, &hexagon);
-
-    let (x, y) = hex_anchor_shifted(-2, -1);
-    buf.paste_at(x as isize, y as isize, &hexagon);
-
-    let hexes = HexIndex::hex_ring(Hex::new(0, 0), 2);
-
-    for h in hexes {
-        let (x, y) = hex_anchor_shifted(h.q, h.r);
-        buf.paste_at(x as isize, y as isize, &hexagon);
+    pub struct FieldRenderer {
+        width: usize,
+        height: usize,
+        buf: Buffer<u8>,
+        clr: Buffer<Color>,
     }
 
-    for (i, path) in Hex::new(0, 0).paths_arr().iter().enumerate().take(6) {
-        let mut path_indexed_buf = path_buf(*path);
+    impl FieldRenderer {
+        pub fn new() -> Self {
+            let width = 47;
+            let height = 21;
 
-        // *path_indexed_buf.buf.at_mut(0, 0) = (i as u8) + (b'0');
+            Self {
+                width,
+                height,
+                buf: Buffer::new(width, height),
+                clr: Buffer::new(width, height),
+            }
+        }
 
-        buf.paste_at(
-            path_indexed_buf.pos.x as isize,
-            path_indexed_buf.pos.y as isize,
-            &path_indexed_buf.buf,
-        );
+        pub fn clear(&mut self) {
+            self.buf.clear();
+            self.clr.clear();
+        }
+
+        pub fn draw_path(&mut self, path: Path, color: Color) {
+            self.buf.paste(&utils::path_buf(path));
+            self.clr.paste(&utils::path_buf_clr(path, color));
+        }
+
+        // pub fn draw_field(&mut self, color: Color) {}
+
+        pub fn render(&self) {
+            let mut stdout = StandardStream::stdout(ColorChoice::Always);
+
+            print!(" ");
+            for x in 0..self.width {
+                print!("{}", x % 10);
+            }
+            print!("\n");
+            for y in 0..self.height {
+                print!("{}", y % 10);
+
+                let start = y * self.width;
+                let end = (y + 1) * self.width;
+
+                for i in start..end {
+                    let color = self.clr.get_slice()[i];
+                    let chr = self.buf.get_slice()[i];
+
+                    stdout
+                        .set_color(ColorSpec::new().set_fg(Some(color)))
+                        .unwrap();
+                    write!(&mut stdout, "{}", chr as char).unwrap();
+                }
+
+                stdout.set_color(ColorSpec::new().set_fg(None)).unwrap();
+
+                print!("{}", y % 10);
+                print!("\n");
+            }
+            print!(" ");
+            for x in 0..self.width {
+                print!("{}", x % 10);
+            }
+            print!("\n");
+        }
     }
-
-    buf.print();
 }
 
 pub mod test {
-    #[test]
-    fn draw_field() {
-        super::draw_field();
-    }
+    use catan_core::topology::Hex;
+    use termcolor::Color;
+
+    use super::*;
 
     #[test]
-    fn draw_paths() {
-        super::draw_paths();
+    fn render_color_paths() {
+        use field_render::*;
+
+        let mut field = FieldRenderer::new();
+
+        for (path, color) in Hex::new(0, 0).paths_arr().iter().zip([
+            Color::White,
+            Color::Black,
+            Color::Blue,
+            Color::Cyan,
+            Color::Yellow,
+            Color::Magenta,
+        ]) {
+            field.draw_path(*path, color);
+        }
+
+        field.render();
     }
 }
