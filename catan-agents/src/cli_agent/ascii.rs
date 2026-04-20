@@ -219,14 +219,14 @@ pub mod buffer {
 }
 
 pub mod field_render {
-    use catan_core::topology::Path;
-    use std::io::Write;
+    use catan_core::topology::{Hex, HexIndex, Path};
+    use std::{collections::BTreeSet, io::Write};
     use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 
     use crate::cli_agent::ascii::buffer::Buffer;
 
     mod utils {
-        use catan_core::topology::{Axis, Path};
+        use catan_core::topology::{Axis, Hex, Path};
         use termcolor::Color;
 
         use crate::cli_agent::ascii::{
@@ -289,6 +289,23 @@ pub mod field_render {
             }
         }
 
+        pub fn hex_buf(hex: Hex) -> BufFragment {
+            let hexagon = r"  _______   /       \ /         \\         / \_______/ ";
+            let hexagon = Buffer::from_string(11, 5, hexagon.as_bytes());
+
+            BufFragment {
+                fragment: hexagon,
+                pos: hex_anchor_shifted(hex.q, hex.r).into(),
+            }
+        }
+
+        pub fn hex_buf_clr(hex: Hex, color: Color) -> BufFragment<Color> {
+            BufFragment {
+                fragment: Buffer::<Color>::new_with(9, 5, color),
+                pos: hex_anchor_shifted(hex.q, hex.r).into(),
+            }
+        }
+
         pub const fn hex_anchor_shifted(q: i32, r: i32) -> (i32, i32) {
             // supposing (-2, -1) -> (0, 0)
             //
@@ -331,18 +348,32 @@ pub mod field_render {
             self.clr.paste(&utils::path_buf_clr(path, color));
         }
 
-        // pub fn draw_field(&mut self, color: Color) {}
+        pub fn draw_hex(&mut self, hex: Hex, color: Color) {
+            self.buf.paste(&utils::hex_buf(hex));
+            self.clr.paste(&utils::hex_buf_clr(hex, color));
+        }
+
+        pub fn draw_field(&mut self, color: Color) {
+            let paths = (0..=2)
+                .flat_map(|radius| HexIndex::hex_ring(Hex::new(0, 0), radius))
+                .flat_map(|h| h.paths_arr())
+                .collect::<BTreeSet<_>>();
+
+            for path in paths {
+                self.draw_path(path, color);
+            }
+        }
 
         pub fn render(&self) {
             let mut stdout = StandardStream::stdout(ColorChoice::Always);
 
-            print!(" ");
+            write!(stdout, " ").unwrap();
             for x in 0..self.width {
-                print!("{}", x % 10);
+                write!(stdout, "{}", x % 10).unwrap();
             }
-            print!("\n");
+            write!(stdout, "\n").unwrap();
             for y in 0..self.height {
-                print!("{}", y % 10);
+                write!(stdout, "{}", y % 10).unwrap();
 
                 let start = y * self.width;
                 let end = (y + 1) * self.width;
@@ -359,28 +390,25 @@ pub mod field_render {
 
                 stdout.set_color(ColorSpec::new().set_fg(None)).unwrap();
 
-                print!("{}", y % 10);
-                print!("\n");
+                write!(stdout, "{}", y % 10).unwrap();
+                write!(stdout, "\n").unwrap();
             }
-            print!(" ");
+            write!(stdout, " ").unwrap();
             for x in 0..self.width {
-                print!("{}", x % 10);
+                write!(stdout, "{}", x % 10).unwrap();
             }
-            print!("\n");
+            write!(stdout, "\n").unwrap();
         }
     }
 }
 
 pub mod test {
+    use super::field_render::*;
     use catan_core::topology::Hex;
     use termcolor::Color;
 
-    use super::*;
-
     #[test]
     fn render_color_paths() {
-        use field_render::*;
-
         let mut field = FieldRenderer::new();
 
         for (path, color) in Hex::new(0, 0).paths_arr().iter().zip([
@@ -394,6 +422,13 @@ pub mod test {
             field.draw_path(*path, color);
         }
 
+        field.render();
+    }
+
+    #[test]
+    fn render_field() {
+        let mut field = FieldRenderer::new();
+        field.draw_field(Color::Cyan);
         field.render();
     }
 }
