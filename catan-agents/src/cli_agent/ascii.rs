@@ -256,23 +256,17 @@ pub mod buffer {
 
 pub mod field_render {
     use catan_core::{
-        gameplay::primitives::{
-            build::EstablishmentType,
-            resource::{self, Resource},
-        },
-        topology::{Hex, HexIndex, Path},
+        gameplay::primitives::{build::EstablishmentType, resource::Resource},
+        topology::{Hex, HexIndex, Intersection, Path},
     };
     use std::{collections::BTreeSet, io::Write};
     use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 
-    use crate::cli_agent::ascii::{
-        buffer::{BufFragment, Buffer},
-        cursor::CursorPosition,
-    };
+    use crate::cli_agent::ascii::buffer::{BufFragment, Buffer};
 
     mod utils {
-        use catan_core::topology::{Axis, Hex, Path};
-        use termcolor::{Color, ColorSpec};
+        use catan_core::topology::{Axis, Hex, Intersection, Path, SignedAxis};
+        use termcolor::ColorSpec;
 
         use crate::cli_agent::ascii::{
             buffer::{BufFragment, Buffer},
@@ -314,6 +308,28 @@ pub mod field_render {
                     CursorPosition { x, y: y + 3 }
                 }
             }
+        }
+
+        pub fn intersection_anchor(v: Intersection) -> CursorPosition {
+            let hexes = v.as_set();
+            let nether_hex = hexes
+                .iter()
+                .max_by_key(|h| hex_anchor(**h).y)
+                .expect("can't be empty lol");
+
+            let top_path = nether_hex.paths_arr()[SignedAxis::QP.dir_index()];
+
+            let right = nether_hex.neighbors()[SignedAxis::SP.dir_index()];
+            let _ /* left */ = nether_hex.neighbors()[SignedAxis::SN.dir_index()];
+            let mut anchor = path_anchor(top_path);
+
+            if hexes.contains(&right) {
+                anchor.x += 7;
+            } else {
+                anchor.x -= 1;
+            }
+
+            anchor
         }
 
         pub fn path_buf(path: Path) -> BufFragment {
@@ -419,7 +435,7 @@ pub mod field_render {
 
     pub enum IntersectionAttr {
         Selector,
-        Establishment(EstablishmentType),
+        Establishment(EstablishmentType, Color),
     }
 
     pub struct FieldRenderer {
@@ -457,9 +473,19 @@ pub mod field_render {
             match attr {
                 PathAttr::Road { color } => self.draw_path(
                     path,
-                    ColorSpec::new().set_bold(true).set_fg(Some(color)).clone(),
+                    ColorSpec::new()
+                        .set_bold(true)
+                        .set_intense(true)
+                        .set_fg(Some(color))
+                        .clone(),
                 ),
-                PathAttr::Selector => todo!(),
+                PathAttr::Selector => self.draw_path(
+                    path,
+                    ColorSpec::new()
+                        .set_bold(true)
+                        .set_bg(Some(Color::Red))
+                        .clone(),
+                ),
             }
         }
 
@@ -513,6 +539,48 @@ pub mod field_render {
                 HexAttr::Resource(res) => self.draw_hex_resourse(hex, res),
                 HexAttr::Robber => self.draw_hex_robber(hex),
                 HexAttr::Selector => self.draw_hex_selector(hex),
+            }
+        }
+
+        pub fn draw_intersection_selector(&mut self, v: Intersection) {
+            let pos = utils::intersection_anchor(v);
+            let (buf, fmt) = utils::textbox_buf_centered_fmt(
+                pos,
+                "[ ]".as_bytes(),
+                ColorSpec::new().set_bg(Some(Color::Red)).clone(),
+            );
+            self.paste_fmt(&buf, &fmt);
+        }
+
+        pub fn draw_intersection_establishment(
+            &mut self,
+            v: Intersection,
+            kind: EstablishmentType,
+            color: Color,
+        ) {
+            let pos = utils::intersection_anchor(v);
+            let s = match kind {
+                EstablishmentType::Settlement => b"{ }",
+                EstablishmentType::City => b"{@}",
+            };
+            let (buf, fmt) = utils::textbox_buf_centered_fmt(
+                pos,
+                s,
+                ColorSpec::new().set_fg(Some(color)).clone(),
+            );
+            self.paste_fmt(&buf, &fmt);
+        }
+
+        pub fn draw_intersection_attr(
+            &mut self,
+            intersection: Intersection,
+            attr: IntersectionAttr,
+        ) {
+            match attr {
+                IntersectionAttr::Selector => self.draw_intersection_selector(intersection),
+                IntersectionAttr::Establishment(establishment_type, color) => {
+                    self.draw_intersection_establishment(intersection, establishment_type, color)
+                }
             }
         }
 
@@ -575,10 +643,22 @@ pub mod field_render {
 pub mod test {
     use super::field_render::*;
     use catan_core::{
-        gameplay::primitives::resource::Resource,
-        topology::{Hex, Path},
+        gameplay::primitives::{build::EstablishmentType, resource::Resource},
+        topology::{Hex, Intersection, Path},
     };
     use termcolor::{Color, ColorSpec};
+
+    fn h(q: i32, r: i32) -> Hex {
+        Hex::new(q, r)
+    }
+
+    fn p(h1: Hex, h2: Hex) -> Path {
+        Path::try_from((h1, h2)).unwrap()
+    }
+
+    fn v(h1: Hex, h2: Hex, h3: Hex) -> Intersection {
+        Intersection::try_from((h1, h2, h3)).unwrap()
+    }
 
     #[test]
     fn render_color_paths() {
@@ -647,6 +727,83 @@ pub mod test {
 
         field.draw_hex_attr(Hex::new(1, 0), HexAttr::TileNum(6));
         field.draw_hex_attr(Hex::new(1, 0), HexAttr::Selector);
+        field.render();
+    }
+
+    #[test]
+    fn path_attributes() {
+        let mut field = FieldRenderer::new();
+
+        field.draw_field(
+            ColorSpec::new()
+                .set_fg(Some(Color::Rgb(10, 10, 10)))
+                .clone(),
+        );
+
+        field.draw_hex_attr(Hex::new(0, 0), HexAttr::TileNum(12));
+        field.draw_hex_attr(Hex::new(0, 0), HexAttr::Robber);
+        field.draw_hex_attr(Hex::new(0, 0), HexAttr::Resource(Resource::Sheep));
+
+        field.draw_hex_attr(Hex::new(1, 0), HexAttr::TileNum(6));
+        field.draw_hex_attr(Hex::new(1, 0), HexAttr::Resource(Resource::Wood));
+        field.draw_hex_attr(Hex::new(1, 0), HexAttr::Selector);
+
+        field.draw_path_attr(
+            p(h(0, 0), h(0, 1)),
+            PathAttr::Road {
+                color: Color::Green,
+            },
+        );
+
+        field.draw_path_attr(
+            p(h(0, 0), h(-1, 1)),
+            PathAttr::Road {
+                color: Color::Green,
+            },
+        );
+
+        field.render();
+    }
+
+    #[test]
+    fn intersection_attributes() {
+        let mut field = FieldRenderer::new();
+
+        field.draw_field(
+            ColorSpec::new()
+                .set_fg(Some(Color::Rgb(10, 10, 10)))
+                .clone(),
+        );
+
+        field.draw_hex_attr(Hex::new(0, 0), HexAttr::TileNum(12));
+        field.draw_hex_attr(Hex::new(0, 0), HexAttr::Robber);
+        field.draw_hex_attr(Hex::new(0, 0), HexAttr::Resource(Resource::Sheep));
+
+        field.draw_path_attr(
+            p(h(0, 0), h(-1, 1)),
+            PathAttr::Road {
+                color: Color::Green,
+            },
+        );
+
+        for (i, v) in h(0, 0).vertices().enumerate() {
+            field.draw_intersection_attr(v, IntersectionAttr::Selector);
+        }
+
+        for (i, v) in h(-2, 0).vertices().enumerate() {
+            field.draw_intersection_attr(
+                v,
+                IntersectionAttr::Establishment(EstablishmentType::Settlement, Color::Green),
+            );
+        }
+
+        for (i, v) in h(2, 0).vertices().enumerate() {
+            field.draw_intersection_attr(
+                v,
+                IntersectionAttr::Establishment(EstablishmentType::City, Color::Blue),
+            );
+        }
+
         field.render();
     }
 }

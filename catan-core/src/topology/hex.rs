@@ -213,14 +213,17 @@ pub enum Axis {
 }
 
 impl SignedAxis {
-    pub const fn unorient(&self) -> Axis {
-        match self {
-            SignedAxis::QP => Axis::Q,
-            SignedAxis::QN => Axis::Q,
-            SignedAxis::RP => Axis::R,
-            SignedAxis::RN => Axis::R,
-            SignedAxis::SP => Axis::S,
-            SignedAxis::SN => Axis::S,
+    pub fn from_dir(dir_index: usize) -> SignedAxis {
+        assert!((0..6).contains(&dir_index));
+
+        match dir_index {
+            0 => SignedAxis::RP,
+            1 => SignedAxis::SP,
+            2 => SignedAxis::QP,
+            3 => SignedAxis::RN,
+            4 => SignedAxis::SN,
+            5 => SignedAxis::QN,
+            _ => unreachable!(),
         }
     }
 
@@ -235,6 +238,17 @@ impl SignedAxis {
         }
     }
 
+    pub const fn unorient(&self) -> Axis {
+        match self {
+            SignedAxis::QP => Axis::Q,
+            SignedAxis::QN => Axis::Q,
+            SignedAxis::RP => Axis::R,
+            SignedAxis::RN => Axis::R,
+            SignedAxis::SP => Axis::S,
+            SignedAxis::SN => Axis::S,
+        }
+    }
+
     pub fn dir(&self) -> Hex {
         Hex::direction(self.dir_index())
     }
@@ -242,14 +256,7 @@ impl SignedAxis {
 
 impl Axis {
     pub fn from_dir(dir_index: usize) -> Axis {
-        assert!((0..6).contains(&dir_index));
-
-        match dir_index % 3 {
-            0 => Axis::R,
-            1 => Axis::S,
-            2 => Axis::Q,
-            _ => unreachable!(),
-        }
+        SignedAxis::from_dir(dir_index).unorient()
     }
 
     pub fn from_path(path: Path) -> Axis {
@@ -262,11 +269,37 @@ impl Axis {
         Self::from_dir(dir_index)
     }
 
-    pub const fn to_dir(&self) -> usize {
+    pub const fn dir_index(&self) -> usize {
+        self.orient(true).dir_index()
+    }
+
+    pub fn dir(&self) -> Hex {
+        self.orient(true).dir()
+    }
+
+    pub const fn orient(&self, positive: bool) -> SignedAxis {
         match self {
-            Axis::Q => 2,
-            Axis::R => 0,
-            Axis::S => 1,
+            Axis::Q => {
+                if positive {
+                    SignedAxis::QP
+                } else {
+                    SignedAxis::QN
+                }
+            }
+            Axis::R => {
+                if positive {
+                    SignedAxis::RP
+                } else {
+                    SignedAxis::RN
+                }
+            }
+            Axis::S => {
+                if positive {
+                    SignedAxis::SP
+                } else {
+                    SignedAxis::SN
+                }
+            }
         }
     }
 }
