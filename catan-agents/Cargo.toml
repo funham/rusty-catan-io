@@ -6,4 +6,6 @@ edition = "2024"
 [dependencies]
 catan-core = { path = "../catan-core" }
 log = "0.4.29"
+strum = { version = "0.28.0", features = ["derive"] }
+strum_macros = "0.28.0"
 termcolor = "1.4.1"
