@@ -148,7 +148,7 @@ pub mod buffer {
             &mut self.buf[y * self.width + x]
         }
 
-        pub fn paste_at(&mut self, x0: isize, y0: isize, paste: &Self) {
+        fn paste_at(&mut self, x0: isize, y0: isize, paste: &Self, ignore_blank: bool) {
             for y in 0..paste.height {
                 for x in 0..paste.width {
                     let xb = (x0 + x as isize) as usize;
@@ -158,7 +158,7 @@ pub mod buffer {
                         continue;
                     }
 
-                    if paste.at(x, y).is_blank() {
+                    if ignore_blank && paste.at(x, y).is_blank() {
                         continue;
                     }
 
@@ -168,7 +168,21 @@ pub mod buffer {
         }
 
         pub fn paste(&mut self, paste: &BufFragment<T>) {
-            self.paste_at(paste.pos.x as isize, paste.pos.y as isize, &paste.fragment);
+            self.paste_at(
+                paste.pos.x as isize,
+                paste.pos.y as isize,
+                &paste.fragment,
+                true,
+            );
+        }
+
+        pub fn paste_with_blank(&mut self, paste: &BufFragment<T>) {
+            self.paste_at(
+                paste.pos.x as isize,
+                paste.pos.y as isize,
+                &paste.fragment,
+                false,
+            );
         }
 
         pub fn clear(&mut self) {
@@ -549,7 +563,7 @@ pub mod field_render {
                 "[ ]".as_bytes(),
                 ColorSpec::new().set_bg(Some(Color::Red)).clone(),
             );
-            self.paste_fmt(&buf, &fmt);
+            self.paste_with_blank_fmt(&buf, &fmt);
         }
 
         pub fn draw_intersection_establishment(
@@ -568,7 +582,7 @@ pub mod field_render {
                 s,
                 ColorSpec::new().set_fg(Some(color)).clone(),
             );
-            self.paste_fmt(&buf, &fmt);
+            self.paste_with_blank_fmt(&buf, &fmt);
         }
 
         pub fn draw_intersection_attr(
@@ -602,6 +616,11 @@ pub mod field_render {
         pub fn paste_fmt(&mut self, buf: &BufFragment, fmt: &BufFragment<ColorSpec>) {
             self.buf.paste(&buf);
             self.fmt.paste(&fmt);
+        }
+
+        pub fn paste_with_blank_fmt(&mut self, buf: &BufFragment, fmt: &BufFragment<ColorSpec>) {
+            self.buf.paste_with_blank(&buf);
+            self.fmt.paste_with_blank(&fmt);
         }
 
         pub fn render(&self) {
