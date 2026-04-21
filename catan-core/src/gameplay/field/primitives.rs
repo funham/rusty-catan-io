@@ -66,6 +66,16 @@ impl FieldArrangement {
             .collect::<BTreeSet<_>>()
     }
 
+    pub fn path_set(&self) -> BTreeSet<Path> {
+        self.hex_iter()
+            .flat_map(|h| h.paths_arr())
+            .collect::<BTreeSet<_>>()
+    }
+
+    pub fn paths(&self) -> impl IntoIterator<Item = Path> {
+        self.path_set()
+    }
+
     pub fn ports(&self) -> &BTreeMap<Path, PortKind> {
         &self.ports_info
     }

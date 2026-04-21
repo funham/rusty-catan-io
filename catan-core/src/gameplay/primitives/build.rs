@@ -560,6 +560,8 @@ pub mod data {
 
 /// Read-only query utilities over the build data.
 pub mod query {
+    use crate::topology::HexIndex;
+
     use super::*;
 
     pub struct BuildDataQuery<'a> {
@@ -650,11 +652,15 @@ pub mod query {
                 .filter(|v| !build_deadzone.contains(v));
 
             let path_deadzone = &occ.occupancy_full().roads_occupancy.paths;
+            let valid_paths = field.arrangement.path_set();
 
             // log::debug!("build_deadzone: {:?}", build_deadzone);
 
             let possible_placements = available_intersections.flat_map(|v| {
-                let paths = v.paths().into_iter().filter(|p| !path_deadzone.contains(p));
+                let paths = v
+                    .paths()
+                    .into_iter()
+                    .filter(|p| !path_deadzone.contains(p) && valid_paths.contains(p));
                 paths.map(move |p| (v, p))
             });
 
