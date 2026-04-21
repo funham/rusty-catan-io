@@ -20,7 +20,7 @@ use catan_core::{
             trade::{BankTrade, BankTradeKind},
         },
     },
-    topology::{Hex, Intersection, Path},
+    topology::{Hex, HexIndex, Intersection, Path, repr::Dual},
 };
 
 use crate::cli_agent::ascii;
@@ -86,7 +86,7 @@ impl TerminalUi {
             }
             AgentRequest::RobHex(perspective) => {
                 Self::print_perspective("RobHex", &perspective);
-                AgentResponse::RobHex(Self::read_hex("robber hex (q r): "))
+                AgentResponse::RobHex(Self::read_hex("robber hex (#hex): "))
             }
             AgentRequest::RobPlayer(perspective) => {
                 Self::print_perspective("RobPlayer", &perspective);
@@ -95,11 +95,11 @@ impl TerminalUi {
             AgentRequest::Initialization(perspective) => {
                 Self::print_perspective("Initialization", &perspective);
                 let establishment = Establishment {
-                    pos: Self::read_intersection("settlement (q1 r1 q2 r2 q3 r3): "),
+                    pos: Self::read_intersection("settlement (h1, h2, h3)"),
                     stage: EstablishmentType::Settlement,
                 };
                 let road = Road {
-                    pos: Self::read_path("road (q1 r1 q2 r2): "),
+                    pos: Self::read_path("road (h1, h2): "),
                 };
                 AgentResponse::Initialization {
                     establishment,
@@ -209,19 +209,19 @@ impl TerminalUi {
     fn parse_build(line: &str) -> Option<Build> {
         let parts = line.split_whitespace().collect::<Vec<_>>();
         match parts.as_slice() {
-            ["build", "road", q1, r1, q2, r2] => {
+            ["build", "road", h1, h2] => {
                 let path = Path::try_from((
-                    Hex::new(q1.parse().ok()?, r1.parse().ok()?),
-                    Hex::new(q2.parse().ok()?, r2.parse().ok()?),
+                    HexIndex::spiral_to_hex(h1.parse().ok()?),
+                    HexIndex::spiral_to_hex(h2.parse().ok()?),
                 ))
                 .ok()?;
                 Some(Build::Road(Road { pos: path }))
             }
-            ["build", "settlement", q1, r1, q2, r2, q3, r3] => {
+            ["build", "settlement", h1, h2, h3] => {
                 let pos = Intersection::try_from([
-                    Hex::new(q1.parse().ok()?, r1.parse().ok()?),
-                    Hex::new(q2.parse().ok()?, r2.parse().ok()?),
-                    Hex::new(q3.parse().ok()?, r3.parse().ok()?),
+                    HexIndex::spiral_to_hex(h1.parse().ok()?),
+                    HexIndex::spiral_to_hex(h2.parse().ok()?),
+                    HexIndex::spiral_to_hex(h3.parse().ok()?),
                 ])
                 .ok()?;
                 Some(Build::Establishment(Establishment {
@@ -229,11 +229,11 @@ impl TerminalUi {
                     stage: EstablishmentType::Settlement,
                 }))
             }
-            ["build", "city", q1, r1, q2, r2, q3, r3] => {
+            ["build", "city", h1, h2, h3] => {
                 let pos = Intersection::try_from([
-                    Hex::new(q1.parse().ok()?, r1.parse().ok()?),
-                    Hex::new(q2.parse().ok()?, r2.parse().ok()?),
-                    Hex::new(q3.parse().ok()?, r3.parse().ok()?),
+                    HexIndex::spiral_to_hex(h1.parse().ok()?),
+                    HexIndex::spiral_to_hex(h2.parse().ok()?),
+                    HexIndex::spiral_to_hex(h3.parse().ok()?),
                 ])
                 .ok()?;
                 Some(Build::Establishment(Establishment {
@@ -299,8 +299,8 @@ impl TerminalUi {
                 .map(str::parse::<i32>)
                 .collect::<Result<Vec<_>, _>>();
             match parts {
-                Ok(parts) if parts.len() == 2 => return Hex::new(parts[0], parts[1]),
-                _ => println!("expected: q r"),
+                Ok(parts) if parts.len() == 1 => return HexIndex::spiral_to_hex(parts[0] as usize),
+                _ => println!("expected spiral hex 0-based index (usize)"),
             }
         }
     }
@@ -313,18 +313,30 @@ impl TerminalUi {
                 .map(str::parse::<i32>)
                 .collect::<Result<Vec<_>, _>>();
             match parts {
-                Ok(parts) if parts.len() == 4 => {
-                    let result = Path::try_from((
-                        Hex::new(parts[0], parts[1]),
-                        Hex::new(parts[2], parts[3]),
+                Ok(parts) if parts.len() == 2 => {
+                    let result_canon = Path::try_from((
+                        HexIndex::spiral_to_hex(parts[0] as usize),
+                        HexIndex::spiral_to_hex(parts[1] as usize),
                     ));
-                    if let Ok(path) = result {
-                        return path;
+
+                    let result_dual = Path::<Dual>::try_from((
+                        HexIndex::spiral_to_hex(parts[0] as usize),
+                        HexIndex::spiral_to_hex(parts[1] as usize),
+                    ));
+
+                    match (result_canon, result_dual) {
+                        (Ok(path), _) => {
+                            return path;
+                        }
+                        (_, Ok(path)) => {
+                            return path.canon();
+                        }
+                        _ => {}
                     }
                 }
                 _ => {}
             }
-            println!("expected adjacent hex pair: q1 r1 q2 r2");
+            println!("expected adjacent hex pair: h1 h2 or a dual representation");
         }
     }
 
@@ -336,16 +348,16 @@ impl TerminalUi {
                 .map(str::parse::<i32>)
                 .collect::<Result<Vec<_>, _>>();
             match parts {
-                Ok(parts) if parts.len() == 6 => {
+                Ok(parts) if parts.len() == 3 => {
                     let result = Intersection::try_from([
-                        Hex::new(parts[0], parts[1]),
-                        Hex::new(parts[2], parts[3]),
-                        Hex::new(parts[4], parts[5]),
+                        HexIndex::spiral_to_hex(parts[0] as usize),
+                        HexIndex::spiral_to_hex(parts[1] as usize),
+                        HexIndex::spiral_to_hex(parts[2] as usize),
                     ]);
                     match result {
                         Ok(intersection) => return intersection,
                         Err(_) => {
-                            log::error!("vertices are not adjacent");
+                            log::error!("hexes are not adjacent");
                         }
                     }
                     if let Ok(intersection) = result {
@@ -354,7 +366,7 @@ impl TerminalUi {
                 }
                 _ => {}
             }
-            println!("expected adjacent hex triplet: q1 r1 q2 r2 q3 r3");
+            println!("expected adjacent hex triplet: h1 h2 h3");
         }
     }
 
