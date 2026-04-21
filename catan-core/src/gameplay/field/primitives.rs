@@ -52,6 +52,10 @@ impl FieldArrangement {
         (0..self.tiles.len()).map(|index| HexIndex::spiral_to_hex(index))
     }
 
+    pub fn hex_iter_with_ocean(&self) -> impl Iterator<Item = Hex> {
+        (0..HexIndex::spiral_start_of_ring(4)).map(|index| HexIndex::spiral_to_hex(index))
+    }
+
     pub fn hex_enum_iter(&self) -> impl Iterator<Item = (Hex, Tile)> {
         self.hex_iter().zip(self.tiles.iter().copied())
     }

@@ -1,4 +1,3 @@
-
 use catan_core::{
     gameplay::{
         game::state::Perspective,
@@ -144,7 +143,7 @@ mod utils {
         // (+1, +0) -> (+9, +2)  (y-axis inverted)
         // (+0, +1) -> (+0, +4)
 
-        let (q, r) = (q + 2, r + 1);
+        let (q, r) = (q + 3, r + 1);
         const X_PIXEL_OFFSET: i32 = 1;
 
         (q * 9 + X_PIXEL_OFFSET, q * 2 + r * 4)
@@ -158,7 +157,7 @@ pub enum PathAttr {
 
 pub enum HexAttr {
     TileNum(u8),
-    DebugCoords,
+    Index,
     Resource(Resource),
     Robber,
     Selector,
@@ -178,8 +177,15 @@ pub struct FieldRenderer {
 
 impl FieldRenderer {
     pub fn new() -> Self {
-        let width = 49;
-        let height = 21;
+        const FIELD_HEX_WIDTH: usize = 5 + 2;
+        const HEX_WIDTH_BODY: usize = 9;
+        const HEX_WIDTH_SIDE: usize = 1;
+
+        const FIELD_HEX_HEIGHT: usize = 5 + 2;
+        const HEX_HEIGHT: usize = 5;
+
+        let width = FIELD_HEX_WIDTH * HEX_WIDTH_BODY + 2 * HEX_WIDTH_SIDE;
+        let height = (HEX_HEIGHT - 1) * FIELD_HEX_HEIGHT + 1;
 
         Self {
             width,
@@ -213,11 +219,13 @@ impl FieldRenderer {
         self.fmt.clear();
     }
 
-    pub fn draw_perspective(&mut self, perspective: &Perspective) {
-        // render skeleton
-        self.draw_field(ColorSpec::new().set_fg(Some(Color::Ansi256(233))).clone());
+    pub fn draw_skeleton(&mut self, _perspective: &Perspective) -> &mut Self {
+        // TODO: ports
+        self.draw_field(ColorSpec::new().set_dimmed(true).clone());
+        self
+    }
 
-        // render tile info
+    pub fn draw_tile_info(&mut self, perspective: &Perspective) -> &mut Self {
         for (hex, tile) in perspective.field.arrangement.hex_enum_iter() {
             match tile {
                 Tile::Resource { resource, number } => {
@@ -228,11 +236,15 @@ impl FieldRenderer {
                 _ => todo!(),
             }
         }
+        self
+    }
 
-        // render robber
+    pub fn draw_robber(&mut self, perspective: &Perspective) -> &mut Self {
         self.draw_hex_attr(perspective.field.robber_pos, HexAttr::Robber);
+        self
+    }
 
-        // render builds
+    pub fn draw_builds(&mut self, perspective: &Perspective) -> &mut Self {
         for (id, player) in perspective.builds.players().iter().enumerate() {
             for road in player.roads.iter() {
                 self.draw_path_attr(
@@ -250,11 +262,35 @@ impl FieldRenderer {
                 );
             }
         }
+
+        self
+    }
+
+    pub fn draw_index(&mut self, perspective: &Perspective) -> &mut Self {
+        for hex in perspective.field.arrangement.hex_iter_with_ocean() {
+            self.draw_hex_attr(hex, HexAttr::Index);
+        }
+        self
+    }
+
+    pub fn draw_perspective(&mut self, perspective: &Perspective) {
+        // render skeleton
+        self.draw_skeleton(perspective);
+
+        // render tile info
+        self.draw_tile_info(perspective);
+
+        // render robber
+        self.draw_robber(perspective);
+
+        // render builds
+        self.draw_builds(perspective);
     }
 
     pub fn render(&self) {
         let mut stdout = StandardStream::stdout(ColorChoice::Always);
 
+        writeln!(stdout, "\n{}x{}", self.width, self.height).unwrap();
         write!(stdout, " ").unwrap();
         for x in 0..self.width {
             write!(stdout, "{}", x % 10).unwrap();
@@ -312,7 +348,7 @@ impl FieldRenderer {
     pub fn draw_hex_attr(&mut self, hex: Hex, attr: HexAttr) {
         match attr {
             HexAttr::TileNum(num) => self.draw_hex_tile_num(hex, num),
-            HexAttr::DebugCoords => todo!(),
+            HexAttr::Index => self.draw_hex_index(hex),
             HexAttr::Resource(res) => self.draw_hex_resourse(hex, res),
             HexAttr::Robber => self.draw_hex_robber(hex),
             HexAttr::Selector => self.draw_hex_selector(hex),
@@ -364,7 +400,8 @@ impl FieldRenderer {
             1,
             format!("{}", num).as_bytes(),
             match num {
-                6 | 8 => ColorSpec::new().set_fg(Some(Color::Ansi256(131))).clone(),
+                // 6 | 8 => ColorSpec::new().set_fg(Some(Color::Ansi256(131))).clone(),
+                6 | 8 => ColorSpec::new().set_fg(Some(Color::Red)).clone(),
                 _ => ColorSpec::new().set_fg(Some(Color::Ansi256(188))).clone(),
             },
         );
@@ -384,9 +421,25 @@ impl FieldRenderer {
     }
 
     fn draw_hex_selector(&mut self, hex: Hex) {
-        for path in hex.paths_arr() {
-            self.draw_path(path, ColorSpec::new().set_bg(Some(Color::Red)).clone());
-        }
+        let (buf, fmt) = utils::hex_textbox_fmt(
+            hex,
+            3,
+            "[ ]".as_bytes(),
+            ColorSpec::new().set_bg(Some(Color::Red)).clone(),
+        );
+
+        self.paste_with_blank_fmt(&buf, &fmt);
+    }
+
+    fn draw_hex_index(&mut self, hex: Hex) {
+        let (buf, fmt) = utils::hex_textbox_fmt(
+            hex,
+            3,
+            format!("{}", hex.index().to_spiral()).as_bytes(),
+            ColorSpec::new().set_dimmed(true).clone(),
+        );
+
+        self.paste_fmt(&buf, &fmt);
     }
 
     fn draw_hex_resourse(&mut self, hex: Hex, res: Resource) {
