@@ -560,8 +560,6 @@ pub mod data {
 
 /// Read-only query utilities over the build data.
 pub mod query {
-    use crate::topology::HexIndex;
-
     use super::*;
 
     pub struct BuildDataQuery<'a> {
