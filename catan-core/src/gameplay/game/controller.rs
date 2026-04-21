@@ -150,6 +150,7 @@ impl GameController {
         });
 
         let _ = GameController::handle_move_init(params, dice);
+        log::trace!("handle move init success");
         Ok(())
     }
 
@@ -157,12 +158,14 @@ impl GameController {
         params: &mut TurnHandlingParams,
         dice: &mut dyn DiceRoller,
     ) -> Result<(), ()> {
+        log::trace!("handle_move_init");
         match Self::request(
             params,
             AgentRequest::Init(params.game.perspective(params.player_id)),
         ) {
             AgentResponse::Init(action::InitialAction::ThrowDice) => {
-                Self::execute_dice_trow(params, dice);
+                Self::execute_dice_throw(params, dice);
+                log::trace!("execute_seven_success");
                 Self::handle_dice_thrown(params)
             }
             AgentResponse::Init(action::InitialAction::UseDevCard(usage)) => {
@@ -238,7 +241,7 @@ impl GameController {
             AgentRequest::AfterDevCard(params.game.perspective(params.player_id)),
         );
 
-        Self::execute_dice_trow(params, dice);
+        Self::execute_dice_throw(params, dice);
         Self::handle_rest(params)
     }
 
@@ -351,6 +354,8 @@ impl GameController {
     }
 
     fn execute_seven(params: &mut TurnHandlingParams) {
+        log::trace!("execute_seven");
+
         for id in 0..params.agents.len() {
             if params.game.players.get(id).resources().total() <= 7 {
                 continue;
@@ -454,7 +459,7 @@ impl GameController {
         }
     }
 
-    fn execute_dice_trow(params: &mut TurnHandlingParams, dice: &mut dyn DiceRoller) {
+    fn execute_dice_throw(params: &mut TurnHandlingParams, dice: &mut dyn DiceRoller) {
         let roll = dice.roll();
         params.observer.on_event(&GameEvent::DiceRolled {
             player_id: params.player_id,

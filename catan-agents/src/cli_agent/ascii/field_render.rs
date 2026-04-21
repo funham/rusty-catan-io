@@ -280,6 +280,9 @@ impl FieldRenderer {
         // render tile info
         self.draw_tile_info(perspective);
 
+        // render hex indices
+        self.draw_index(perspective);
+
         // render robber
         self.draw_robber(perspective);
 

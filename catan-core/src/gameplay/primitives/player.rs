@@ -80,17 +80,14 @@ impl PlayerDataContainer {
         ids: (PlayerId, PlayerId),
     ) -> (&mut PlayerData, &mut PlayerData) {
         let (id_fst, id_snd) = ids;
-        match id_fst.cmp(&id_snd) {
+        let (id_fst, id_snd) = match id_fst.cmp(&id_snd) {
             std::cmp::Ordering::Equal => panic!(
                 "can't borrow mutably two identical objects; ids are: {:?} (should be two distinct)",
                 ids
             ),
-            std::cmp::Ordering::Greater => {
-                let (res_snd, res_fst) = self.get_mut_both_raw((id_fst, id_snd));
-                return (res_fst, res_snd);
-            }
-            std::cmp::Ordering::Less => (),
-        }
+            std::cmp::Ordering::Greater => (id_snd, id_fst),
+            std::cmp::Ordering::Less => (id_fst, id_snd),
+        };
 
         // fst < snd (asserted)
         //   0   1   2   3   4

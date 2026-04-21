@@ -183,14 +183,16 @@ impl ResourceCollection {
 
         // Generate random number
         let mut rng = rand::rng();
-        let mut rand_val: u16 = rng.random_range(..self.total());
+        let rand_val: u16 = rng.random_range(0..self.total());
+        let mut cum_total: u16 = 0;
 
         // Find which resource corresponds to the random value
         for (resource, count) in self.unroll() {
-            if rand_val < count {
+            cum_total += count;
+
+            if rand_val < cum_total {
                 return Some(resource);
             }
-            rand_val -= count;
         }
 
         unreachable!("peek random: total == 0?")

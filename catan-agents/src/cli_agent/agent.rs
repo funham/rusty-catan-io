@@ -95,7 +95,7 @@ impl TerminalUi {
             AgentRequest::Initialization(perspective) => {
                 Self::print_perspective("Initialization", &perspective);
                 let establishment = Establishment {
-                    pos: Self::read_intersection("settlement (h1, h2, h3)"),
+                    pos: Self::read_intersection("settlement (h1, h2, h3): "),
                     stage: EstablishmentType::Settlement,
                 };
                 let road = Road {

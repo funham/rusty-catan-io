@@ -128,6 +128,9 @@ impl GameState {
         from_bank: ResourceCollection,
     ) -> Result<(), BankResourceExchangeError> {
         self.transfer_to_bank(to_bank, player_id)?;
+        if !self.bank.resources.has_enough(&from_bank) {
+            return Err(BankResourceExchangeError::BankIsShort);
+        }
         self.transfer_from_bank(from_bank, player_id)
     }
 
@@ -163,6 +166,7 @@ impl GameState {
         to_id: PlayerId,
         resources: ResourceCollection,
     ) -> Result<(), PlayerResourceExchangeError> {
+        log::trace!("players_resource_transfer");
         let (from, to) = self.players.get_mut_both_raw((from_id, to_id));
 
         ResourceCollection::transfer(
@@ -269,6 +273,8 @@ impl GameState {
         robber_id: PlayerId,
         robbed_id: Option<PlayerId>,
     ) -> Result<(), DevCardUsageError> {
+        log::trace!("use robbers");
+
         if (self.field.arrangement.field_radius as usize) < rob_hex.norm() {
             return Err(DevCardUsageError::InvalidHex);
         }
@@ -278,9 +284,13 @@ impl GameState {
         if let Some(robbed_id) = robbed_id {
             match self.builds.query().builds_on_hex(rob_hex).get(&robbed_id) {
                 Some(v) if !v.establishments.is_empty() => self.steal(robbed_id, robber_id),
-                _ => return Err(DevCardUsageError::InvalidRobbery),
+                _ => {
+                    log::trace!("use robbers fail");
+                    return Err(DevCardUsageError::InvalidRobbery);
+                }
             }
         }
+        log::trace!("use robbers success");
         Ok(())
     }
 
@@ -317,13 +327,16 @@ impl GameState {
     }
 
     fn steal(&mut self, robbed_id: PlayerId, robber_id: PlayerId) {
+        log::trace!("steal");
         let robbed_account = self.players.get(robbed_id).resources();
         let stolen = robbed_account.peek_random();
+        log::trace!("peek random success");
         if let Some(card) = stolen {
             if let Err(e) = self.players_resource_transfer(robbed_id, robber_id, card.into()) {
                 log::error!("stealing non-existent card: {:?}", e)
             }
         }
+        log::trace!("steal success");
     }
 
     fn use_year_of_plenty(
