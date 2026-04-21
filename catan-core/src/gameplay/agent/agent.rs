@@ -14,7 +14,7 @@ use crate::{
 };
 
 use super::action::{
-    FinalStateAnswer, InitialAction, PostDevCardAction, PostDiceThrowAnswer, TradeAction,
+    FinalStateAnswer, InitialAction, PostDevCardAction, PostDiceAnswer, TradeAction,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -37,7 +37,7 @@ pub enum AgentRequest {
 pub enum AgentResponse {
     Init(InitialAction),
     AfterDevCard(PostDevCardAction),
-    AfterDiceThrow(PostDiceThrowAnswer),
+    AfterDice(PostDiceAnswer),
     Rest(FinalStateAnswer),
     RobHex(Hex),
     RobPlayer(PlayerId),

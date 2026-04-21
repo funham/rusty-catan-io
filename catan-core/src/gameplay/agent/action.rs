@@ -12,7 +12,7 @@ pub enum TradeAction {
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub enum InitialAction {
-    ThrowDice,
+    RollDice,
     UseDevCard(DevCardUsage),
 }
 #[derive(Debug, Serialize, Deserialize)]
@@ -20,8 +20,9 @@ pub enum PostDevCardAction {
     ThrowDice,
 }
 #[derive(Debug, Serialize, Deserialize)]
-pub enum PostDiceThrowAnswer {
+pub enum PostDiceAnswer {
     UseDevCard(DevCardUsage),
+    BuyDevCard,
     OfferPublicTrade(PublicTradeOffer),
     OfferPersonalTrade(PersonalTradeOffer),
     TradeWithBank(BankTrade),
@@ -34,5 +35,6 @@ pub enum FinalStateAnswer {
     OfferPersonalTrade(PersonalTradeOffer),
     TradeWithBank(BankTrade),
     Build(Build),
+    BuyDevCard,
     EndMove,
 }

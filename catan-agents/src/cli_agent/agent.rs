@@ -7,7 +7,7 @@ use catan_core::{
     agent::{
         Agent, AgentRequest, AgentResponse,
         action::{
-            FinalStateAnswer, InitialAction, PostDevCardAction, PostDiceThrowAnswer, TradeAction,
+            FinalStateAnswer, InitialAction, PostDevCardAction, PostDiceAnswer, TradeAction,
         },
     },
     gameplay::{
@@ -66,7 +66,7 @@ impl TerminalUi {
                     let line = Self::read_line("command [throw-dice]: ");
                     match line.as_str() {
                         "throw-dice" | "roll" | "" => {
-                            return AgentResponse::Init(InitialAction::ThrowDice);
+                            return AgentResponse::Init(InitialAction::RollDice);
                         }
                         _ => println!("supported commands: throw-dice"),
                     }
@@ -78,7 +78,7 @@ impl TerminalUi {
             }
             AgentRequest::AfterDiceThrow(perspective) => {
                 Self::print_perspective("AfterDiceThrow", &perspective);
-                AgentResponse::AfterDiceThrow(Self::read_post_dice_action())
+                AgentResponse::AfterDice(Self::read_post_dice_action())
             }
             AgentRequest::Rest(perspective) => {
                 Self::print_perspective("Rest", &perspective);
@@ -164,21 +164,21 @@ impl TerminalUi {
         }
     }
 
-    fn read_post_dice_action() -> PostDiceThrowAnswer {
+    fn read_post_dice_action() -> PostDiceAnswer {
         loop {
             let line = Self::read_line(
                 "command [end | build road ... | build settlement ... | build city ... | bank-trade give take kind]: ",
             );
             if line == "end" || line.is_empty() {
-                return PostDiceThrowAnswer::EndMove;
+                return PostDiceAnswer::EndMove;
             }
 
             if let Some(build) = Self::parse_build(&line) {
-                return PostDiceThrowAnswer::Build(build);
+                return PostDiceAnswer::Build(build);
             }
 
             if let Some(trade) = Self::parse_bank_trade(&line) {
-                return PostDiceThrowAnswer::TradeWithBank(trade);
+                return PostDiceAnswer::TradeWithBank(trade);
             }
 
             println!("could not parse action");

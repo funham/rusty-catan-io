@@ -2,7 +2,7 @@ use catan_core::{
     agent::{
         Agent, AgentRequest, AgentResponse,
         action::{
-            FinalStateAnswer, InitialAction, PostDevCardAction, PostDiceThrowAnswer, TradeAction,
+            FinalStateAnswer, InitialAction, PostDevCardAction, PostDiceAnswer, TradeAction,
         },
     },
     gameplay::{game::state::Perspective, primitives::resource::ResourceCollection},
@@ -31,12 +31,12 @@ impl LazyAgent {
 impl Agent for LazyAgent {
     fn respond(&mut self, request: AgentRequest) -> AgentResponse {
         match request {
-            AgentRequest::Init(_) => AgentResponse::Init(InitialAction::ThrowDice),
+            AgentRequest::Init(_) => AgentResponse::Init(InitialAction::RollDice),
             AgentRequest::AfterDevCard(_) => {
                 AgentResponse::AfterDevCard(PostDevCardAction::ThrowDice)
             }
             AgentRequest::AfterDiceThrow(_) => {
-                AgentResponse::AfterDiceThrow(PostDiceThrowAnswer::EndMove)
+                AgentResponse::AfterDice(PostDiceAnswer::EndMove)
             }
             AgentRequest::Rest(_) => AgentResponse::Rest(FinalStateAnswer::EndMove),
             AgentRequest::RobHex(perspective) => {

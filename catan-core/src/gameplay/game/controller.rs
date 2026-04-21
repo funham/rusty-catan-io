@@ -1,15 +1,19 @@
 use super::state::GameState;
-use crate::gameplay::agent::{
-    action,
-    agent::{Agent, AgentRequest, AgentResponse},
-};
 use crate::gameplay::game::init::GameInitializationState;
 use crate::gameplay::primitives::Tile;
+use crate::gameplay::primitives::bank::BankResourceExchangeError;
 use crate::gameplay::primitives::build::{Build, BuildingError, Establishment};
 use crate::gameplay::primitives::dev_card::DevCardUsage;
 use crate::gameplay::primitives::player::PlayerId;
 use crate::gameplay::primitives::trade::BankTrade;
 use crate::gameplay::primitives::turn::GameTurn;
+use crate::gameplay::{
+    agent::{
+        action,
+        agent::{Agent, AgentRequest, AgentResponse},
+    },
+    primitives::resource::HasCost,
+};
 use crate::math::dice::DiceRoller;
 use crate::{
     GameEvent, GameObserver, NoopObserver, gameplay::primitives::resource::ResourceCollection,
@@ -150,7 +154,6 @@ impl GameController {
         });
 
         let _ = GameController::handle_move_init(params, dice);
-        log::trace!("handle move init success");
         Ok(())
     }
 
@@ -159,68 +162,71 @@ impl GameController {
         dice: &mut dyn DiceRoller,
     ) -> Result<(), ()> {
         log::trace!("handle_move_init");
-        match Self::request(
+
+        let request = Self::request(
             params,
             AgentRequest::Init(params.game.perspective(params.player_id)),
-        ) {
-            AgentResponse::Init(action::InitialAction::ThrowDice) => {
-                Self::execute_dice_throw(params, dice);
-                log::trace!("execute_seven_success");
-                Self::handle_dice_thrown(params)
+        );
+        let AgentResponse::Init(answer) = request else {
+            panic!("wrong agent response type");
+        };
+
+        match answer {
+            action::InitialAction::RollDice => {
+                Self::execute_dice_roll(params, dice);
+                Self::handle_dice_rolled(params)
             }
-            AgentResponse::Init(action::InitialAction::UseDevCard(usage)) => {
+            action::InitialAction::UseDevCard(usage) => {
                 Self::handle_dev_card_used(params, usage, dice)
             }
-            other => panic!("expected init response, got {other:?}"),
         }
     }
 
-    fn handle_dice_thrown(params: &mut TurnHandlingParams) -> Result<(), ()> {
-        match Self::request(
+    fn handle_dice_rolled(params: &mut TurnHandlingParams) -> Result<(), ()> {
+        let response = Self::request(
             params,
             AgentRequest::AfterDiceThrow(params.game.perspective(params.player_id)),
-        ) {
-            AgentResponse::AfterDiceThrow(action::PostDiceThrowAnswer::UseDevCard(
-                dev_card_usage,
-            )) if matches!(dev_card_usage, DevCardUsage::Knight(_)) => {
-                let DevCardUsage::Knight(rob_hex) = dev_card_usage else {
-                    unreachable!()
-                };
+        );
+
+        let AgentResponse::AfterDice(answer) = response else {
+            panic!("wrong agent response type");
+        };
+
+        match answer {
+            action::PostDiceAnswer::UseDevCard(dev_card_usage)
+                if let DevCardUsage::Knight(rob_hex) = dev_card_usage =>
+            {
                 let robbed_id = Self::get_robbed_id(params, rob_hex);
                 let _ = params
                     .game
                     .use_robbers(rob_hex, params.player_id, robbed_id);
                 Self::handle_rest(params)?;
             }
-            AgentResponse::AfterDiceThrow(action::PostDiceThrowAnswer::UseDevCard(
-                dev_card_usage,
-            )) => {
+            action::PostDiceAnswer::UseDevCard(dev_card_usage) => {
                 if let Err(e) = params.game.use_dev_card(dev_card_usage, params.player_id) {
                     log::error!("{:?}", e);
                 }
                 Self::handle_rest(params)?;
             }
-            AgentResponse::AfterDiceThrow(action::PostDiceThrowAnswer::OfferPublicTrade(_)) => {
-                log::warn!("Trades are not implemented yet")
+            action::PostDiceAnswer::BuyDevCard => {
+                Self::execute_buy_dev_card(params);
             }
-            AgentResponse::AfterDiceThrow(action::PostDiceThrowAnswer::OfferPersonalTrade(_)) => {
-                log::warn!("Trades are not implemented yet")
+            action::PostDiceAnswer::OfferPublicTrade(_) => {
+                log::error!("P2P trades are not implemented yet; ignore")
             }
-            AgentResponse::AfterDiceThrow(action::PostDiceThrowAnswer::TradeWithBank(
-                bank_trade,
-            )) => {
+            action::PostDiceAnswer::OfferPersonalTrade(_) => {
+                log::error!("P2P trades are not implemented yet; ignore")
+            }
+            action::PostDiceAnswer::TradeWithBank(bank_trade) => {
                 Self::execute_bank_trade(params, bank_trade);
             }
-            AgentResponse::AfterDiceThrow(action::PostDiceThrowAnswer::Build(buildable)) => {
-                Self::execute_build(params, buildable);
+            action::PostDiceAnswer::Build(build) => {
+                Self::execute_build(params, build);
             }
-            AgentResponse::AfterDiceThrow(action::PostDiceThrowAnswer::EndMove) => {
-                return Err(());
-            }
-            other => panic!("expected after-dice response, got {other:?}"),
+            action::PostDiceAnswer::EndMove => return Err(()),
         }
 
-        Self::handle_dice_thrown(params)
+        Self::handle_dice_rolled(params)
     }
 
     fn handle_dev_card_used(
@@ -241,31 +247,35 @@ impl GameController {
             AgentRequest::AfterDevCard(params.game.perspective(params.player_id)),
         );
 
-        Self::execute_dice_throw(params, dice);
+        Self::execute_dice_roll(params, dice);
         Self::handle_rest(params)
     }
 
     fn handle_rest(params: &mut TurnHandlingParams) -> Result<(), ()> {
-        match Self::request(
+        let response = Self::request(
             params,
             AgentRequest::Rest(params.game.perspective(params.player_id)),
-        ) {
-            AgentResponse::Rest(action::FinalStateAnswer::OfferPublicTrade(_)) => {
-                log::warn!("Trades are not implemented yet")
+        );
+
+        let AgentResponse::Rest(answer) = response else {
+            panic!("wrong agent response type");
+        };
+
+        match answer {
+            action::FinalStateAnswer::OfferPublicTrade(_) => {
+                log::error!("P2P trades are not implemented yet; ignore")
             }
-            AgentResponse::Rest(action::FinalStateAnswer::OfferPersonalTrade(_)) => {
-                log::warn!("Trades are not implemented yet")
+            action::FinalStateAnswer::OfferPersonalTrade(_) => {
+                log::error!("P2P trades are not implemented yet; ignore")
             }
-            AgentResponse::Rest(action::FinalStateAnswer::TradeWithBank(bank_trade)) => {
+            action::FinalStateAnswer::TradeWithBank(bank_trade) => {
                 Self::execute_bank_trade(params, bank_trade);
             }
-            AgentResponse::Rest(action::FinalStateAnswer::Build(buildable)) => {
-                Self::execute_build(params, buildable)
-            }
-            AgentResponse::Rest(action::FinalStateAnswer::EndMove) => {
+            action::FinalStateAnswer::Build(buildable) => Self::execute_build(params, buildable),
+            action::FinalStateAnswer::BuyDevCard => Self::execute_buy_dev_card(params),
+            action::FinalStateAnswer::EndMove => {
                 return Err(());
             }
-            other => panic!("expected rest response, got {other:?}"),
         }
 
         if params.game.check_win_condition().is_some() {
@@ -289,19 +299,65 @@ impl GameController {
         }
     }
 
-    fn execute_build(params: &mut TurnHandlingParams, buildable: Build) {
+    fn execute_build(params: &mut TurnHandlingParams, build: Build) {
+        if let Err(err) = params.game.transfer_to_bank(build.cost(), params.player_id) {
+            match err {
+                BankResourceExchangeError::BankIsShort => unreachable!(),
+                BankResourceExchangeError::AccountIsShort { id } => {
+                    log::warn!(
+                        "Can't build {}: Player#{} has {}, but {} costs {}",
+                        Into::<&str>::into(build),
+                        id,
+                        params.game.players.get(id).resources(),
+                        Into::<&str>::into(build),
+                        build.cost()
+                    );
+
+                    return;
+                }
+            }
+        }
+
         if let Err(err) = params
             .game
             .builds
-            .try_build(params.player_id, buildable.clone())
+            .try_build(params.player_id, build.clone())
         {
-            log::error!("Invalid building try: {:?}", err)
+            log::warn!("Couldn't build {}: {:?}", Into::<&str>::into(build), err);
         } else {
             params.observer.on_event(&GameEvent::BuildPlaced {
                 player_id: params.player_id,
-                build: buildable,
+                build,
                 snapshot: params.game.snapshot(),
             });
+        }
+    }
+
+    fn execute_buy_dev_card(params: &mut TurnHandlingParams) {
+        const DEV_CARD_COST: ResourceCollection = ResourceCollection::new(0, 0, 1, 1, 1);
+
+        if params.game.bank.dev_cards.is_empty() {
+            log::warn!("Can't buy a dev card: Bank's out of dev cards");
+            return;
+        }
+
+        if let Err(err) = params
+            .game
+            .transfer_to_bank(DEV_CARD_COST, params.player_id)
+        {
+            match err {
+                BankResourceExchangeError::BankIsShort => unreachable!(),
+                BankResourceExchangeError::AccountIsShort { id } => {
+                    log::warn!(
+                        "Can't buy a dev card: Player#{} has {}, but a dev card costs {}",
+                        params.player_id,
+                        params.game.players.get(params.player_id).resources(),
+                        DEV_CARD_COST
+                    );
+
+                    return;
+                }
+            }
         }
     }
 
@@ -459,7 +515,7 @@ impl GameController {
         }
     }
 
-    fn execute_dice_throw(params: &mut TurnHandlingParams, dice: &mut dyn DiceRoller) {
+    fn execute_dice_roll(params: &mut TurnHandlingParams, dice: &mut dyn DiceRoller) {
         let roll = dice.roll();
         params.observer.on_event(&GameEvent::DiceRolled {
             player_id: params.player_id,

@@ -1,5 +1,6 @@
 use std::{
     collections::BTreeMap,
+    ffi::os_str::Display,
     ops::{Index, IndexMut},
 };
 
@@ -98,6 +99,16 @@ pub struct ResourceCollection {
     pub ore: u16,
 }
 
+impl std::fmt::Display for ResourceCollection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Brick: {}; ", self.brick)?;
+        write!(f, "Wood: {}; ", self.wood)?;
+        write!(f, "Wheat: {}; ", self.wheat)?;
+        write!(f, "Sheep: {}; ", self.sheep)?;
+        write!(f, "Ore: {}", self.ore)
+    }
+}
+
 #[derive(Debug)]
 pub enum ResourceCollectionSubstractionError {
     SubstractionFromSmallerCollection,
@@ -119,7 +130,7 @@ impl ResourceCollection {
         }
     }
 
-    pub fn new(brick: u16, wood: u16, wheat: u16, sheep: u16, ore: u16) -> Self {
+    pub const fn new(brick: u16, wood: u16, wheat: u16, sheep: u16, ore: u16) -> Self {
         Self {
             brick,
             wood,
