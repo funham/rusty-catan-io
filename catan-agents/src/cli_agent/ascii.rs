@@ -429,8 +429,9 @@ pub mod field_render {
             // (+0, +1) -> (+0, +4)
 
             let (q, r) = (q + 2, r + 1);
+            const X_PIXEL_OFFSET: i32 = 1;
 
-            (q * 9, q * 2 + r * 4)
+            (q * 9 + X_PIXEL_OFFSET, q * 2 + r * 4)
         }
     }
 
@@ -460,8 +461,10 @@ pub mod field_render {
     }
 
     impl FieldRenderer {
+        /* basic functions */
+
         pub fn new() -> Self {
-            let width = 47;
+            let width = 49;
             let height = 21;
 
             Self {
@@ -475,142 +478,6 @@ pub mod field_render {
         pub fn clear(&mut self) {
             self.buf.clear();
             self.fmt.clear();
-        }
-
-        pub fn draw_path(&mut self, path: Path, fmt: ColorSpec) {
-            let (buf, fmt) = utils::path_buf_fmt(path, fmt);
-            self.buf.paste(&buf);
-            self.fmt.paste(&fmt);
-        }
-
-        pub fn draw_path_attr(&mut self, path: Path, attr: PathAttr) {
-            match attr {
-                PathAttr::Road { color } => self.draw_path(
-                    path,
-                    ColorSpec::new()
-                        .set_bold(true)
-                        .set_intense(true)
-                        .set_fg(Some(color))
-                        .clone(),
-                ),
-                PathAttr::Selector => self.draw_path(
-                    path,
-                    ColorSpec::new()
-                        .set_bold(true)
-                        .set_bg(Some(Color::Red))
-                        .clone(),
-                ),
-            }
-        }
-
-        fn draw_hex_tile_num(&mut self, hex: Hex, num: u8) {
-            let (buf, fmt) =
-                utils::hex_textbox_fmt(hex, 1, format!("{}", num).as_bytes(), ColorSpec::new());
-
-            self.paste_fmt(&buf, &fmt);
-        }
-
-        fn draw_hex_robber(&mut self, hex: Hex) {
-            let (buf, fmt) = utils::hex_textbox_fmt(
-                hex,
-                3,
-                "XXX".as_bytes(),
-                ColorSpec::new().set_bg(Some(Color::White)).clone(),
-            );
-
-            self.paste_fmt(&buf, &fmt);
-        }
-
-        fn draw_hex_selector(&mut self, hex: Hex) {
-            for path in hex.paths_arr() {
-                self.draw_path(path, ColorSpec::new().set_bg(Some(Color::Red)).clone());
-            }
-        }
-
-        fn draw_hex_resourse(&mut self, hex: Hex, res: Resource) {
-            let (buf, fmt) = utils::hex_textbox_fmt(
-                hex,
-                2,
-                Into::<&str>::into(res).as_bytes(),
-                ColorSpec::new()
-                    .set_fg(Some(match res {
-                        Resource::Brick => Color::Red,
-                        Resource::Wood => Color::Rgb(34, 139, 34),
-                        Resource::Wheat => Color::Yellow,
-                        Resource::Sheep => Color::Rgb(102, 255, 0),
-                        Resource::Ore => Color::Cyan,
-                    }))
-                    .clone(),
-            );
-
-            self.paste_fmt(&buf, &fmt);
-        }
-
-        pub fn draw_hex_attr(&mut self, hex: Hex, attr: HexAttr) {
-            match attr {
-                HexAttr::TileNum(num) => self.draw_hex_tile_num(hex, num),
-                HexAttr::DebugCoords => todo!(),
-                HexAttr::Resource(res) => self.draw_hex_resourse(hex, res),
-                HexAttr::Robber => self.draw_hex_robber(hex),
-                HexAttr::Selector => self.draw_hex_selector(hex),
-            }
-        }
-
-        pub fn draw_intersection_selector(&mut self, v: Intersection) {
-            let pos = utils::intersection_anchor(v);
-            let (buf, fmt) = utils::textbox_buf_centered_fmt(
-                pos,
-                "[ ]".as_bytes(),
-                ColorSpec::new().set_bg(Some(Color::Red)).clone(),
-            );
-            self.paste_with_blank_fmt(&buf, &fmt);
-        }
-
-        pub fn draw_intersection_establishment(
-            &mut self,
-            v: Intersection,
-            kind: EstablishmentType,
-            color: Color,
-        ) {
-            let pos = utils::intersection_anchor(v);
-            let s = match kind {
-                EstablishmentType::Settlement => b"{ }",
-                EstablishmentType::City => b"{@}",
-            };
-            let (buf, fmt) = utils::textbox_buf_centered_fmt(
-                pos,
-                s,
-                ColorSpec::new().set_fg(Some(color)).clone(),
-            );
-            self.paste_with_blank_fmt(&buf, &fmt);
-        }
-
-        pub fn draw_intersection_attr(
-            &mut self,
-            intersection: Intersection,
-            attr: IntersectionAttr,
-        ) {
-            match attr {
-                IntersectionAttr::Selector => self.draw_intersection_selector(intersection),
-                IntersectionAttr::Establishment(establishment_type, color) => {
-                    self.draw_intersection_establishment(intersection, establishment_type, color)
-                }
-            }
-        }
-
-        pub fn draw_hex(&mut self, hex: Hex, fmt: ColorSpec) {
-            self.paste_fmt(&utils::hex_buf(hex), &utils::hex_buf_clr(hex, fmt));
-        }
-
-        pub fn draw_field(&mut self, fmt: ColorSpec) {
-            let paths = (0..=2)
-                .flat_map(|radius| HexIndex::hex_ring(Hex::new(0, 0), radius))
-                .flat_map(|h| h.paths_arr())
-                .collect::<BTreeSet<_>>();
-
-            for path in paths {
-                self.draw_path(path, fmt.clone());
-            }
         }
 
         pub fn paste_fmt(&mut self, buf: &BufFragment, fmt: &BufFragment<ColorSpec>) {
@@ -656,13 +523,163 @@ pub mod field_render {
             }
             write!(stdout, "\n").unwrap();
         }
+
+        /* draw game objects */
+
+        pub fn draw_intersection_attr(
+            &mut self,
+            intersection: Intersection,
+            attr: IntersectionAttr,
+        ) {
+            match attr {
+                IntersectionAttr::Selector => self.draw_intersection_selector(intersection),
+                IntersectionAttr::Establishment(establishment_type, color) => {
+                    self.draw_intersection_establishment(intersection, establishment_type, color)
+                }
+            }
+        }
+
+        pub fn draw_hex_attr(&mut self, hex: Hex, attr: HexAttr) {
+            match attr {
+                HexAttr::TileNum(num) => self.draw_hex_tile_num(hex, num),
+                HexAttr::DebugCoords => todo!(),
+                HexAttr::Resource(res) => self.draw_hex_resourse(hex, res),
+                HexAttr::Robber => self.draw_hex_robber(hex),
+                HexAttr::Selector => self.draw_hex_selector(hex),
+            }
+        }
+
+        pub fn draw_path_attr(&mut self, path: Path, attr: PathAttr) {
+            match attr {
+                PathAttr::Road { color } => self.draw_path(
+                    path,
+                    ColorSpec::new()
+                        .set_bold(true)
+                        .set_intense(true)
+                        .set_fg(Some(color))
+                        .clone(),
+                ),
+                PathAttr::Selector => self.draw_path(
+                    path,
+                    ColorSpec::new()
+                        .set_bold(true)
+                        .set_bg(Some(Color::Red))
+                        .clone(),
+                ),
+            }
+        }
+
+        pub fn draw_field(&mut self, fmt: ColorSpec) {
+            let paths = (0..=2)
+                .flat_map(|radius| HexIndex::hex_ring(Hex::new(0, 0), radius))
+                .flat_map(|h| h.paths_arr())
+                .collect::<BTreeSet<_>>();
+
+            for path in paths {
+                self.draw_path(path, fmt.clone());
+            }
+        }
+
+        /* private helpers */
+
+        fn draw_path(&mut self, path: Path, fmt: ColorSpec) {
+            let (buf, fmt) = utils::path_buf_fmt(path, fmt);
+            self.buf.paste(&buf);
+            self.fmt.paste(&fmt);
+        }
+
+        fn draw_hex_tile_num(&mut self, hex: Hex, num: u8) {
+            let (buf, fmt) = utils::hex_textbox_fmt(
+                hex,
+                1,
+                format!("{}", num).as_bytes(),
+                match num {
+                    6 | 8 => ColorSpec::new().set_fg(Some(Color::Ansi256(131))).clone(),
+                    _ => ColorSpec::new().set_fg(Some(Color::Ansi256(188))).clone(),
+                },
+            );
+
+            self.paste_fmt(&buf, &fmt);
+        }
+
+        fn draw_hex_robber(&mut self, hex: Hex) {
+            let (buf, fmt) = utils::hex_textbox_fmt(
+                hex,
+                3,
+                "ROB".as_bytes(),
+                ColorSpec::new().set_bg(Some(Color::Ansi256(244))).clone(),
+            );
+
+            self.paste_fmt(&buf, &fmt);
+        }
+
+        fn draw_hex_selector(&mut self, hex: Hex) {
+            for path in hex.paths_arr() {
+                self.draw_path(path, ColorSpec::new().set_bg(Some(Color::Red)).clone());
+            }
+        }
+
+        fn draw_hex_resourse(&mut self, hex: Hex, res: Resource) {
+            let (buf, fmt) = utils::hex_textbox_fmt(
+                hex,
+                2,
+                Into::<&str>::into(res).as_bytes(),
+                ColorSpec::new()
+                    .set_fg(Some(match res {
+                        Resource::Brick => Color::Red,
+                        Resource::Wood => Color::Ansi256(28),
+                        Resource::Wheat => Color::Ansi256(11),
+                        Resource::Sheep => Color::Ansi256(10),
+                        Resource::Ore => Color::Cyan,
+                    }))
+                    .clone(),
+            );
+
+            self.paste_fmt(&buf, &fmt);
+        }
+
+        fn draw_intersection_selector(&mut self, v: Intersection) {
+            let pos = utils::intersection_anchor(v);
+            let (buf, fmt) = utils::textbox_buf_centered_fmt(
+                pos,
+                "[ ]".as_bytes(),
+                ColorSpec::new().set_bg(Some(Color::Red)).clone(),
+            );
+            self.paste_with_blank_fmt(&buf, &fmt);
+        }
+
+        fn draw_intersection_establishment(
+            &mut self,
+            v: Intersection,
+            kind: EstablishmentType,
+            color: Color,
+        ) {
+            let pos = utils::intersection_anchor(v);
+            let s = match kind {
+                EstablishmentType::Settlement => b"(S)",
+                EstablishmentType::City => b"[C]",
+            };
+            let (buf, fmt) = utils::textbox_buf_centered_fmt(
+                pos,
+                s,
+                ColorSpec::new().set_fg(Some(color)).set_bold(true).clone(),
+            );
+            self.paste_with_blank_fmt(&buf, &fmt);
+        }
     }
 }
 
 pub mod test {
     use super::field_render::*;
     use catan_core::{
-        gameplay::primitives::{build::EstablishmentType, resource::Resource},
+        gameplay::{
+            game::init::GameInitializationState,
+            primitives::{
+                Tile,
+                build::{Build, Establishment, EstablishmentType, Road},
+                resource::Resource,
+            },
+        },
         topology::{Hex, Intersection, Path},
     };
     use termcolor::{Color, ColorSpec};
@@ -680,65 +697,10 @@ pub mod test {
     }
 
     #[test]
-    fn render_color_paths() {
-        let mut field = FieldRenderer::new();
-
-        for (path, color) in Hex::new(0, 0).paths_arr().iter().zip([
-            Color::White,
-            Color::Black,
-            Color::Blue,
-            Color::Cyan,
-            Color::Yellow,
-            Color::Magenta,
-        ]) {
-            let fmt = ColorSpec::new().set_fg(Some(color)).clone();
-            field.draw_path(*path, fmt);
-        }
-
-        field.render();
-    }
-
-    #[test]
-    fn render_field() {
-        let mut field = FieldRenderer::new();
-
-        field.draw_field(
-            ColorSpec::new()
-                // .set_bold(true)
-                .set_fg(Some(Color::Rgb(10, 10, 10)))
-                // .set_underline(true)
-                .clone(),
-        );
-        field.draw_path(
-            Path::try_from((Hex::new(0, 0), Hex::new(0, 1))).unwrap(),
-            ColorSpec::new()
-                .set_bold(true)
-                .set_fg(Some(Color::Red))
-                // .set_bg(Some(Color::Red))
-                // .set_underline(true)
-                .clone(),
-        );
-        field.draw_path(
-            Path::try_from((Hex::new(0, 0), Hex::new(1, 0))).unwrap(),
-            ColorSpec::new()
-                .set_bold(true)
-                .set_fg(Some(Color::Red))
-                // .set_bg(Some(Color::Red))
-                // .set_underline(true)
-                .clone(),
-        );
-        field.render();
-    }
-
-    #[test]
     fn hex_attributes() {
         let mut field = FieldRenderer::new();
 
-        field.draw_field(
-            ColorSpec::new()
-                .set_fg(Some(Color::Rgb(10, 10, 10)))
-                .clone(),
-        );
+        field.draw_field(ColorSpec::new().set_fg(Some(Color::Ansi256(233))).clone());
 
         field.draw_hex_attr(Hex::new(0, 0), HexAttr::TileNum(12));
         field.draw_hex_attr(Hex::new(0, 0), HexAttr::Robber);
@@ -753,11 +715,7 @@ pub mod test {
     fn path_attributes() {
         let mut field = FieldRenderer::new();
 
-        field.draw_field(
-            ColorSpec::new()
-                .set_fg(Some(Color::Rgb(10, 10, 10)))
-                .clone(),
-        );
+        field.draw_field(ColorSpec::new().set_fg(Some(Color::Ansi256(233))).clone());
 
         field.draw_hex_attr(Hex::new(0, 0), HexAttr::TileNum(12));
         field.draw_hex_attr(Hex::new(0, 0), HexAttr::Robber);
@@ -788,11 +746,7 @@ pub mod test {
     fn intersection_attributes() {
         let mut field = FieldRenderer::new();
 
-        field.draw_field(
-            ColorSpec::new()
-                .set_fg(Some(Color::Rgb(10, 10, 10)))
-                .clone(),
-        );
+        field.draw_field(ColorSpec::new().set_fg(Some(Color::Ansi256(233))).clone());
 
         field.draw_hex_attr(Hex::new(0, 0), HexAttr::TileNum(12));
         field.draw_hex_attr(Hex::new(0, 0), HexAttr::Robber);
@@ -824,5 +778,94 @@ pub mod test {
         }
 
         field.render();
+    }
+
+    #[test]
+    fn field_example() {
+        let mut renderer = FieldRenderer::new();
+        let mut game = GameInitializationState::default();
+
+        // render skeleton
+        renderer.draw_field(ColorSpec::new().set_fg(Some(Color::Ansi256(233))).clone());
+
+        // render tile info
+        for (hex, tile) in game.field.arrangement.hex_enum_iter() {
+            match tile {
+                Tile::Resource { resource, number } => {
+                    renderer.draw_hex_attr(hex, HexAttr::TileNum(number.into()));
+                    renderer.draw_hex_attr(hex, HexAttr::Resource(resource));
+                }
+                Tile::Desert => {}
+                _ => todo!(),
+            }
+        }
+
+        renderer.draw_hex_attr(game.field.robber_pos, HexAttr::Robber);
+
+        let player_colors = [Color::Blue, Color::White, Color::Red, Color::Ansi256(172)];
+        let settlements = [
+            // player #0
+            v(h(0, 0), h(1, 0), h(1, -1)),
+            v(h(0, 0), h(-1, 1), h(0, 1)),
+            //player #1
+            v(h(-1, -1), h(-1, 0), h(0, -1)),
+            v(h(0, -2), h(1, -2), h(1, -3)),
+            // player #2
+            v(h(1, 0), h(2, 0), h(2, -1)),
+            v(h(0, 1), h(0, 2), h(-1, 2)),
+            //player #3
+            v(h(-2, 1), h(-3, 2), h(-3, 1)),
+            v(h(-2, 0), h(-3, 1), h(-3, 0)),
+        ];
+        let roads = [
+            // player #0
+            p(h(0, 0), h(1, 0)),
+            p(h(0, 0), h(0, 1)),
+            // player #1
+            p(h(-1, -1), h(-1, 0)),
+            p(h(0, -2), h(1, -2)),
+            // player #2
+            p(h(1, 0), h(2, 0)),
+            p(h(0, 1), h(0, 2)),
+            // player #3
+            p(h(-2, 1), h(-3, 2)),
+            p(h(-2, 0), h(-3, 1)),
+        ];
+
+        for (i, (est_pos, road_pos)) in settlements.iter().zip(roads.iter()).enumerate() {
+            game.builds
+                .try_init_place(
+                    i / 2,
+                    Road { pos: *road_pos },
+                    Establishment {
+                        pos: *est_pos,
+                        stage: EstablishmentType::Settlement,
+                    },
+                )
+                .expect(&format!(
+                    "try_build failed on settlement {:?} and road {:?}; builds snapshot: {:?}",
+                    est_pos, road_pos, game.builds
+                ));
+        }
+
+        for (id, player) in game.builds.players().iter().enumerate() {
+            for road in player.roads.iter() {
+                renderer.draw_path_attr(
+                    road.pos,
+                    PathAttr::Road {
+                        color: player_colors[id],
+                    },
+                );
+            }
+
+            for est in player.establishments.iter() {
+                renderer.draw_intersection_attr(
+                    est.pos,
+                    IntersectionAttr::Establishment(est.stage, player_colors[id]),
+                );
+            }
+        }
+
+        renderer.render();
     }
 }

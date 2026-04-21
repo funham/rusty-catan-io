@@ -458,7 +458,7 @@ pub mod data {
                 Build::Establishment(establishment) => match establishment.stage {
                     EstablishmentType::Settlement => match checker.can_place(&establishment) {
                         true => Ok({
-                            assert!(
+                            debug_assert!(
                                 self.players[player_id].establishments.insert(establishment),
                                 "checker malfunction"
                             );
@@ -472,7 +472,7 @@ pub mod data {
                             stage: EstablishmentType::Settlement,
                         }) {
                         true => Ok({
-                            assert!(
+                            debug_assert!(
                                 self.players[player_id]
                                     .establishments
                                     .remove(&Establishment {
