@@ -64,11 +64,9 @@ pub mod cursor {
 }
 
 pub mod buffer {
-    use std::ops::{Index, IndexMut};
-
-    use termcolor::{Color, ColorSpec};
-
     use crate::cli_agent::ascii::cursor::CursorPosition;
+    use std::ops::{Index, IndexMut};
+    use termcolor::{Color, ColorSpec};
 
     pub trait Bufferable: Sized + PartialEq + Clone {
         fn blank() -> Self;
@@ -270,7 +268,10 @@ pub mod buffer {
 
 pub mod field_render {
     use catan_core::{
-        gameplay::primitives::{build::EstablishmentType, resource::Resource},
+        gameplay::{
+            game::state::Perspective,
+            primitives::{Tile, build::EstablishmentType, player::PlayerId, resource::Resource},
+        },
         topology::{Hex, HexIndex, Intersection, Path},
     };
     use std::{collections::BTreeSet, io::Write};
@@ -363,23 +364,6 @@ pub mod field_render {
             (buf, fmt)
         }
 
-        pub fn hex_buf(hex: Hex) -> BufFragment {
-            let hexagon = r"  _______   /       \ /         \\         / \_______/ ";
-            let hexagon = Buffer::from_string(11, 5, hexagon.as_bytes());
-
-            BufFragment {
-                fragment: hexagon,
-                pos: hex_anchor_flat(hex.q, hex.r).into(),
-            }
-        }
-
-        pub fn hex_buf_clr(hex: Hex, fmt: ColorSpec) -> BufFragment<ColorSpec> {
-            BufFragment {
-                fragment: Buffer::<ColorSpec>::new_with(9, 5, fmt),
-                pos: hex_anchor_flat(hex.q, hex.r).into(),
-            }
-        }
-
         pub fn textbox_buf_centered(pos: CursorPosition, s: &[u8]) -> BufFragment {
             let tb_pos = CursorPosition {
                 x: pos.x - (s.len() / 2) as i32,
@@ -461,8 +445,6 @@ pub mod field_render {
     }
 
     impl FieldRenderer {
-        /* basic functions */
-
         pub fn new() -> Self {
             let width = 49;
             let height = 21;
@@ -475,19 +457,67 @@ pub mod field_render {
             }
         }
 
+        pub fn player_color(player_id: PlayerId) -> Color {
+            const PLAYER_COLORS: [Color; 4] =
+                [Color::Blue, Color::White, Color::Red, Color::Ansi256(172)];
+
+            PLAYER_COLORS[player_id]
+        }
+
+        pub fn resource_color(res: Resource) -> Color {
+            match res {
+                Resource::Brick => Color::Red,
+                Resource::Wood => Color::Ansi256(28),
+                Resource::Wheat => Color::Ansi256(11),
+                Resource::Sheep => Color::Ansi256(10),
+                Resource::Ore => Color::Cyan,
+            }
+        }
+        
+        /* main functions */
+
         pub fn clear(&mut self) {
             self.buf.clear();
             self.fmt.clear();
         }
 
-        pub fn paste_fmt(&mut self, buf: &BufFragment, fmt: &BufFragment<ColorSpec>) {
-            self.buf.paste(&buf);
-            self.fmt.paste(&fmt);
-        }
+        pub fn draw_perspective(&mut self, perspective: &Perspective) {
+            // render skeleton
+            self.draw_field(ColorSpec::new().set_fg(Some(Color::Ansi256(233))).clone());
 
-        pub fn paste_with_blank_fmt(&mut self, buf: &BufFragment, fmt: &BufFragment<ColorSpec>) {
-            self.buf.paste_with_blank(&buf);
-            self.fmt.paste_with_blank(&fmt);
+            // render tile info
+            for (hex, tile) in perspective.field.arrangement.hex_enum_iter() {
+                match tile {
+                    Tile::Resource { resource, number } => {
+                        self.draw_hex_attr(hex, HexAttr::TileNum(number.into()));
+                        self.draw_hex_attr(hex, HexAttr::Resource(resource));
+                    }
+                    Tile::Desert => {}
+                    _ => todo!(),
+                }
+            }
+
+            // render robber
+            self.draw_hex_attr(perspective.field.robber_pos, HexAttr::Robber);
+
+            // render builds
+            for (id, player) in perspective.builds.players().iter().enumerate() {
+                for road in player.roads.iter() {
+                    self.draw_path_attr(
+                        road.pos,
+                        PathAttr::Road {
+                            color: Self::player_color(id),
+                        },
+                    );
+                }
+
+                for est in player.establishments.iter() {
+                    self.draw_intersection_attr(
+                        est.pos,
+                        IntersectionAttr::Establishment(est.stage, Self::player_color(id)),
+                    );
+                }
+            }
         }
 
         pub fn render(&self) {
@@ -522,6 +552,18 @@ pub mod field_render {
                 write!(stdout, "{}", x % 10).unwrap();
             }
             write!(stdout, "\n").unwrap();
+        }
+
+        /* buffer combining */
+
+        pub fn paste_fmt(&mut self, buf: &BufFragment, fmt: &BufFragment<ColorSpec>) {
+            self.buf.paste(&buf);
+            self.fmt.paste(&fmt);
+        }
+
+        pub fn paste_with_blank_fmt(&mut self, buf: &BufFragment, fmt: &BufFragment<ColorSpec>) {
+            self.buf.paste_with_blank(&buf);
+            self.fmt.paste_with_blank(&fmt);
         }
 
         /* draw game objects */
@@ -625,13 +667,7 @@ pub mod field_render {
                 2,
                 Into::<&str>::into(res).as_bytes(),
                 ColorSpec::new()
-                    .set_fg(Some(match res {
-                        Resource::Brick => Color::Red,
-                        Resource::Wood => Color::Ansi256(28),
-                        Resource::Wheat => Color::Ansi256(11),
-                        Resource::Sheep => Color::Ansi256(10),
-                        Resource::Ore => Color::Cyan,
-                    }))
+                    .set_fg(Some(Self::resource_color(res)))
                     .clone(),
             );
 

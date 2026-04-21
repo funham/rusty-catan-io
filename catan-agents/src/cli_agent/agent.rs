@@ -14,6 +14,7 @@ use catan_core::{
         game::state::Perspective,
         primitives::{
             build::{Build, Establishment, EstablishmentType, Road},
+            dev_card::{UsableDevCardCollection, UsableDevCardKind},
             player::PlayerId,
             resource::{Resource, ResourceCollection},
             trade::{BankTrade, BankTradeKind},
@@ -21,6 +22,8 @@ use catan_core::{
     },
     topology::{Hex, Intersection, Path},
 };
+
+use crate::cli_agent::ascii;
 
 #[derive(Debug, Default)]
 struct TerminalUi;
@@ -122,10 +125,33 @@ impl TerminalUi {
     }
 
     fn print_perspective(label: &str, perspective: &Perspective) {
+        let mut renderer = ascii::field_render::FieldRenderer::new();
+        renderer.draw_perspective(perspective);
+        renderer.render();
+
+        // TODO: colorize
         println!("\n== {label} ==");
-        println!("player: {}", perspective.player_id);
+        println!("player id: {}", perspective.player_id);
         println!("resources: {:?}", perspective.player_view.resources);
-        println!("dev cards: {:?}", perspective.player_view.dev_cards);
+
+        let print_dev_card_collection = |label: &str, deck: UsableDevCardCollection| {
+            println!(
+                "{}: | Kn: {} | YoP: {} | RB: {} | M: {} |",
+                label,
+                deck[UsableDevCardKind::Knight],
+                deck[UsableDevCardKind::YearOfPlenty],
+                deck[UsableDevCardKind::RoadBuild],
+                deck[UsableDevCardKind::Monopoly]
+            );
+        };
+
+        println!("dev cards:");
+        println!("-------------------------------------------");
+        print_dev_card_collection("Active: ", perspective.player_view.dev_cards.active);
+        print_dev_card_collection("Queued: ", perspective.player_view.dev_cards.queued);
+        print_dev_card_collection("Used  : ", perspective.player_view.dev_cards.used);
+        println!("-------------------------------------------");
+
         println!("robber: {:?}", perspective.field.robber_pos);
         for player in &perspective.other_players {
             println!(
