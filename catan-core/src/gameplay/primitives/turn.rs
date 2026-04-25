@@ -1,13 +1,14 @@
 use super::player::PlayerId;
 use num::Integer;
+use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RegularCycle;
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BackAndForthCycle;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameTurn<CycleType = RegularCycle> {
     n_players: u8, // in [0..=4]
     rounds_played: u16,

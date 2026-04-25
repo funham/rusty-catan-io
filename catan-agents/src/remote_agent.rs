@@ -1,23 +1,44 @@
-use catan_core::agent::{Agent, AgentRequest, AgentResponse};
-use std::sync::mpsc::{Receiver, Sender};
+// use catan_core::{
+//     agent::Agent,
+//     gameplay::{
+//         game::event::{GameEvent, PlayerObserver},
+//         primitives::player::PlayerId,
+//     },
+// };
+// use std::sync::mpsc::{Receiver, Sender};
 
-pub struct RemoteAgent {
-    req_tx: Sender<AgentRequest>,
-    resp_rx: Receiver<AgentResponse>,
-}
+// pub struct RemoteAgent {
+//     player_id: PlayerId,
+//     req_tx: Sender<AgentRequest>,
+//     resp_rx: Receiver<AgentAction>,
+//     event_rx: Receiver<GameEvent>,
+// }
 
-impl RemoteAgent {
-    pub fn new(tx: Sender<AgentRequest>, rx: Receiver<AgentResponse>) -> Self {
-        Self {
-            req_tx: tx,
-            resp_rx: rx,
-        }
-    }
-}
+// impl RemoteAgent {
+//     pub fn new(
+//         id: PlayerId,
+//         tx: Sender<AgentRequest>,
+//         rx: Receiver<AgentAction>,
+//         event_rx: Receiver<GameEvent>,
+//     ) -> Self {
+//         Self {
+//             player_id: id,
+//             req_tx: tx,
+//             resp_rx: rx,
+//             event_rx,
+//         }
+//     }
+// }
 
-impl Agent for RemoteAgent {
-    fn respond(&mut self, request: AgentRequest) -> AgentResponse {
-        self.req_tx.send(request).unwrap();
-        self.resp_rx.recv().unwrap()
-    }
-}
+// impl PlayerObserver for RemoteAgent {
+//     fn player_id(&self) -> PlayerId {
+//         todo!()
+//     }
+// }
+
+// impl Agent for RemoteAgent {
+//     fn respond(&mut self, request: AgentRequest) -> AgentAction {
+//         self.req_tx.send(request).unwrap();
+//         self.resp_rx.recv().unwrap()
+//     }
+// }

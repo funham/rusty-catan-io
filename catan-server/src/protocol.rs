@@ -1,5 +1,4 @@
-use catan_core::GameEvent;
-use catan_core::agent::*;
+use catan_core::{agent::*, gameplay::game::event::GameEvent};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -10,5 +9,5 @@ pub enum ServerToClient {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ClientToServer {
-    AgentResponse(AgentResponse),
+    AgentResponse(AgentAction),
 }

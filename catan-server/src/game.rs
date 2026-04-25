@@ -2,7 +2,7 @@ use std::sync::mpsc;
 use std::thread;
 
 use catan_agents::remote_agent::RemoteAgent;
-use catan_core::agent::{Agent, AgentRequest, AgentResponse};
+use catan_core::agent::{Agent, AgentAction, AgentRequest};
 use catan_core::math::dice::RandomDiceRoller;
 use tokio::sync::mpsc::{Receiver, Sender};
 
@@ -17,9 +17,8 @@ pub fn spawn_game(mut from_player: Receiver<ClientToServer>, to_player: Sender<S
         let (agent_req_tx, agent_req_rx) = mpsc::channel::<AgentRequest>();
 
         // UI → Agent
-        let (agent_resp_tx, agent_resp_rx) = mpsc::channel::<AgentResponse>();
-
-        let agent = RemoteAgent::new(agent_req_tx, agent_resp_rx);
+        let (agent_resp_tx, agent_resp_rx) = mpsc::channel::<AgentAction>();
+        let agent = RemoteAgent::new(todo!(), agent_req_tx, agent_resp_rx, todo!());
 
         // Forward AgentRequest → WebSocket
         let to_player_clone = to_player.clone();
@@ -45,7 +44,7 @@ pub fn spawn_game(mut from_player: Receiver<ClientToServer>, to_player: Sender<S
         let agents: Vec<Box<dyn Agent>> = vec![Box::new(agent)];
         let init_state = GameInitializationState::default();
         let runner = GameInitializer::new(init_state, agents);
-        let mut runner = runner.init_game();
+        let mut runner = runner.init();
         let _ = runner.run(&mut RandomDiceRoller::new());
     });
 }

@@ -9,6 +9,7 @@ use crate::gameplay::{
     },
 };
 
+#[derive(Clone)]
 pub struct GameInitializationState {
     pub field: FieldState,
     pub turn: GameTurn<BackAndForthCycle>,

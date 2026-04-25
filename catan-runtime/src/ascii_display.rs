@@ -1,7 +1,4 @@
-use catan_core::{
-    GameEvent, GameObserver,
-    gameplay::{game::state::GameSnapshot, primitives::build::EstablishmentType},
-};
+use catan_core::gameplay::{game::view::GameSnapshot, primitives::build::EstablishmentType};
 
 #[derive(Default)]
 pub struct AsciiDisplay;
@@ -31,68 +28,6 @@ impl AsciiDisplay {
                     .count(),
                 player.builds.roads.len(),
             );
-        }
-    }
-}
-
-impl GameObserver for AsciiDisplay {
-    fn on_event(&mut self, event: &GameEvent) {
-        match event {
-            GameEvent::GameStarted { snapshot } => {
-                println!("== game started ==");
-                Self::print_snapshot(snapshot);
-            }
-            GameEvent::TurnStarted { snapshot } => {
-                println!(
-                    "\n== turn started: player {} ==",
-                    snapshot.current_player_id
-                );
-                Self::print_snapshot(snapshot);
-            }
-            GameEvent::DiceRolled {
-                player_id,
-                value,
-                snapshot,
-            } => {
-                let value: u8 = (*value).into();
-                println!("player {} rolled {}", player_id, value);
-                Self::print_snapshot(snapshot);
-            }
-            GameEvent::BuildPlaced {
-                player_id,
-                build,
-                snapshot,
-            } => {
-                println!("player {} built {:?}", player_id, build);
-                Self::print_snapshot(snapshot);
-            }
-            GameEvent::PlayerDiscarded {
-                player_id,
-                discarded,
-                snapshot,
-            } => {
-                println!("player {} discarded {:?}", player_id, discarded);
-                Self::print_snapshot(snapshot);
-            }
-            GameEvent::RobberMoved {
-                player_id,
-                hex,
-                robbed_id,
-                snapshot,
-            } => {
-                println!(
-                    "player {} moved robber to {:?}, robbed {:?}",
-                    player_id, hex, robbed_id
-                );
-                Self::print_snapshot(snapshot);
-            }
-            GameEvent::GameFinished {
-                winner_id,
-                snapshot,
-            } => {
-                println!("\n== game finished: winner {} ==", winner_id);
-                Self::print_snapshot(snapshot);
-            }
         }
     }
 }

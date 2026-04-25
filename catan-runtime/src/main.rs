@@ -1,10 +1,8 @@
 mod ascii_display;
 mod config;
-mod display;
 mod host;
 
 use std::path::PathBuf;
-
 
 fn main() {
     env_logger::init();

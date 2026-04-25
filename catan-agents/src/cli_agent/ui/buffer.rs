@@ -1,4 +1,4 @@
-use crate::cli_agent::ascii::cursor::CursorPosition;
+use crate::cli_agent::ui::cursor::CursorPosition;
 use std::ops::{Index, IndexMut};
 use termcolor::{Color, ColorSpec};
 

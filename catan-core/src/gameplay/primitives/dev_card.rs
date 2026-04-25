@@ -20,6 +20,12 @@ pub enum DevCardKind {
 }
 
 #[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct DevCardCollection {
+    usable: UsableDevCardCollection,
+    victory_points: u8,
+}
+
+#[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct UsableDevCardCollection {
     data: [<UsableDevCardCollection as Index<UsableDevCardKind>>::Output; 4],
 }

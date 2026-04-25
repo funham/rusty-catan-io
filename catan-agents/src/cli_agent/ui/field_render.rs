@@ -8,13 +8,13 @@ use catan_core::{
 use std::{collections::BTreeSet, io::Write};
 use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 
-use crate::cli_agent::ascii::buffer::{BufFragment, Buffer};
+use crate::cli_agent::ui::buffer::{BufFragment, Buffer};
 
 mod utils {
     use catan_core::topology::{Axis, Hex, Intersection, Path, SignedAxis};
     use termcolor::ColorSpec;
 
-    use crate::cli_agent::ascii::{
+    use crate::cli_agent::ui::{
         buffer::{BufFragment, Buffer},
         cursor::CursorPosition,
     };
