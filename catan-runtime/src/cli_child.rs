@@ -5,9 +5,12 @@ use std::{
     path::Path as FsPath,
 };
 
-use catan_agents::remote_agent::{
-    CliToHost, DecisionRequestFrame, DecisionResponseFrame, HostToCli, UiModel, read_frame,
-    write_frame,
+use catan_agents::{
+    cli_agent::ui::field_render::FieldRenderer,
+    remote_agent::{
+        CliToHost, DecisionRequestFrame, DecisionResponseFrame, HostToCli, UiModel, read_frame,
+        write_frame,
+    },
 };
 use catan_core::{
     agent::action::{
@@ -243,13 +246,29 @@ impl CliUi {
             .block(Block::default().borders(Borders::ALL).title("Status"));
             frame.render_widget(title, chunks[0]);
 
-            let body = model
-                .map(model_lines)
-                .unwrap_or_else(|| vec![Line::from("waiting for game state")]);
-            let body = Paragraph::new(body)
-                .wrap(Wrap { trim: false })
-                .block(Block::default().borders(Borders::ALL).title("Game"));
-            frame.render_widget(body, chunks[1]);
+            match model {
+                Some(model) => {
+                    let body_chunks = Layout::default()
+                        .direction(Direction::Horizontal)
+                        .constraints([Constraint::Length(68), Constraint::Min(30)])
+                        .split(chunks[1]);
+
+                    let field = Paragraph::new(field_lines(model))
+                        .block(Block::default().borders(Borders::ALL).title("Field"));
+                    frame.render_widget(field, body_chunks[0]);
+
+                    let details = Paragraph::new(model_lines(model))
+                        .wrap(Wrap { trim: false })
+                        .block(Block::default().borders(Borders::ALL).title("Game"));
+                    frame.render_widget(details, body_chunks[1]);
+                }
+                None => {
+                    let body = Paragraph::new(vec![Line::from("waiting for game state")])
+                        .wrap(Wrap { trim: false })
+                        .block(Block::default().borders(Borders::ALL).title("Game"));
+                    frame.render_widget(body, chunks[1]);
+                }
+            }
 
             let input = Paragraph::new(vec![
                 Line::from(prompt.to_owned()),
@@ -318,6 +337,12 @@ fn model_lines(model: &UiModel) -> Vec<Line<'static>> {
     lines.push(Line::from("trades: bank-trade give take common"));
     lines.push(Line::from("dev cards: use knight hex [player|none] | use yop res1 res2 | use monopoly res | use roadbuild h1 h2 h3 h4"));
     lines
+}
+
+fn field_lines(model: &UiModel) -> Vec<Line<'static>> {
+    let mut renderer = FieldRenderer::new();
+    renderer.draw_ui_public(&model.public);
+    renderer.plain_lines().into_iter().map(Line::from).collect()
 }
 
 fn read_init_action(ui: &mut CliUi, model: &UiModel) -> io::Result<InitAction> {

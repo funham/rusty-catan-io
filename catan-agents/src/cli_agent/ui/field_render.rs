@@ -8,7 +8,10 @@ use catan_core::{
 use std::{collections::BTreeSet, io::Write};
 use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 
-use crate::cli_agent::ui::buffer::{BufFragment, Buffer};
+use crate::{
+    cli_agent::ui::buffer::{BufFragment, Buffer},
+    remote_agent::UiPublicGame,
+};
 
 mod utils {
     use catan_core::topology::{Axis, Hex, Intersection, Path, SignedAxis};
@@ -290,6 +293,51 @@ impl FieldRenderer {
 
         // render builds
         self.draw_builds(view);
+    }
+
+    pub fn draw_ui_public(&mut self, view: &UiPublicGame) {
+        self.draw_field(ColorSpec::new().set_dimmed(true).clone());
+
+        for (index, tile) in view.board.tiles.iter().copied().enumerate() {
+            let hex = HexIndex::spiral_to_hex(index);
+            match tile {
+                Tile::Resource { resource, number } => {
+                    self.draw_hex_attr(hex, HexAttr::TileNum(number.into()));
+                    self.draw_hex_attr(hex, HexAttr::Resource(resource));
+                }
+                Tile::Desert => {}
+                Tile::River { number } => {
+                    self.draw_hex_attr(hex, HexAttr::TileNum(number.into()));
+                }
+            }
+        }
+
+        for index in 0..HexIndex::spiral_start_of_ring(view.board.field_radius as usize + 2) {
+            self.draw_hex_attr(HexIndex::spiral_to_hex(index), HexAttr::Index);
+        }
+
+        self.draw_hex_attr(view.board_state.robber_pos, HexAttr::Robber);
+
+        for player in &view.builds {
+            for road in &player.roads {
+                self.draw_path_attr(
+                    road.pos,
+                    PathAttr::Road {
+                        color: Self::player_color(player.player_id),
+                    },
+                );
+            }
+
+            for est in &player.establishments {
+                self.draw_intersection_attr(
+                    est.pos,
+                    IntersectionAttr::Establishment(
+                        est.stage,
+                        Self::player_color(player.player_id),
+                    ),
+                );
+            }
+        }
     }
 
     pub fn plain_lines(&self) -> Vec<String> {
