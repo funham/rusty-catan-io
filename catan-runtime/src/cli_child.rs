@@ -5,12 +5,9 @@ use std::{
     path::Path as FsPath,
 };
 
-use catan_agents::{
-    cli_agent::ui::field_render::FieldRenderer,
-    remote_agent::{
-        CliToHost, DecisionRequestFrame, DecisionResponseFrame, HostToCli, UiModel, read_frame,
-        write_frame,
-    },
+use catan_agents::remote_agent::{
+    CliToHost, DecisionRequestFrame, DecisionResponseFrame, HostToCli, UiModel, read_frame,
+    write_frame,
 };
 use catan_core::{
     agent::action::{
@@ -25,6 +22,11 @@ use catan_core::{
         trade::{BankTrade, BankTradeKind},
     },
     topology::{Hex, HexIndex, Intersection, Path as BoardPath, repr::Dual},
+};
+use catan_render::{
+    adapters::ratatui::canvas_lines,
+    field::{FieldOverlay, FieldRenderer, FieldSelection},
+    model::{RenderBoard, RenderGameView, RenderPlayerBuilds},
 };
 use crossterm::{
     event::{self, Event as CrosstermEvent, KeyCode, KeyEventKind},
@@ -143,6 +145,7 @@ fn handle_decision(
 struct CliUi {
     terminal: Terminal<CrosstermBackend<Stdout>>,
     message: String,
+    overlay: FieldOverlay,
 }
 
 impl CliUi {
@@ -154,22 +157,26 @@ impl CliUi {
         Ok(Self {
             terminal,
             message: "waiting for host".to_owned(),
+            overlay: FieldOverlay::default(),
         })
     }
 
     fn set_message(&mut self, message: String) -> io::Result<()> {
         self.message = message;
+        self.overlay.selected = None;
         self.draw(None, "", "")
     }
 
     fn show_model(&mut self, model: &UiModel, message: String) -> io::Result<()> {
         self.message = message;
+        self.overlay.selected = None;
         self.draw(Some(model), "", "")
     }
 
     fn prompt(&mut self, model: &UiModel, prompt: &str) -> io::Result<String> {
         let mut input = String::new();
         self.message = "enter command".to_owned();
+        self.overlay.selected = None;
         loop {
             self.draw(Some(model), prompt, &input)?;
             if let CrosstermEvent::Key(key) = event::read()?
@@ -195,6 +202,7 @@ impl CliUi {
         model: &UiModel,
         prompt: &str,
         choices: &[(String, T)],
+        selection: impl Fn(T) -> FieldSelection,
     ) -> io::Result<T> {
         if choices.is_empty() {
             return Err(io::Error::new(
@@ -206,12 +214,17 @@ impl CliUi {
         let mut selected = 0;
         self.message = "select with arrows/tab; enter confirms".to_owned();
         loop {
+            self.overlay.selected = Some(selection(choices[selected].1));
             self.draw(Some(model), prompt, &choices[selected].0)?;
             if let CrosstermEvent::Key(key) = event::read()?
                 && key.kind == KeyEventKind::Press
             {
                 match key.code {
-                    KeyCode::Enter => return Ok(choices[selected].1),
+                    KeyCode::Enter => {
+                        let choice = choices[selected].1;
+                        self.overlay.selected = None;
+                        return Ok(choice);
+                    }
                     KeyCode::Right | KeyCode::Down | KeyCode::Tab => {
                         selected = (selected + 1) % choices.len();
                     }
@@ -228,6 +241,7 @@ impl CliUi {
 
     fn draw(&mut self, model: Option<&UiModel>, prompt: &str, input: &str) -> io::Result<()> {
         let message = self.message.clone();
+        let overlay = self.overlay.clone();
         self.terminal.draw(|frame| {
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
@@ -253,7 +267,7 @@ impl CliUi {
                         .constraints([Constraint::Length(68), Constraint::Min(30)])
                         .split(chunks[1]);
 
-                    let field = Paragraph::new(field_lines(model))
+                    let field = Paragraph::new(field_lines(model, &overlay))
                         .block(Block::default().borders(Borders::ALL).title("Field"));
                     frame.render_widget(field, body_chunks[0]);
 
@@ -339,10 +353,11 @@ fn model_lines(model: &UiModel) -> Vec<Line<'static>> {
     lines
 }
 
-fn field_lines(model: &UiModel) -> Vec<Line<'static>> {
+fn field_lines(model: &UiModel, overlay: &FieldOverlay) -> Vec<Line<'static>> {
     let mut renderer = FieldRenderer::new();
-    renderer.draw_ui_public(&model.public);
-    renderer.plain_lines().into_iter().map(Line::from).collect()
+    renderer.draw_game(&render_game_view(model));
+    renderer.draw_overlay(overlay);
+    canvas_lines(renderer.canvas())
 }
 
 fn read_init_action(ui: &mut CliUi, model: &UiModel) -> io::Result<InitAction> {
@@ -521,15 +536,20 @@ fn read_resource_collection(
 }
 
 fn read_hex(ui: &mut CliUi, model: &UiModel, prompt: &str) -> io::Result<Hex> {
-    ui.select(model, prompt, &hex_choices(model))
+    ui.select(model, prompt, &hex_choices(model), FieldSelection::Hex)
 }
 
 fn read_path(ui: &mut CliUi, model: &UiModel, prompt: &str) -> io::Result<BoardPath> {
-    ui.select(model, prompt, &path_choices(model))
+    ui.select(model, prompt, &path_choices(model), FieldSelection::Path)
 }
 
 fn read_intersection(ui: &mut CliUi, model: &UiModel, prompt: &str) -> io::Result<Intersection> {
-    ui.select(model, prompt, &intersection_choices(model))
+    ui.select(
+        model,
+        prompt,
+        &intersection_choices(model),
+        FieldSelection::Intersection,
+    )
 }
 
 fn read_player_id(ui: &mut CliUi, model: &UiModel, prompt: &str) -> io::Result<PlayerId> {
@@ -587,4 +607,26 @@ fn board_hexes(model: &UiModel) -> Vec<Hex> {
     (0..model.public.board.tiles.len())
         .map(HexIndex::spiral_to_hex)
         .collect()
+}
+
+fn render_game_view(model: &UiModel) -> RenderGameView {
+    RenderGameView {
+        board: RenderBoard {
+            n_players: model.public.board.n_players,
+            field_radius: model.public.board.field_radius,
+            tiles: model.public.board.tiles.clone(),
+            ports: model.public.board.ports.clone(),
+        },
+        board_state: model.public.board_state,
+        builds: model
+            .public
+            .builds
+            .iter()
+            .map(|builds| RenderPlayerBuilds {
+                player_id: builds.player_id,
+                establishments: builds.establishments.clone(),
+                roads: builds.roads.clone(),
+            })
+            .collect(),
+    }
 }
