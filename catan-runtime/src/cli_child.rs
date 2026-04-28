@@ -197,43 +197,159 @@ impl CliUi {
         }
     }
 
-    fn select<T: Copy>(
-        &mut self,
-        model: &UiModel,
-        prompt: &str,
-        choices: &[(String, T)],
-        selection: impl Fn(T) -> FieldSelection,
-    ) -> io::Result<T> {
-        if choices.is_empty() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "selector has no choices",
-            ));
+    fn select_hex(&mut self, model: &UiModel, prompt: &str) -> io::Result<Hex> {
+        let board_hexes = board_hex_set(model);
+        let mut selected = Hex::new(0, 0);
+        if !board_hexes.contains(&selected) {
+            selected = *board_hexes.iter().next().ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "selector has no board hexes")
+            })?;
         }
 
-        let mut selected = 0;
-        self.message = "select with arrows/tab; enter confirms".to_owned();
+        self.message = "select hex with arrows; enter confirms".to_owned();
         loop {
-            self.overlay.selected = Some(selection(choices[selected].1));
-            self.draw(Some(model), prompt, &choices[selected].0)?;
+            self.overlay.selected = Some(FieldSelection::Hex(selected));
+            self.draw(Some(model), prompt, &hex_label(selected))?;
             if let CrosstermEvent::Key(key) = event::read()?
                 && key.kind == KeyEventKind::Press
             {
                 match key.code {
                     KeyCode::Enter => {
-                        let choice = choices[selected].1;
                         self.overlay.selected = None;
-                        return Ok(choice);
+                        return Ok(selected);
                     }
-                    KeyCode::Right | KeyCode::Down | KeyCode::Tab => {
-                        selected = (selected + 1) % choices.len();
+                    KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
+                        selected = move_hex_by_key(selected, key.code, &board_hexes);
                     }
-                    KeyCode::Left | KeyCode::Up | KeyCode::BackTab => {
-                        selected = selected.checked_sub(1).unwrap_or(choices.len() - 1);
-                    }
-                    KeyCode::Home => selected = 0,
-                    KeyCode::End => selected = choices.len() - 1,
                     _ => {}
+                }
+            }
+        }
+    }
+
+    fn select_path(&mut self, model: &UiModel, prompt: &str) -> io::Result<BoardPath> {
+        let board_hexes = board_hex_set(model);
+        let mut hex = Hex::new(0, 0);
+        if !board_hexes.contains(&hex) {
+            hex = *board_hexes.iter().next().ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "selector has no board hexes")
+            })?;
+        }
+
+        self.message = "stage 1: select hex; enter chooses surrounding road".to_owned();
+        loop {
+            loop {
+                self.overlay.selected = Some(FieldSelection::Hex(hex));
+                self.draw(
+                    Some(model),
+                    prompt,
+                    &format!("{}; enter for roads", hex_label(hex)),
+                )?;
+                if let CrosstermEvent::Key(key) = event::read()?
+                    && key.kind == KeyEventKind::Press
+                {
+                    match key.code {
+                        KeyCode::Enter => break,
+                        KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
+                            hex = move_hex_by_key(hex, key.code, &board_hexes);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
+            let paths = hex.paths_arr();
+            let mut selected = 0;
+            self.message = "stage 2: cycle roads with arrows/tab; esc returns to hex".to_owned();
+            loop {
+                let path = paths[selected];
+                self.overlay.selected = Some(FieldSelection::Path(path));
+                self.draw(Some(model), prompt, &path_label(path))?;
+                if let CrosstermEvent::Key(key) = event::read()?
+                    && key.kind == KeyEventKind::Press
+                {
+                    match key.code {
+                        KeyCode::Enter => {
+                            self.overlay.selected = None;
+                            return Ok(path);
+                        }
+                        KeyCode::Esc => {
+                            self.message =
+                                "stage 1: select hex; enter chooses surrounding road".to_owned();
+                            break;
+                        }
+                        KeyCode::Left | KeyCode::Down | KeyCode::Tab => {
+                            selected = (selected + 1) % paths.len();
+                        }
+                        KeyCode::Right | KeyCode::Up | KeyCode::BackTab => {
+                            selected = selected.checked_sub(1).unwrap_or(paths.len() - 1);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
+    fn select_intersection(&mut self, model: &UiModel, prompt: &str) -> io::Result<Intersection> {
+        let board_hexes = board_hex_set(model);
+        let mut hex = Hex::new(0, 0);
+        if !board_hexes.contains(&hex) {
+            hex = *board_hexes.iter().next().ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "selector has no board hexes")
+            })?;
+        }
+
+        self.message = "stage 1: select hex; enter chooses surrounding vertex".to_owned();
+        loop {
+            loop {
+                self.overlay.selected = Some(FieldSelection::Hex(hex));
+                self.draw(
+                    Some(model),
+                    prompt,
+                    &format!("{}; enter for vertices", hex_label(hex)),
+                )?;
+                if let CrosstermEvent::Key(key) = event::read()?
+                    && key.kind == KeyEventKind::Press
+                {
+                    match key.code {
+                        KeyCode::Enter => break,
+                        KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
+                            hex = move_hex_by_key(hex, key.code, &board_hexes);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
+            let intersections = hex.vertices_arr();
+            let mut selected = 0;
+            self.message = "stage 2: cycle vertices with arrows/tab; esc returns to hex".to_owned();
+            loop {
+                let intersection = intersections[selected];
+                self.overlay.selected = Some(FieldSelection::Intersection(intersection));
+                self.draw(Some(model), prompt, &intersection_label(intersection))?;
+                if let CrosstermEvent::Key(key) = event::read()?
+                    && key.kind == KeyEventKind::Press
+                {
+                    match key.code {
+                        KeyCode::Enter => {
+                            self.overlay.selected = None;
+                            return Ok(intersection);
+                        }
+                        KeyCode::Esc => {
+                            self.message =
+                                "stage 1: select hex; enter chooses surrounding vertex".to_owned();
+                            break;
+                        }
+                        KeyCode::Left | KeyCode::Down | KeyCode::Tab => {
+                            selected = (selected + 1) % intersections.len();
+                        }
+                        KeyCode::Right | KeyCode::Up | KeyCode::BackTab => {
+                            selected = selected.checked_sub(1).unwrap_or(intersections.len() - 1);
+                        }
+                        _ => {}
+                    }
                 }
             }
         }
@@ -536,20 +652,15 @@ fn read_resource_collection(
 }
 
 fn read_hex(ui: &mut CliUi, model: &UiModel, prompt: &str) -> io::Result<Hex> {
-    ui.select(model, prompt, &hex_choices(model), FieldSelection::Hex)
+    ui.select_hex(model, prompt)
 }
 
 fn read_path(ui: &mut CliUi, model: &UiModel, prompt: &str) -> io::Result<BoardPath> {
-    ui.select(model, prompt, &path_choices(model), FieldSelection::Path)
+    ui.select_path(model, prompt)
 }
 
 fn read_intersection(ui: &mut CliUi, model: &UiModel, prompt: &str) -> io::Result<Intersection> {
-    ui.select(
-        model,
-        prompt,
-        &intersection_choices(model),
-        FieldSelection::Intersection,
-    )
+    ui.select_intersection(model, prompt)
 }
 
 fn read_player_id(ui: &mut CliUi, model: &UiModel, prompt: &str) -> io::Result<PlayerId> {
@@ -562,51 +673,57 @@ fn read_player_id(ui: &mut CliUi, model: &UiModel, prompt: &str) -> io::Result<P
     }
 }
 
-fn hex_choices(model: &UiModel) -> Vec<(String, Hex)> {
-    board_hexes(model)
-        .into_iter()
-        .map(|hex| (format!("hex {}", hex.index().to_spiral()), hex))
-        .collect()
+fn hex_label(hex: Hex) -> String {
+    format!("hex {} (q={}, r={})", hex.index().to_spiral(), hex.q, hex.r)
 }
 
-fn path_choices(model: &UiModel) -> Vec<(String, BoardPath)> {
-    board_hexes(model)
-        .into_iter()
-        .flat_map(|hex| hex.paths_arr())
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .map(|path| {
-            let (a, b) = path.as_pair();
-            (
-                format!("road {} {}", a.index().to_spiral(), b.index().to_spiral()),
-                path,
-            )
-        })
-        .collect()
+fn path_label(path: BoardPath) -> String {
+    let (a, b) = path.as_pair();
+    format!(
+        "road {} {} ({},{} -> {},{})",
+        a.index().to_spiral(),
+        b.index().to_spiral(),
+        a.q,
+        a.r,
+        b.q,
+        b.r
+    )
 }
 
-fn intersection_choices(model: &UiModel) -> Vec<(String, Intersection)> {
-    board_hexes(model)
+fn intersection_label(intersection: Intersection) -> String {
+    let label = intersection
+        .as_set()
         .into_iter()
-        .flat_map(|hex| hex.vertices_arr())
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .map(|intersection| {
-            let label = intersection
-                .as_set()
-                .into_iter()
-                .map(|hex| hex.index().to_spiral().to_string())
-                .collect::<Vec<_>>()
-                .join(" ");
-            (format!("intersection {label}"), intersection)
-        })
-        .collect()
+        .map(|hex| hex.index().to_spiral().to_string())
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!("intersection {label}")
+}
+
+fn move_hex_by_key(current: Hex, key: KeyCode, board_hexes: &BTreeSet<Hex>) -> Hex {
+    let next = match key {
+        KeyCode::Left => Hex::new(current.q - 1, current.r),
+        KeyCode::Right => Hex::new(current.q + 1, current.r),
+        KeyCode::Up => Hex::new(current.q, current.r - 1),
+        KeyCode::Down => Hex::new(current.q, current.r + 1),
+        _ => current,
+    };
+
+    if board_hexes.contains(&next) {
+        next
+    } else {
+        current
+    }
 }
 
 fn board_hexes(model: &UiModel) -> Vec<Hex> {
     (0..model.public.board.tiles.len())
         .map(HexIndex::spiral_to_hex)
         .collect()
+}
+
+fn board_hex_set(model: &UiModel) -> BTreeSet<Hex> {
+    board_hexes(model).into_iter().collect()
 }
 
 fn render_game_view(model: &UiModel) -> RenderGameView {
@@ -628,5 +745,52 @@ fn render_game_view(model: &UiModel) -> RenderGameView {
                 roads: builds.roads.clone(),
             })
             .collect(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hex_set(hexes: impl IntoIterator<Item = Hex>) -> BTreeSet<Hex> {
+        hexes.into_iter().collect()
+    }
+
+    #[test]
+    fn hex_arrow_navigation_changes_q_and_r_coordinates() {
+        let board = hex_set([
+            Hex::new(0, 0),
+            Hex::new(1, 0),
+            Hex::new(-1, 0),
+            Hex::new(0, -1),
+            Hex::new(0, 1),
+        ]);
+
+        assert_eq!(
+            move_hex_by_key(Hex::new(0, 0), KeyCode::Right, &board),
+            Hex::new(1, 0)
+        );
+        assert_eq!(
+            move_hex_by_key(Hex::new(0, 0), KeyCode::Left, &board),
+            Hex::new(-1, 0)
+        );
+        assert_eq!(
+            move_hex_by_key(Hex::new(0, 0), KeyCode::Up, &board),
+            Hex::new(0, -1)
+        );
+        assert_eq!(
+            move_hex_by_key(Hex::new(0, 0), KeyCode::Down, &board),
+            Hex::new(0, 1)
+        );
+    }
+
+    #[test]
+    fn hex_arrow_navigation_stays_on_board() {
+        let board = hex_set([Hex::new(0, 0)]);
+
+        assert_eq!(
+            move_hex_by_key(Hex::new(0, 0), KeyCode::Right, &board),
+            Hex::new(0, 0)
+        );
     }
 }
