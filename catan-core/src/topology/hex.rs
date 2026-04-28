@@ -413,8 +413,13 @@ mod tests {
     fn hex_index_ring_basic() {
         assert_eq!(HexIndex::ring_size(0), 1);
         assert_eq!(HexIndex::ring_size(1), 6);
-        assert_eq!(HexIndex::ring_size(1), 12);
-        assert_eq!(HexIndex::hex_ring(h(32, -12), 1), h(32, -12).neighbors());
+        assert_eq!(HexIndex::ring_size(2), 12);
+        assert_eq!(
+            HexIndex::hex_ring(h(32, -12), 1)
+                .into_iter()
+                .collect::<BTreeSet<_>>(),
+            h(32, -12).neighbors_set()
+        );
     }
 
     #[test]
