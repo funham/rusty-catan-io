@@ -13,6 +13,27 @@ pub struct Bank {
 }
 
 impl Bank {
+    pub fn can_pay(&self, resources: &ResourceCollection) -> bool {
+        self.resources.has_enough(resources)
+    }
+
+    pub fn deposit(&mut self, resources: ResourceCollection) {
+        self.resources += &resources;
+    }
+
+    pub fn withdraw(
+        &mut self,
+        resources: ResourceCollection,
+    ) -> Result<(), BankResourceExchangeError> {
+        self.resources
+            .subtract_in_place(&resources)
+            .map_err(|_| BankResourceExchangeError::BankIsShort)
+    }
+
+    pub fn draw_dev_card(&mut self) -> Option<DevCardKind> {
+        self.dev_cards.pop()
+    }
+
     pub fn public_view(&self) -> BankViewOwned {
         let mut resources = ResourceMap {
             brick: DeckFullnessLevel::Empty,

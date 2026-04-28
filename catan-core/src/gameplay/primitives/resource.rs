@@ -1,9 +1,8 @@
 use std::{
     collections::BTreeMap,
-    ops::{Index, IndexMut},
+    ops::{Add, AddAssign, Index, IndexMut},
 };
 
-use itertools::Itertools;
 use rand::RngExt;
 use serde::{Deserialize, Serialize};
 
@@ -36,7 +35,7 @@ impl Resource {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResourceMap<T> {
     pub brick: T,
     pub wood: T,
@@ -71,32 +70,27 @@ impl<T> IndexMut<Resource> for ResourceMap<T> {
     }
 }
 
-impl<T> TryFrom<&[(Resource, T)]> for ResourceMap<T> {
-    type Error = ResourceCollectionCollectError;
+impl<T: Default + Copy> TryFrom<&[(Resource, T)]> for ResourceMap<T> {
+    type Error = ResourceCollectionError;
 
     fn try_from(flat_map: &[(Resource, T)]) -> Result<Self, Self::Error> {
-        if flat_map
-            .iter()
-            .dedup_by(|x, y| x.0 != y.0)
-            .try_len()
-            .unwrap()
-            == flat_map.len()
-        {
-            return Err(ResourceCollectionCollectError::ResourceAppearTwice);
+        let mut this = Self::default();
+        let mut seen = ResourceMap::default();
+
+        for (resource, value) in flat_map {
+            if seen[*resource] {
+                return Err(ResourceCollectionError::ResourceAppearsTwice);
+            }
+
+            seen[*resource] = true;
+            this[*resource] = *value;
         }
 
-        todo!()
+        Ok(this)
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
-pub struct ResourceCollection {
-    pub brick: u16,
-    pub wood: u16,
-    pub wheat: u16,
-    pub sheep: u16,
-    pub ore: u16,
-}
+pub type ResourceCollection = ResourceMap<u16>;
 
 impl std::fmt::Display for ResourceCollection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -108,42 +102,40 @@ impl std::fmt::Display for ResourceCollection {
     }
 }
 
-#[derive(Debug)]
-pub enum ResourceCollectionSubstractionError {
-    SubstractionFromSmallerCollection,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResourceCollectionError {
+    InsufficientResources {
+        available: ResourceCollection,
+        required: ResourceCollection,
+    },
+    ResourceAppearsTwice,
 }
 
 impl ResourceCollection {
-    pub fn transfer<E>(
+    pub const ZERO: Self = Self {
+        brick: 0,
+        wood: 0,
+        wheat: 0,
+        sheep: 0,
+        ore: 0,
+    };
+
+    pub fn transfer(
         from: &mut ResourceCollection,
         to: &mut ResourceCollection,
         resources: ResourceCollection,
-        on_error: E,
-    ) -> Result<(), E> {
-        match *from - &resources {
-            Some(remainder) => Ok({
-                *from = remainder;
-                *to += &resources;
-            }),
-            None => Err(on_error),
-        }
-    }
-
-    pub const fn new(brick: u16, wood: u16, wheat: u16, sheep: u16, ore: u16) -> Self {
-        Self {
-            brick,
-            wood,
-            wheat,
-            sheep,
-            ore,
-        }
+    ) -> Result<(), ResourceCollectionError> {
+        let remainder = from.try_sub(&resources)?;
+        *from = remainder;
+        *to += &resources;
+        Ok(())
     }
 
     pub fn has_enough(&self, set: &ResourceCollection) -> bool {
         Resource::list().into_iter().all(|r| self[r] >= set[r])
     }
 
-    pub fn empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.total() == 0
     }
 
@@ -151,41 +143,43 @@ impl ResourceCollection {
         Resource::list().into_iter().map(|r| self[r] as u16).sum()
     }
 
-    pub fn substract(
+    pub fn checked_sub(&self, rhs: &ResourceCollection) -> Option<ResourceCollection> {
+        if !self.has_enough(rhs) {
+            return None;
+        }
+
+        Some(ResourceCollection {
+            brick: self.brick - rhs.brick,
+            wood: self.wood - rhs.wood,
+            wheat: self.wheat - rhs.wheat,
+            sheep: self.sheep - rhs.sheep,
+            ore: self.ore - rhs.ore,
+        })
+    }
+
+    pub fn try_sub(
         &self,
         rhs: &ResourceCollection,
-    ) -> Result<ResourceCollection, ResourceCollectionSubstractionError> {
-        match *self - rhs {
-            Some(result) => Ok(result),
-            None => Err(ResourceCollectionSubstractionError::SubstractionFromSmallerCollection),
-        }
+    ) -> Result<ResourceCollection, ResourceCollectionError> {
+        self.checked_sub(rhs)
+            .ok_or(ResourceCollectionError::InsufficientResources {
+                available: *self,
+                required: *rhs,
+            })
     }
 
-    pub fn substract_inplace(
+    pub fn subtract_in_place(
         &mut self,
-        set: &ResourceCollection,
-    ) -> Result<(), ResourceCollectionSubstractionError> {
-        self.substract_inplace_or_throw(
-            set,
-            ResourceCollectionSubstractionError::SubstractionFromSmallerCollection,
-        )
-    }
-
-    pub fn substract_inplace_or_throw<T>(
-        &mut self,
-        set: &ResourceCollection,
-        err: T,
-    ) -> Result<(), T> {
-        match self.substract(set) {
-            Ok(result) => Ok(*self = result),
-            Err(_) => Err(err),
-        }
+        rhs: &ResourceCollection,
+    ) -> Result<(), ResourceCollectionError> {
+        *self = self.try_sub(rhs)?;
+        Ok(())
     }
 
     // None if empty, weighted random otherwise
     pub fn peek_random(&self) -> Option<Resource> {
         // Calculate total and return None if empty
-        if self.empty() {
+        if self.is_empty() {
             return None;
         }
 
@@ -211,7 +205,7 @@ impl ResourceCollection {
     pub fn pop_random(&mut self) -> Option<Resource> {
         match self.peek_random() {
             Some(resource) => {
-                *self = (*self - &resource.into()).unwrap();
+                self.subtract_in_place(&resource.into()).ok()?;
                 Some(resource)
             }
             None => None,
@@ -223,77 +217,53 @@ impl ResourceCollection {
     }
 }
 
-impl std::ops::Add<&ResourceCollection> for ResourceCollection {
+impl Add for ResourceCollection {
     type Output = ResourceCollection;
 
-    fn add(self, rhs: &ResourceCollection) -> Self::Output {
-        Self::Output::try_from(
-            Resource::list()
-                .into_iter()
-                .map(|r| (r, self[r] + rhs[r]))
-                .collect::<Vec<_>>()
-                .as_slice(),
-        )
-        .expect("broken ResourceCollection::Add")
+    fn add(self, rhs: ResourceCollection) -> Self::Output {
+        self + &rhs
     }
 }
 
-impl std::ops::AddAssign<&ResourceCollection> for ResourceCollection {
+impl Add<&ResourceCollection> for ResourceCollection {
+    type Output = ResourceCollection;
+
+    fn add(self, rhs: &ResourceCollection) -> Self::Output {
+        ResourceCollection {
+            brick: self.brick + rhs.brick,
+            wood: self.wood + rhs.wood,
+            wheat: self.wheat + rhs.wheat,
+            sheep: self.sheep + rhs.sheep,
+            ore: self.ore + rhs.ore,
+        }
+    }
+}
+
+impl AddAssign for ResourceCollection {
+    fn add_assign(&mut self, rhs: ResourceCollection) {
+        *self += &rhs;
+    }
+}
+
+impl AddAssign<&ResourceCollection> for ResourceCollection {
     fn add_assign(&mut self, rhs: &ResourceCollection) {
         *self = *self + rhs;
     }
 }
 
-impl std::ops::Sub<&ResourceCollection> for ResourceCollection {
-    type Output = Option<ResourceCollection>;
-
-    fn sub(self, rhs: &ResourceCollection) -> Self::Output {
-        match Resource::list()
-            .into_iter()
-            .map(|r| match self[r].checked_sub(rhs[r]) {
-                Some(sub) => Some((r, sub)),
-                None => None,
-            })
-            .collect::<Option<Vec<_>>>()
-        {
-            Some(v) => {
-                Some(ResourceCollection::try_from(&v[..]).expect("broken ResourceCollection::Sub"))
-            }
-            _ => None,
-        }
-    }
-}
-
-impl Into<ResourceCollection> for Resource {
-    fn into(self) -> ResourceCollection {
+impl From<Resource> for ResourceCollection {
+    fn from(resource: Resource) -> ResourceCollection {
         let mut res = ResourceCollection::default();
-        res[self] = 1;
+        res[resource] = 1;
         res
     }
 }
 
-impl Into<ResourceCollection> for (Resource, u16) {
-    fn into(self) -> ResourceCollection {
-        let mut res: ResourceCollection = self.0.into();
-        res[self.0] *= self.1;
+impl From<(Resource, u16)> for ResourceCollection {
+    fn from((resource, count): (Resource, u16)) -> ResourceCollection {
+        let mut res = ResourceCollection::default();
+        res[resource] = count;
         res
-    }
-}
-
-impl TryFrom<&[(Resource, u16)]> for ResourceCollection {
-    type Error = ResourceCollectionCollectError;
-
-    fn try_from(value: &[(Resource, u16)]) -> Result<Self, Self::Error> {
-        let mut this = Self::default();
-        for (resource, number) in value {
-            if this[*resource] != 0 {
-                return Err(ResourceCollectionCollectError::ResourceAppearTwice);
-            }
-
-            this[*resource] = *number;
-        }
-
-        Ok(this)
     }
 }
 
@@ -304,36 +274,6 @@ impl From<BTreeMap<Resource, u16>> for ResourceCollection {
     }
 }
 
-impl Index<Resource> for ResourceCollection {
-    type Output = u16;
-
-    fn index(&self, resource: Resource) -> &Self::Output {
-        match resource {
-            Resource::Brick => &self.brick,
-            Resource::Wood => &self.wood,
-            Resource::Wheat => &self.wheat,
-            Resource::Sheep => &self.sheep,
-            Resource::Ore => &self.ore,
-        }
-    }
-}
-
-impl IndexMut<Resource> for ResourceCollection {
-    fn index_mut(&mut self, resource: Resource) -> &mut Self::Output {
-        match resource {
-            Resource::Brick => &mut self.brick,
-            Resource::Wood => &mut self.wood,
-            Resource::Wheat => &mut self.wheat,
-            Resource::Sheep => &mut self.sheep,
-            Resource::Ore => &mut self.ore,
-        }
-    }
-}
 pub trait HasCost {
     fn cost(&self) -> ResourceCollection;
-}
-
-#[derive(Debug)]
-pub enum ResourceCollectionCollectError {
-    ResourceAppearTwice,
 }

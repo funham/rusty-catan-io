@@ -1,9 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::gameplay::primitives::{
-    dev_card::{
-        DevCardData, DevCardDataPlayingError, DevCardKind, SecuredDevCardData, UsableDevCardKind,
-    },
+    dev_card::{DevCardData, DevCardDataPlayingError, DevCardKind, UsableDevCardKind},
     resource::ResourceCollection,
 };
 
@@ -55,10 +53,6 @@ impl PlayerDataContainer {
         self.players[player_id].dev_cards.move_to_used(card)
     }
 
-    pub fn get_secured(&self, player_id: PlayerId) -> SecuredPlayerData {
-        SecuredPlayerData::from(&self.get(player_id))
-    }
-
     pub fn get(&self, player_id: PlayerId) -> PlayerDataProxy<'_> {
         PlayerDataProxy {
             player_id,
@@ -80,27 +74,20 @@ impl PlayerDataContainer {
         ids: (PlayerId, PlayerId),
     ) -> (&mut PlayerData, &mut PlayerData) {
         let (id_fst, id_snd) = ids;
-        let (id_fst, id_snd) = match id_fst.cmp(&id_snd) {
+        match id_fst.cmp(&id_snd) {
             std::cmp::Ordering::Equal => panic!(
                 "can't borrow mutably two identical objects; ids are: {:?} (should be two distinct)",
                 ids
             ),
-            std::cmp::Ordering::Greater => (id_snd, id_fst),
-            std::cmp::Ordering::Less => (id_fst, id_snd),
-        };
-
-        // fst < snd (asserted)
-        //   0   1   2   3   4
-        // [ _ | _ | _ | _ | _ ]
-        //       ^       ^
-        //      fst     snd
-        //   0   1   2         0   1
-        // [ _ | _ | _ ]  |  [ _ | _ ]
-        //       ^             ^
-        //      fst           snd
-        let (half_fst, half_snd) = self.players.split_at_mut(id_snd);
-
-        (&mut half_fst[id_fst], &mut half_snd[0])
+            std::cmp::Ordering::Less => {
+                let (left, right) = self.players.split_at_mut(id_snd);
+                (&mut left[id_fst], &mut right[0])
+            }
+            std::cmp::Ordering::Greater => {
+                let (left, right) = self.players.split_at_mut(id_fst);
+                (&mut right[0], &mut left[id_snd])
+            }
+        }
     }
 }
 
@@ -108,6 +95,22 @@ impl PlayerDataContainer {
 pub struct PlayerData {
     pub resources: ResourceCollection,
     pub dev_cards: DevCardData,
+}
+
+impl PlayerData {
+    pub fn can_pay(&self, resources: &ResourceCollection) -> bool {
+        self.resources.has_enough(resources)
+    }
+
+    pub fn receive(&mut self, resources: ResourceCollection) {
+        self.resources += &resources;
+    }
+
+    pub fn pay<E>(&mut self, resources: ResourceCollection, err: E) -> Result<(), E> {
+        self.resources
+            .subtract_in_place(&resources)
+            .map_err(|_| err)
+    }
 }
 
 pub struct PlayerDataProxy<'a> {
@@ -163,37 +166,5 @@ impl<'a> PlayerDataProxyMut<'a> {
 
     pub fn dev_cards_add(&mut self, card: DevCardKind) {
         self.container.players[self.player_id].dev_cards.add(card);
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SecuredPlayerData {
-    pub dev_cards: SecuredDevCardData,
-    pub resource_card_count: u16,
-}
-
-impl From<&PlayerData> for SecuredPlayerData {
-    fn from(player_data: &PlayerData) -> Self {
-        Self {
-            dev_cards: SecuredDevCardData {
-                queued: player_data.dev_cards.queued.total(),
-                active: player_data.dev_cards.active.total(),
-                played: player_data.dev_cards.used.clone(),
-            },
-            resource_card_count: player_data.resources.total(),
-        }
-    }
-}
-
-impl<'a> From<&PlayerDataProxy<'a>> for SecuredPlayerData {
-    fn from(player_data: &PlayerDataProxy) -> Self {
-        Self {
-            dev_cards: SecuredDevCardData {
-                queued: player_data.dev_cards.queued.total(),
-                active: player_data.dev_cards.active.total(),
-                played: player_data.dev_cards.used.clone(),
-            },
-            resource_card_count: player_data.resources.total(),
-        }
     }
 }

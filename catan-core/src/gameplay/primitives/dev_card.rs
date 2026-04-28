@@ -106,19 +106,6 @@ impl DevCardData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SecuredDevCardData {
-    pub queued: u16,
-    pub active: u16,
-    pub played: UsableDevCardCollection,
-}
-
-impl SecuredDevCardData {
-    pub fn max_potential_vp(&self) -> u16 {
-        self.queued + self.active
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DevCardUsage {
     Knight(Hex),
     YearOfPlenty([Resource; 2]),

@@ -23,9 +23,9 @@ use crate::{
         },
     },
     topology::{
-        HasPos, Hex, Intersection, Path,
         collision::CollisionChecker,
         graph::{self, EdgeInsertationError},
+        HasPos, Hex, Intersection, Path,
     },
 };
 

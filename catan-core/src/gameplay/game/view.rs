@@ -1,10 +1,10 @@
 use crate::{
     algorithm,
     gameplay::{
-        field::state::{BoardLayout, BoardState, BuildCollection},
-        game::state::GameState,
+        field::state::{BoardLayout, BoardState},
+        game::{index::GameIndex, query::GameQuery, state::GameState},
         primitives::{
-            bank::{DeckFullnessLevel, Bank},
+            bank::{Bank, DeckFullnessLevel},
             build::BoardBuildData,
             dev_card::{DevCardData, UsableDevCardCollection},
             player::PlayerId,
@@ -70,23 +70,6 @@ impl VisibilityConfig {
 }
 
 #[derive(Debug, Clone)]
-pub struct StateIndices {
-    pub all_builds: Vec<BuildCollection>,
-    pub longest_road_lengths: Vec<u16>,
-}
-
-impl StateIndices {
-    pub fn rebuild(state: &GameState) -> Self {
-        Self {
-            all_builds: state.builds.query().all_builds(),
-            longest_road_lengths: (0..state.players.count())
-                .map(|id| state.count_max_tract_length(id))
-                .collect(),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
 pub enum PublicBankResources {
     Exact(ResourceCollection),
     Approx(ResourceMap<DeckFullnessLevel>),
@@ -147,7 +130,7 @@ pub struct PrivatePlayerView<'a> {
 #[derive(Debug, Clone, Copy)]
 pub struct OmniscientGameView<'a> {
     pub state: &'a GameState,
-    pub indices: &'a StateIndices,
+    pub index: &'a GameIndex,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -181,7 +164,7 @@ pub struct PlayerNotificationContext<'a> {
 
 pub struct ContextFactory<'a> {
     pub state: &'a GameState,
-    pub indices: &'a StateIndices,
+    pub index: &'a GameIndex,
     pub visibility: &'a VisibilityConfig,
 }
 
@@ -229,7 +212,10 @@ impl<'a> ContextFactory<'a> {
         }
     }
 
-    pub fn player_notification_context(&self, player_id: PlayerId) -> PlayerNotificationContext<'a> {
+    pub fn player_notification_context(
+        &self,
+        player_id: PlayerId,
+    ) -> PlayerNotificationContext<'a> {
         PlayerNotificationContext {
             self_id: player_id,
             public: self.public_view(self.visibility.player_policy(player_id)),
@@ -244,11 +230,13 @@ impl<'a> ContextFactory<'a> {
     pub fn omniscient_view(&self) -> OmniscientGameView<'a> {
         OmniscientGameView {
             state: self.state,
-            indices: self.indices,
+            index: self.index,
         }
     }
 
     pub fn public_view(&self, policy: VisibilityPolicy) -> PublicGameView<'a> {
+        let query = GameQuery::new(self.state, self.index);
+
         PublicGameView {
             turn: &self.state.turn,
             board: &self.state.board,
@@ -256,8 +244,8 @@ impl<'a> ContextFactory<'a> {
             bank: self.project_bank(policy),
             players: self.project_players(policy),
             builds: &self.state.builds,
-            longest_road_owner: self.state.longest_road_owner(),
-            largest_army_owner: self.state.largest_army_owner(),
+            longest_road_owner: query.longest_road_owner(),
+            largest_army_owner: query.largest_army_owner(),
         }
     }
 
@@ -282,7 +270,9 @@ impl<'a> ContextFactory<'a> {
             .players
             .iter()
             .enumerate()
-            .map(|(player_id, player)| project_player(player_id, player.resources(), player.dev_cards(), policy))
+            .map(|(player_id, player)| {
+                project_player(player_id, player.resources(), player.dev_cards(), policy)
+            })
             .collect()
     }
 }

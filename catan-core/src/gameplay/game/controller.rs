@@ -1,24 +1,23 @@
-use super::state::GameState;
+use super::state::{BuildActionError, BuyDevCardError, GameState};
 use crate::agent::action::{
     self, ChoosePlayerToRobAction, DecisionRequest, DropHalfAction, InitAction, InitStageAction,
     MoveRobbersAction, PostDevCardAction, PostDiceAction, RegularAction,
 };
+use crate::gameplay::agent::agent::Agent;
 use crate::gameplay::game::event::{
     GameEvent, GameObserver, ObserverKind, ObserverNotificationContext,
 };
+use crate::gameplay::game::index::GameIndex;
 use crate::gameplay::game::init::GameInitializationState;
-use crate::gameplay::game::view::{ContextFactory, SearchFactory, StateIndices, VisibilityConfig};
-use crate::gameplay::primitives::Tile;
+use crate::gameplay::game::query::GameQuery;
+use crate::gameplay::game::view::{ContextFactory, SearchFactory, VisibilityConfig};
 use crate::gameplay::primitives::bank::BankResourceExchangeError;
-use crate::gameplay::primitives::build::{Build, BuildingError, Establishment, EstablishmentType};
+use crate::gameplay::primitives::build::{BuildingError, Establishment, EstablishmentType};
 use crate::gameplay::primitives::dev_card::DevCardUsage;
 use crate::gameplay::primitives::player::PlayerId;
-use crate::gameplay::primitives::trade::BankTrade;
 use crate::gameplay::primitives::turn::GameTurn;
-use crate::gameplay::{agent::agent::Agent, primitives::resource::HasCost};
-use crate::{
-    gameplay::primitives::resource::ResourceCollection, math::dice::DiceRoller, math::dice::DiceVal,
-};
+use crate::gameplay::primitives::Tile;
+use crate::{math::dice::DiceRoller, math::dice::DiceVal};
 
 pub enum GameResult {
     Win(PlayerId),
@@ -33,7 +32,7 @@ enum TurnFlow {
 pub struct GameController {
     observers: Vec<Box<dyn GameObserver>>,
     game: GameState,
-    indices: StateIndices,
+    index: GameIndex,
     players: Vec<Box<dyn Agent>>,
     visibility: VisibilityConfig,
 }
@@ -48,12 +47,12 @@ impl GameController {
         players: Vec<Box<dyn Agent>>,
         visibility: VisibilityConfig,
     ) -> Self {
-        let indices = StateIndices::rebuild(&game);
+        let index = GameIndex::rebuild(&game);
 
         Self {
             observers: Vec::new(),
             game,
-            indices,
+            index,
             players,
             visibility,
         }
@@ -74,10 +73,10 @@ impl GameController {
 
             loop {
                 let state = game_init.clone().finish();
-                let indices = StateIndices::rebuild(&state);
+                let index = GameIndex::rebuild(&state);
                 let factory = ContextFactory {
                     state: &state,
-                    indices: &indices,
+                    index: &index,
                     visibility: &visibility,
                 };
 
@@ -129,16 +128,16 @@ impl GameController {
     fn notify_observers(&mut self, event: &GameEvent) {
         log::info!("Event: {:?}", event);
 
-        let (game, indices, visibility, players, observers) = (
+        let (game, index, visibility, players, observers) = (
             &self.game,
-            &self.indices,
+            &self.index,
             &self.visibility,
             &mut self.players,
             &mut self.observers,
         );
         let factory = ContextFactory {
             state: game,
-            indices,
+            index,
             visibility,
         };
 
@@ -171,7 +170,7 @@ impl GameController {
         let search = Some(SearchFactory::new(&self.game, policy, player_id));
         let factory = ContextFactory {
             state: &self.game,
-            indices: &self.indices,
+            index: &self.index,
             visibility: &self.visibility,
         };
         let context = factory.player_decision_context(player_id, search);
@@ -209,7 +208,7 @@ impl GameController {
 
     pub fn run(&mut self, dice: &mut dyn DiceRoller) -> GameResult {
         loop {
-            if let Some(winner) = self.game.check_win_condition() {
+            if let Some(winner) = GameQuery::new(&self.game, &self.index).check_win_condition() {
                 self.notify_observers(&GameEvent::GameEnded { winner_id: winner });
                 return GameResult::Win(winner);
             }
@@ -252,6 +251,7 @@ impl GameController {
                 if let Err(e) = self.game.use_dev_card(usage.clone(), self.curr_player()) {
                     log::error!("{:?}", e);
                 } else {
+                    self.index = GameIndex::rebuild(&self.game);
                     self.notify_observers(&GameEvent::DevCardUsed(usage));
                 }
                 self.handle_rest()
@@ -267,6 +267,7 @@ impl GameController {
         if let Err(e) = self.game.use_dev_card(usage.clone(), self.curr_player()) {
             log::error!("{:?}", e);
         } else {
+            self.index = GameIndex::rebuild(&self.game);
             self.notify_observers(&GameEvent::DevCardUsed(usage));
         }
 
@@ -292,20 +293,20 @@ impl GameController {
 
         match action {
             RegularAction::Build(build) => {
-                if let Ok(()) = Self::execute_build(&mut self.game, current_player, build) {
-                    self.indices = StateIndices::rebuild(&self.game);
+                if let Ok(()) = self.execute_build(current_player, build) {
+                    self.index = GameIndex::rebuild(&self.game);
                     self.notify_observers(&GameEvent::Built(build));
                 }
                 TurnFlow::Continue
             }
             RegularAction::TradeWithBank(trade) => {
-                if let Ok(()) = Self::execute_bank_trade(&mut self.game, current_player, trade) {
+                if let Ok(()) = self.game.trade_with_bank(current_player, trade) {
                     self.notify_observers(&GameEvent::Traded);
                 }
                 TurnFlow::Continue
             }
             RegularAction::BuyDevCard => {
-                if let Ok(()) = Self::execute_buy_dev_card(&mut self.game, current_player) {
+                if let Ok(()) = self.execute_buy_dev_card(current_player) {
                     self.notify_observers(&GameEvent::DevCardBought);
                 }
                 TurnFlow::Continue
@@ -322,65 +323,41 @@ impl GameController {
         }
     }
 
-    fn execute_bank_trade(
-        game: &mut GameState,
+    fn execute_build(
+        &mut self,
         player: PlayerId,
-        bank_trade: BankTrade,
-    ) -> Result<(), BankResourceExchangeError> {
-        if let Err(err) =
-            game.bank_resource_exchange(player, bank_trade.to_bank(), bank_trade.from_bank())
-        {
-            log::error!("Invalid bank trade {:?}", err);
-            return Err(err);
-        }
-
-        Ok(())
-    }
-
-    fn execute_build(game: &mut GameState, player: PlayerId, build: Build) -> Result<(), ()> {
-        if let Err(err) = game.transfer_to_bank(build.cost(), player) {
-            match err {
-                BankResourceExchangeError::BankIsShort => unreachable!(),
-                BankResourceExchangeError::AccountIsShort { id } => {
-                    log::warn!(
-                        "Can't build {}: Player#{} has {}",
-                        Into::<&str>::into(build),
-                        id,
-                        game.players.get(id).resources(),
-                    );
-                    return Err(());
-                }
-            }
-        }
-
-        match game.builds.try_build(player, build) {
+        build: crate::gameplay::primitives::build::Build,
+    ) -> Result<(), ()> {
+        match self.game.build(player, build) {
             Ok(()) => Ok(()),
-            Err(err) => {
+            Err(BuildActionError::AccountIsShort { id }) => {
+                log::warn!(
+                    "Can't build {}: Player#{} has {}",
+                    Into::<&str>::into(build),
+                    id,
+                    self.game.players.get(id).resources(),
+                );
+                Err(())
+            }
+            Err(BuildActionError::InvalidPlacement(err)) => {
                 log::warn!("Couldn't build {}: {:?}", Into::<&str>::into(build), err);
                 Err(())
             }
         }
     }
 
-    fn execute_buy_dev_card(game: &mut GameState, player: PlayerId) -> Result<(), ()> {
-        const COST: ResourceCollection = ResourceCollection::new(0, 0, 1, 1, 1);
-
-        if game.bank.dev_cards.is_empty() {
-            log::warn!("Bank out of dev cards");
-            return Err(());
-        }
-
-        if let Err(err) = game.transfer_to_bank(COST, player) {
-            match err {
-                BankResourceExchangeError::BankIsShort => unreachable!(),
-                BankResourceExchangeError::AccountIsShort { id } => {
-                    log::warn!("Player#{} can't afford dev card", id);
-                    return Err(());
-                }
+    fn execute_buy_dev_card(&mut self, player: PlayerId) -> Result<(), ()> {
+        match self.game.buy_dev_card(player) {
+            Ok(()) => Ok(()),
+            Err(BuyDevCardError::BankIsShort) => {
+                log::warn!("Bank out of dev cards");
+                Err(())
+            }
+            Err(BuyDevCardError::AccountIsShort { id }) => {
+                log::warn!("Player#{} can't afford dev card", id);
+                Err(())
             }
         }
-
-        Ok(())
     }
 
     fn execute_dice_roll(&mut self, dice: &mut dyn DiceRoller) {
@@ -404,7 +381,12 @@ impl GameController {
     fn execute_harvesting(game: &mut GameState, player: PlayerId, num: DiceVal) {
         let hexes = game.board.hexes_by_num(num).clone();
 
-        for pid in game.player_ids_starting_from(player) {
+        let player_ids = {
+            let index = GameIndex::rebuild(game);
+            GameQuery::new(game, &index).player_ids_starting_from(player)
+        };
+
+        for pid in player_ids {
             for est in game.builds[pid].establishments.clone() {
                 let coinc = est.pos.as_set();
 
@@ -430,7 +412,7 @@ impl GameController {
     }
 
     fn execute_seven_discards(&mut self, player: PlayerId) {
-        for pid in self.game.player_ids_starting_from(player) {
+        for pid in GameQuery::new(&self.game, &self.index).player_ids_starting_from(player) {
             let total_cards = self.game.players.get(pid).resources().total();
             if total_cards <= 7 {
                 continue;
@@ -485,11 +467,11 @@ impl GameController {
             }
 
             let candidates = self
-                .game
+                .query()
                 .players_on_hex(target_hex)
                 .into_iter()
                 .filter(|id| *id != player)
-                .filter(|id| !self.game.players.get(*id).resources().empty())
+                .filter(|id| !self.game.players.get(*id).resources().is_empty())
                 .collect::<Vec<_>>();
 
             let robbed_id = match candidates.as_slice() {
@@ -517,5 +499,9 @@ impl GameController {
                 }
             }
         }
+    }
+
+    fn query(&self) -> GameQuery<'_> {
+        GameQuery::new(&self.game, &self.index)
     }
 }

@@ -331,9 +331,9 @@ impl TerminalUi {
                 give: Self::parse_resource(give)?,
                 take: Self::parse_resource(take)?,
                 kind: match *kind {
-                    "common" => BankTradeKind::Common,
-                    "port-3" => BankTradeKind::PortUniversal,
-                    "port-2" => BankTradeKind::PortSpecial,
+                    "common" => BankTradeKind::BankGeneric,
+                    "port-3" => BankTradeKind::PortGeneric,
+                    "port-2" => BankTradeKind::PortSpecific,
                     _ => return None,
                 },
             }),
