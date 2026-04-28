@@ -1,7 +1,7 @@
 use catan_core::{
     agent::action::RegularAction,
     gameplay::{
-        game::view::PlayerDecisionContext,
+        game::view::{PlayerDecisionContext, PublicPlayerResources},
         primitives::{
             build::{Build, Establishment, EstablishmentType, Road},
             dev_card::{DevCardUsage, UsableDevCardKind},
@@ -100,6 +100,33 @@ pub fn legal_dev_card_usages(
     let active = context.private.dev_cards.active;
     let mut candidates = Vec::new();
 
+    if active.contains(UsableDevCardKind::Knight) {
+        for rob_hex in context.public.board.arrangement.hex_iter() {
+            if rob_hex == context.public.board_state.robber_pos {
+                continue;
+            }
+
+            let robbed_candidates = context
+                .public
+                .players_on_hex(rob_hex)
+                .into_iter()
+                .filter(|id| *id != player_id)
+                .filter(|id| public_resource_total(context, *id) > 0)
+                .collect::<Vec<_>>();
+
+            match robbed_candidates.as_slice() {
+                [] => candidates.push(DevCardUsage::Knight {
+                    rob_hex,
+                    robbed_id: None,
+                }),
+                ids => candidates.extend(ids.iter().map(|robbed_id| DevCardUsage::Knight {
+                    rob_hex,
+                    robbed_id: Some(*robbed_id),
+                })),
+            }
+        }
+    }
+
     if active.contains(UsableDevCardKind::YearOfPlenty) {
         for first in Resource::list() {
             for second in Resource::list() {
@@ -136,6 +163,23 @@ pub fn legal_dev_card_usages(
             state.use_dev_card(usage.clone(), player_id).is_ok()
         })
         .collect()
+}
+
+fn public_resource_total(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> u16 {
+    if player_id == context.actor {
+        return context.private.resources.total();
+    }
+
+    context
+        .public
+        .players
+        .iter()
+        .find(|player| player.player_id == player_id)
+        .map(|player| match player.resources {
+            PublicPlayerResources::Exact(resources) => resources.total(),
+            PublicPlayerResources::Total(total) => total,
+        })
+        .unwrap_or_default()
 }
 
 pub fn greedy_regular_action(

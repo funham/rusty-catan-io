@@ -114,7 +114,10 @@ impl DevCardData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DevCardUsage {
-    Knight(Hex),
+    Knight {
+        rob_hex: Hex,
+        robbed_id: Option<crate::gameplay::primitives::player::PlayerId>,
+    },
     YearOfPlenty([Resource; 2]),
     RoadBuild([Path; 2]),
     Monopoly(Resource),
@@ -123,7 +126,7 @@ pub enum DevCardUsage {
 impl DevCardUsage {
     pub fn card_kind(&self) -> UsableDevCardKind {
         match self {
-            DevCardUsage::Knight(_) => UsableDevCardKind::Knight,
+            DevCardUsage::Knight { .. } => UsableDevCardKind::Knight,
             DevCardUsage::YearOfPlenty(_) => UsableDevCardKind::YearOfPlenty,
             DevCardUsage::RoadBuild(_) => UsableDevCardKind::RoadBuild,
             DevCardUsage::Monopoly(_) => UsableDevCardKind::Monopoly,

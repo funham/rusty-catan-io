@@ -15,6 +15,7 @@ use catan_core::{
     },
     gameplay::primitives::{
         build::{Build, Establishment, EstablishmentType, Road},
+        dev_card::DevCardUsage,
         player::PlayerId,
         resource::{Resource, ResourceCollection},
         trade::{BankTrade, BankTradeKind},
@@ -79,12 +80,11 @@ fn handle_decision(request: DecisionRequestFrame) -> DecisionResponseFrame {
         }
         DecisionRequestFrame::InitAction(model) => {
             print_model(&model);
-            let _ = read_line("press enter to roll dice");
-            DecisionResponseFrame::InitAction(InitAction::RollDice)
+            DecisionResponseFrame::InitAction(read_init_action())
         }
         DecisionRequestFrame::PostDice(model) => {
             print_model(&model);
-            DecisionResponseFrame::PostDice(PostDiceAction::RegularAction(read_regular_action()))
+            DecisionResponseFrame::PostDice(read_post_dice_action())
         }
         DecisionRequestFrame::PostDevCard(model) => {
             print_model(&model);
@@ -149,8 +149,38 @@ fn print_model(model: &UiModel) {
         model.public.longest_road_owner, model.public.largest_army_owner
     );
     println!(
-        "commands: end | buy dev | build road h1 h2 | build settlement h1 h2 h3 | build city h1 h2 h3 | bank-trade give take common"
+        "commands: roll | end | buy dev | build road h1 h2 | build settlement h1 h2 h3 | build city h1 h2 h3 | bank-trade give take common"
     );
+    println!(
+        "dev cards: use knight hex [player|none] | use yop res1 res2 | use monopoly res | use roadbuild h1 h2 h3 h4"
+    );
+}
+
+fn read_init_action() -> InitAction {
+    loop {
+        let line = read_line("action [roll]: ");
+        let line = line.trim();
+        if line.is_empty() || line == "roll" {
+            return InitAction::RollDice;
+        }
+        if let Some(usage) = parse_dev_card_usage(line) {
+            return InitAction::UseDevCard(usage);
+        }
+        println!("could not parse action");
+    }
+}
+
+fn read_post_dice_action() -> PostDiceAction {
+    loop {
+        let line = read_line("action: ");
+        if let Some(usage) = parse_dev_card_usage(&line) {
+            return PostDiceAction::UseDevCard(usage);
+        }
+        if let Some(action) = parse_regular_action(&line) {
+            return PostDiceAction::RegularAction(action);
+        }
+        println!("could not parse action");
+    }
 }
 
 fn read_regular_action() -> RegularAction {
@@ -211,6 +241,38 @@ fn parse_bank_trade(line: &str) -> Option<BankTrade> {
                 _ => return None,
             },
         }),
+        _ => None,
+    }
+}
+
+fn parse_dev_card_usage(line: &str) -> Option<DevCardUsage> {
+    let parts = line.split_whitespace().collect::<Vec<_>>();
+    match parts.as_slice() {
+        ["use", "knight", hex] => Some(DevCardUsage::Knight {
+            rob_hex: HexIndex::spiral_to_hex(hex.parse().ok()?),
+            robbed_id: None,
+        }),
+        ["use", "knight", hex, "none"] => Some(DevCardUsage::Knight {
+            rob_hex: HexIndex::spiral_to_hex(hex.parse().ok()?),
+            robbed_id: None,
+        }),
+        ["use", "knight", hex, robbed_id] => Some(DevCardUsage::Knight {
+            rob_hex: HexIndex::spiral_to_hex(hex.parse().ok()?),
+            robbed_id: Some(robbed_id.parse().ok()?),
+        }),
+        ["use", "yop", first, second] | ["use", "year-of-plenty", first, second] => {
+            Some(DevCardUsage::YearOfPlenty([
+                parse_resource(first)?,
+                parse_resource(second)?,
+            ]))
+        }
+        ["use", "monopoly", resource] => Some(DevCardUsage::Monopoly(parse_resource(resource)?)),
+        ["use", "roadbuild", h1, h2, h3, h4] | ["use", "road-build", h1, h2, h3, h4] => {
+            Some(DevCardUsage::RoadBuild([
+                path_from_tokens(h1, h2)?,
+                path_from_tokens(h3, h4)?,
+            ]))
+        }
         _ => None,
     }
 }
