@@ -458,6 +458,10 @@ impl GameController {
                 let coinc = est.pos.as_set();
 
                 for hex in coinc.intersection(&hexes) {
+                    if *hex == game.board_state.robber_pos {
+                        continue;
+                    }
+
                     match game.board.arrangement[*hex] {
                         Tile::Resource { resource, .. } => {
                             let _ = game.transfer_from_bank(
@@ -583,5 +587,64 @@ impl GameController {
 
     fn query(&self) -> GameQuery<'_> {
         GameQuery::new(&self.game, &self.index)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GameController;
+    use crate::gameplay::{
+        game::init::GameInitializationState,
+        game::state::GameState,
+        primitives::{Tile, build::EstablishmentType},
+    };
+    use crate::topology::Hex;
+
+    fn game_with_settlement_on_numbered_hex() -> (GameState, Hex, crate::math::dice::DiceVal) {
+        let mut init = GameInitializationState::default();
+        let (target_hex, target_num) = init
+            .board
+            .arrangement
+            .hex_enum_iter()
+            .find_map(|(hex, tile)| match tile {
+                Tile::Resource { number, .. } => Some((hex, number)),
+                Tile::Desert => None,
+                Tile::River { .. } => None,
+            })
+            .expect("default board should include resource tiles");
+
+        let (settlement, road) = init
+            .builds
+            .query()
+            .possible_initial_placements(&init.board, 0)
+            .into_iter()
+            .find(|(settlement, _)| settlement.pos.as_set().contains(&target_hex))
+            .expect("target resource hex should have a legal adjacent settlement");
+
+        assert_eq!(settlement.stage, EstablishmentType::Settlement);
+        init.builds
+            .try_init_place(0, road, settlement)
+            .expect("generated initial placement should be valid");
+
+        (init.finish(), target_hex, target_num)
+    }
+
+    #[test]
+    fn harvest_pays_resources_without_robber() {
+        let (mut game, _, target_num) = game_with_settlement_on_numbered_hex();
+
+        GameController::execute_harvesting(&mut game, 0, target_num);
+
+        assert_eq!(game.players.get(0).resources().total(), 1);
+    }
+
+    #[test]
+    fn robber_blocks_resource_harvest() {
+        let (mut game, target_hex, target_num) = game_with_settlement_on_numbered_hex();
+        game.board_state.robber_pos = target_hex;
+
+        GameController::execute_harvesting(&mut game, 0, target_num);
+
+        assert_eq!(game.players.get(0).resources().total(), 0);
     }
 }
