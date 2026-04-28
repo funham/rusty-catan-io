@@ -153,7 +153,7 @@ fn spawn_terminal(exe: &Path, socket_path: &Path, role_arg: &str) -> Result<(), 
 
     if cfg!(target_os = "macos") {
         let command = format!(
-            "cd {} && RUST_LOG=${{RUST_LOG:-info}} {} cli-child --socket {} --role {}; exit",
+            "cd {} && RUST_LOG=${{RUST_LOG:-info}} {} cli-child --socket {} --role {}; echo; echo '[catan cli child exited - press enter to close]'; read _",
             shell_quote(
                 std::env::current_dir()
                     .map_err(|err| format!("failed to read current dir: {err}"))?
@@ -178,7 +178,7 @@ fn spawn_terminal(exe: &Path, socket_path: &Path, role_arg: &str) -> Result<(), 
 
     if cfg!(target_os = "linux") {
         let command = format!(
-            "RUST_LOG=${{RUST_LOG:-info}} {} cli-child --socket {} --role {}",
+            "RUST_LOG=${{RUST_LOG:-info}} {} cli-child --socket {} --role {}; echo; echo '[catan cli child exited - press enter to close]'; read _",
             shell_quote(exe),
             shell_quote(socket),
             shell_quote(role_arg),

@@ -25,13 +25,15 @@ use catan_core::{
             },
         },
         primitives::{
+            PortKind, Tile,
             bank::DeckFullnessLevel,
-            build::BoardBuildData,
+            build::{Establishment, Road},
             dev_card::{DevCardData, UsableDevCardCollection},
             player::PlayerId,
             resource::{ResourceCollection, ResourceMap},
         },
     },
+    topology::Path,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
@@ -96,13 +98,28 @@ pub struct UiModel {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiPublicGame {
-    pub board: BoardLayout,
+    pub board: UiBoard,
     pub board_state: BoardState,
     pub bank: UiPublicBank,
     pub players: Vec<UiPublicPlayer>,
-    pub builds: BoardBuildData,
+    pub builds: Vec<UiPlayerBuilds>,
     pub longest_road_owner: Option<PlayerId>,
     pub largest_army_owner: Option<PlayerId>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiPlayerBuilds {
+    pub player_id: PlayerId,
+    pub establishments: Vec<Establishment>,
+    pub roads: Vec<Road>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiBoard {
+    pub n_players: usize,
+    pub field_radius: u8,
+    pub tiles: Vec<Tile>,
+    pub ports: Vec<(Path, PortKind)>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -304,6 +321,17 @@ impl PlayerRuntime for RemoteCliAgent {
     }
 }
 
+impl Drop for RemoteCliAgent {
+    fn drop(&mut self) {
+        let _ = write_frame(
+            &mut self.stream,
+            &HostToCli::Shutdown {
+                reason: "host dropped remote CLI agent".to_owned(),
+            },
+        );
+    }
+}
+
 pub struct RemoteCliObserver {
     kind: ObserverKind,
     stream: UnixStream,
@@ -334,6 +362,17 @@ impl GameObserver for RemoteCliObserver {
             &HostToCli::Event {
                 event: event.clone(),
                 view: model,
+            },
+        );
+    }
+}
+
+impl Drop for RemoteCliObserver {
+    fn drop(&mut self) {
+        let _ = write_frame(
+            &mut self.stream,
+            &HostToCli::Shutdown {
+                reason: "host dropped remote CLI observer".to_owned(),
             },
         );
     }
@@ -385,7 +424,7 @@ impl UiModel {
 impl UiPublicGame {
     fn from_public(public: &PublicGameView<'_>) -> Self {
         Self {
-            board: public.board.clone(),
+            board: UiBoard::from_board(public.board),
             board_state: *public.board_state,
             bank: UiPublicBank::from_public(&public.bank),
             players: public
@@ -410,9 +449,33 @@ impl UiPublicGame {
                     },
                 })
                 .collect(),
-            builds: public.builds.clone(),
+            builds: public
+                .builds
+                .players_indexed()
+                .map(|(player_id, builds)| UiPlayerBuilds {
+                    player_id,
+                    establishments: builds.establishments.iter().copied().collect(),
+                    roads: builds.roads.iter().collect(),
+                })
+                .collect(),
             longest_road_owner: public.longest_road_owner,
             largest_army_owner: public.largest_army_owner,
+        }
+    }
+}
+
+impl UiBoard {
+    fn from_board(board: &BoardLayout) -> Self {
+        Self {
+            n_players: board.n_players,
+            field_radius: board.arrangement.field_radius,
+            tiles: board.arrangement.iter().collect(),
+            ports: board
+                .arrangement
+                .ports()
+                .iter()
+                .map(|(path, port)| (*path, *port))
+                .collect(),
         }
     }
 }
@@ -470,7 +533,8 @@ fn expect_ready(stream: &mut UnixStream) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{read_frame, write_frame};
+    use super::{CliRole, HostToCli, UiBoard, UiModel, read_frame, write_frame};
+    use catan_core::gameplay::game::init::GameInitializationState;
 
     #[test]
     fn frame_round_trip() {
@@ -485,5 +549,26 @@ mod tests {
         let bytes = ((16 * 1024 * 1024 + 1) as u32).to_be_bytes().to_vec();
         let err = read_frame::<String>(&mut bytes.as_slice()).unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn ui_board_serializes_to_json() {
+        let state = GameInitializationState::default().finish();
+        let board = UiBoard::from_board(&state.board);
+        let index = catan_core::gameplay::game::index::GameIndex::rebuild(&state);
+        let visibility = catan_core::gameplay::game::view::VisibilityConfig::default();
+        let factory = catan_core::gameplay::game::view::ContextFactory {
+            state: &state,
+            index: &index,
+            visibility: &visibility,
+        };
+        let model = UiModel::from_decision(&factory.player_decision_context(0, None));
+        let msg = HostToCli::Hello {
+            role: CliRole::Spectator,
+        };
+
+        serde_json::to_vec(&board).unwrap();
+        serde_json::to_vec(&model).unwrap();
+        serde_json::to_vec(&msg).unwrap();
     }
 }

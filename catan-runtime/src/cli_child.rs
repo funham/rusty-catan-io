@@ -37,8 +37,16 @@ pub fn run(socket: &FsPath, _role: &str) -> Result<(), String> {
     }
 
     loop {
-        let msg = read_frame::<HostToCli>(&mut stream)
-            .map_err(|err| format!("failed to read host frame: {err}"))?;
+        let msg = match read_frame::<HostToCli>(&mut stream) {
+            Ok(msg) => msg,
+            Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => {
+                return Err(
+                    "host closed the CLI socket without a shutdown message; check the host terminal for a panic or startup error"
+                        .to_owned(),
+                );
+            }
+            Err(err) => return Err(format!("failed to read host frame: {err}")),
+        };
         match msg {
             HostToCli::Hello { .. } => {}
             HostToCli::Shutdown { reason } => {
