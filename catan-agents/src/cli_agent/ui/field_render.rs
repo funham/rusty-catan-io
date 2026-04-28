@@ -233,7 +233,9 @@ impl FieldRenderer {
                     self.draw_hex_attr(hex, HexAttr::Resource(resource));
                 }
                 Tile::Desert => {}
-                _ => todo!(),
+                Tile::River { number } => {
+                    self.draw_hex_attr(hex, HexAttr::TileNum(number.into()));
+                }
             }
         }
         self

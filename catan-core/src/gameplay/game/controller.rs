@@ -483,7 +483,7 @@ impl GameController {
                             );
                         }
                         Tile::Desert => {}
-                        Tile::River { .. } => todo!(),
+                        Tile::River { .. } => {}
                     }
                 }
             }
