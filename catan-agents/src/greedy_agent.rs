@@ -12,20 +12,22 @@ use catan_core::{
     },
 };
 
+use crate::legal;
+
 #[derive(Debug, Default)]
-pub struct LazyAgent {
+pub struct GreedyAgent {
     id: PlayerId,
 }
 
-impl LazyAgent {
+impl GreedyAgent {
     pub fn new(id: PlayerId) -> Self {
         Self { id }
     }
 }
 
-impl PlayerNotification for LazyAgent {}
+impl PlayerNotification for GreedyAgent {}
 
-impl PlayerRuntime for LazyAgent {
+impl PlayerRuntime for GreedyAgent {
     fn player_id(&self) -> PlayerId {
         self.id
     }
@@ -46,20 +48,34 @@ impl PlayerRuntime for LazyAgent {
         }
     }
 
-    fn init_action(&mut self, _context: PlayerDecisionContext<'_>) -> InitAction {
-        InitAction::RollDice
+    fn init_action(&mut self, context: PlayerDecisionContext<'_>) -> InitAction {
+        if let Some(usage) = legal::legal_dev_card_usages(&context, self.id)
+            .into_iter()
+            .next()
+        {
+            InitAction::UseDevCard(usage)
+        } else {
+            InitAction::RollDice
+        }
     }
 
-    fn after_dice_action(&mut self, _context: PlayerDecisionContext<'_>) -> PostDiceAction {
-        PostDiceAction::RegularAction(RegularAction::EndMove)
+    fn after_dice_action(&mut self, context: PlayerDecisionContext<'_>) -> PostDiceAction {
+        if let Some(usage) = legal::legal_dev_card_usages(&context, self.id)
+            .into_iter()
+            .next()
+        {
+            PostDiceAction::UseDevCard(usage)
+        } else {
+            PostDiceAction::RegularAction(legal::greedy_regular_action(&context, self.id))
+        }
     }
 
     fn after_dev_card_action(&mut self, _context: PlayerDecisionContext<'_>) -> PostDevCardAction {
         PostDevCardAction::RollDice
     }
 
-    fn regular_action(&mut self, _context: PlayerDecisionContext<'_>) -> RegularAction {
-        RegularAction::EndMove
+    fn regular_action(&mut self, context: PlayerDecisionContext<'_>) -> RegularAction {
+        legal::greedy_regular_action(&context, self.id)
     }
 
     fn move_robbers(&mut self, context: PlayerDecisionContext<'_>) -> MoveRobbersAction {

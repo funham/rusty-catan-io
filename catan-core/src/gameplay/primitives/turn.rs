@@ -47,6 +47,10 @@ impl<CycleType> GameTurn<CycleType> {
     pub fn get_turn_index(&self) -> usize {
         self.turn_index as usize
     }
+
+    pub fn get_turns_played(&self) -> u64 {
+        self.rounds_played as u64 * self.n_players as u64 + self.turn_index as u64
+    }
 }
 
 impl GameTurn<RegularCycle> {

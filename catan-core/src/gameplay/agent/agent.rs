@@ -1,10 +1,7 @@
 use crate::{
     agent::action::{ChoosePlayerToRobAction, DropHalfAction, InitStageAction, MoveRobbersAction},
     gameplay::{
-        game::{
-            event::PlayerNotification,
-            view::PlayerDecisionContext,
-        },
+        game::{event::PlayerNotification, view::PlayerDecisionContext},
         primitives::player::PlayerId,
     },
 };
@@ -20,7 +17,10 @@ pub trait PlayerRuntime: PlayerNotification {
     fn after_dev_card_action(&mut self, context: PlayerDecisionContext<'_>) -> PostDevCardAction;
     fn regular_action(&mut self, context: PlayerDecisionContext<'_>) -> RegularAction;
     fn move_robbers(&mut self, context: PlayerDecisionContext<'_>) -> MoveRobbersAction;
-    fn choose_player_to_rob(&mut self, context: PlayerDecisionContext<'_>) -> ChoosePlayerToRobAction;
+    fn choose_player_to_rob(
+        &mut self,
+        context: PlayerDecisionContext<'_>,
+    ) -> ChoosePlayerToRobAction;
     fn answer_trade(&mut self, context: PlayerDecisionContext<'_>) -> TradeAnswer;
     fn drop_half(&mut self, context: PlayerDecisionContext<'_>) -> DropHalfAction;
 }

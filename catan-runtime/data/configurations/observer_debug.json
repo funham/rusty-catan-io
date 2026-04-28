@@ -1,11 +1,13 @@
 {
   "players": [
-    { "kind": "cli" },
     { "kind": "lazy" },
     { "kind": "greedy" },
+    { "kind": "lazy" },
     { "kind": "greedy" }
   ],
-  "observers": [],
+  "observers": [
+    { "kind": "cli_omniscient" }
+  ],
   "field": { "kind": "default" },
   "dice": { "kind": "random" },
   "limits": { "max_turns": 500 }

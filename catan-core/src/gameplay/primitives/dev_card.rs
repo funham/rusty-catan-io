@@ -79,7 +79,14 @@ pub struct DevCardDataPlayingError;
 
 impl DevCardData {
     pub fn reset_queue(&mut self) {
-        // self.active.add(self.queued);
+        for kind in [
+            UsableDevCardKind::Knight,
+            UsableDevCardKind::YearOfPlenty,
+            UsableDevCardKind::RoadBuild,
+            UsableDevCardKind::Monopoly,
+        ] {
+            self.active[kind] += self.queued[kind];
+        }
         self.queued = UsableDevCardCollection::default();
     }
 

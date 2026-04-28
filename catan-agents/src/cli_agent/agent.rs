@@ -5,17 +5,19 @@ use std::{
 
 use catan_core::{
     agent::{
-        Agent,
-        action::{InitAction, PostDevCardAction, PostDiceAction, RegularAction, TradeAnswer},
+        action::{
+            ChoosePlayerToRobAction, DropHalfAction, InitAction, InitStageAction,
+            MoveRobbersAction, PostDevCardAction, PostDiceAction, RegularAction, TradeAnswer,
+        },
+        agent::PlayerRuntime,
     },
     gameplay::{
         game::{
-            event::{GameEvent, PlayerContext, PlayerObserver},
-            view::{GameView, PrivatePlayerData},
+            event::{GameEvent, PlayerNotification},
+            view::{PlayerDecisionContext, PlayerNotificationContext},
         },
         primitives::{
             build::{Build, Establishment, EstablishmentType, Road},
-            dev_card::{UsableDevCardCollection, UsableDevCardKind},
             player::PlayerId,
             resource::{Resource, ResourceCollection},
             trade::{BankTrade, BankTradeKind},
@@ -23,8 +25,6 @@ use catan_core::{
     },
     topology::{Hex, HexIndex, Intersection, Path, repr::Dual},
 };
-
-use crate::cli_agent::ui;
 
 #[derive(Debug, Default)]
 struct TerminalUi;
@@ -49,238 +49,123 @@ impl CliAgent {
     }
 }
 
-impl PlayerObserver for CliAgent {
+impl PlayerNotification for CliAgent {
+    fn on_event(&mut self, event: &GameEvent, context: PlayerNotificationContext<'_>) {
+        let _guard = self.terminal.inner.lock().expect("terminal mutex poisoned");
+        TerminalUi::print_notification(event, &context);
+    }
+}
+
+impl PlayerRuntime for CliAgent {
     fn player_id(&self) -> PlayerId {
         self.player_id
     }
 
-    fn on_event(
-        &mut self,
-        event: &GameEvent,
-        context: &catan_core::gameplay::game::event::PlayerContext,
-    ) {
-        let _ = event;
-        let _ = context;
-
-        todo!("implement PlayerObserver for cli agent")
-    }
-}
-
-impl Agent for CliAgent {
-    fn init_stage_action(
-        &mut self,
-        context: &catan_core::gameplay::game::event::PlayerContext,
-    ) -> catan_core::agent::action::InitStageAction {
-        todo!()
+    fn init_stage_action(&mut self, context: PlayerDecisionContext<'_>) -> InitStageAction {
+        let _guard = self.terminal.inner.lock().expect("terminal mutex poisoned");
+        TerminalUi::print_decision_context("Initial placement", &context);
+        InitStageAction {
+            establishment_position: TerminalUi::read_intersection("settlement (h1 h2 h3): "),
+            road: Road {
+                pos: TerminalUi::read_path("road (h1 h2): "),
+            },
+        }
     }
 
-    fn init_action(
-        &mut self,
-        context: &catan_core::gameplay::game::event::PlayerContext,
-    ) -> InitAction {
-        todo!()
+    fn init_action(&mut self, context: PlayerDecisionContext<'_>) -> InitAction {
+        let _guard = self.terminal.inner.lock().expect("terminal mutex poisoned");
+        TerminalUi::print_decision_context("Before dice", &context);
+        InitAction::RollDice
     }
 
-    fn after_dice_action(
-        &mut self,
-        context: &catan_core::gameplay::game::event::PlayerContext,
-    ) -> PostDiceAction {
-        todo!()
+    fn after_dice_action(&mut self, context: PlayerDecisionContext<'_>) -> PostDiceAction {
+        let _guard = self.terminal.inner.lock().expect("terminal mutex poisoned");
+        TerminalUi::print_decision_context("After dice", &context);
+        PostDiceAction::RegularAction(TerminalUi::read_regular_action())
     }
 
-    fn after_dev_card_action(
-        &mut self,
-        context: &catan_core::gameplay::game::event::PlayerContext,
-    ) -> PostDevCardAction {
-        todo!()
+    fn after_dev_card_action(&mut self, _context: PlayerDecisionContext<'_>) -> PostDevCardAction {
+        PostDevCardAction::RollDice
     }
 
-    fn regular_action(
-        &mut self,
-        context: &catan_core::gameplay::game::event::PlayerContext,
-    ) -> RegularAction {
-        todo!()
+    fn regular_action(&mut self, context: PlayerDecisionContext<'_>) -> RegularAction {
+        let _guard = self.terminal.inner.lock().expect("terminal mutex poisoned");
+        TerminalUi::print_decision_context("Action", &context);
+        TerminalUi::read_regular_action()
     }
 
-    fn move_robbers(
-        &mut self,
-        context: &catan_core::gameplay::game::event::PlayerContext,
-    ) -> catan_core::agent::action::MoveRobbersAction {
-        todo!()
+    fn move_robbers(&mut self, context: PlayerDecisionContext<'_>) -> MoveRobbersAction {
+        let _guard = self.terminal.inner.lock().expect("terminal mutex poisoned");
+        TerminalUi::print_decision_context("Move robber", &context);
+        MoveRobbersAction(TerminalUi::read_hex("robber hex: "))
     }
 
     fn choose_player_to_rob(
         &mut self,
-        context: &catan_core::gameplay::game::event::PlayerContext,
-    ) -> catan_core::agent::action::ChoosePlayerToRobAction {
-        todo!()
+        context: PlayerDecisionContext<'_>,
+    ) -> ChoosePlayerToRobAction {
+        let _guard = self.terminal.inner.lock().expect("terminal mutex poisoned");
+        TerminalUi::print_decision_context("Choose player to rob", &context);
+        ChoosePlayerToRobAction(TerminalUi::read_player_id("player id: "))
     }
 
-    fn answer_trade(
-        &mut self,
-        context: &catan_core::gameplay::game::event::PlayerContext,
-    ) -> TradeAnswer {
-        todo!()
+    fn answer_trade(&mut self, _context: PlayerDecisionContext<'_>) -> TradeAnswer {
+        TradeAnswer::Declined
     }
 
-    fn drop_half(
-        &mut self,
-        context: &catan_core::gameplay::game::event::PlayerContext,
-    ) -> catan_core::agent::action::DropHalfAction {
-        todo!()
+    fn drop_half(&mut self, context: PlayerDecisionContext<'_>) -> DropHalfAction {
+        let _guard = self.terminal.inner.lock().expect("terminal mutex poisoned");
+        TerminalUi::print_decision_context("Discard half", &context);
+        DropHalfAction(TerminalUi::read_resource_collection(
+            "drop brick wood wheat sheep ore: ",
+        ))
     }
-}
-
-impl SharedTerminalUi {
-    // pub fn prompt(&self, request: AgentRequest) -> AgentAction {
-    //     let _guard = self.inner.lock().expect("terminal mutex poisoned");
-    //     TerminalUi::prompt_locked(request)
-    // }
 }
 
 impl TerminalUi {
-    // fn prompt_locked(request: AgentRequest) -> AgentAction {
-    //     match request {
-    //         AgentRequest::Init(context) => {
-    //             Self::print_context("Init", &context);
-    //             loop {
-    //                 let line = Self::read_line("command [throw-dice]: ");
-    //                 match line.as_str() {
-    //                     "throw-dice" | "roll" | "" => {
-    //                         return AgentAction::Init(InitAction::RollDice);
-    //                     }
-    //                     _ => println!("supported commands: throw-dice"),
-    //                 }
-    //             }
-    //         }
-    //         AgentRequest::AfterDevCard(context) => {
-    //             Self::print_context("AfterDevCard", &context);
-    //             AgentAction::AfterDevCard(PostDevCardAction::RollDice)
-    //         }
-    //         AgentRequest::AfterDiceThrow(context) => {
-    //             Self::print_context("AfterDiceThrow", &context);
-    //             AgentAction::AfterDice(Self::read_post_dice_action())
-    //         }
-    //         AgentRequest::Rest(context) => {
-    //             Self::print_context("Rest", &context);
-    //             AgentAction::Rest(Self::read_rest_action())
-    //         }
-    //         AgentRequest::RobHex(context) => {
-    //             Self::print_context("RobHex", &context);
-    //             AgentAction::RobHex(Self::read_hex("robber hex (#hex): "))
-    //         }
-    //         AgentRequest::RobPlayer(context) => {
-    //             Self::print_context("RobPlayer", &context);
-    //             AgentAction::RobPlayer(Self::read_player_id("robbed player id: "))
-    //         }
-    //         AgentRequest::Initialization(context) => {
-    //             Self::print_context("Initialization", &context);
-    //             let establishment = Establishment {
-    //                 pos: Self::read_intersection("settlement (h1, h2, h3): "),
-    //                 stage: EstablishmentType::Settlement,
-    //             };
-    //             let road = Road {
-    //                 pos: Self::read_path("road (h1, h2): "),
-    //             };
-    //             AgentAction::Initialization {
-    //                 establishment,
-    //                 road,
-    //             }
-    //         }
-    //         AgentRequest::AnswerTrade { context, trade } => {
-    //             Self::print_context("AnswerTrade", &context);
-    //             println!("trade offer give={:?} take={:?}", trade.give, trade.take);
-    //             let line = Self::read_line("answer [accept/decline]: ");
-    //             let action = match line.as_str() {
-    //                 "accept" | "yes" | "y" => TradeAnswer::Accepted,
-    //                 _ => TradeAnswer::Declined,
-    //             };
-    //             AgentAction::AnswerTrade(action)
-    //         }
-    //         AgentRequest::DropHalf(context) => {
-    //             Self::print_context("DropHalf", &context);
-    //             println!("enter five counts in order: brick wood wheat sheep ore");
-    //             AgentAction::DropHalf(Self::read_resource_collection("drop counts: "))
-    //         }
-    //     }
-    // }
+    fn print_notification(event: &GameEvent, _context: &PlayerNotificationContext<'_>) {
+        println!("event: {event:?}");
+    }
 
-    fn print_context(label: &str, context: &PlayerContext) {
-        let mut renderer = ui::field_render::FieldRenderer::new();
-        renderer.draw_context(context);
+    fn print_decision_context(label: &str, context: &PlayerDecisionContext<'_>) {
+        let mut renderer = crate::cli_agent::ui::field_render::FieldRenderer::new();
+        renderer.draw_context(&context.public);
         renderer.render();
 
-        // TODO: colorize
         println!("\n== {label} ==");
-        println!("player: {:?}", context.player_data);
-        println!("resources: {:?}", context.player_data.resources);
-
-        let print_dev_card_collection = |label: &str, deck: UsableDevCardCollection| {
-            println!(
-                "{}: | Kn: {} | YoP: {} | RB: {} | M: {} |",
-                label,
-                deck[UsableDevCardKind::Knight],
-                deck[UsableDevCardKind::YearOfPlenty],
-                deck[UsableDevCardKind::RoadBuild],
-                deck[UsableDevCardKind::Monopoly]
-            );
-        };
-
-        println!("dev cards:");
-        println!("-------------------------------------------");
-        print_dev_card_collection("Active: ", context.player_data.dev_cards.active);
-        print_dev_card_collection("Queued: ", context.player_data.dev_cards.queued);
-        print_dev_card_collection("Used  : ", context.player_data.dev_cards.used);
-        println!("-------------------------------------------");
-
-        println!("robber: {:?}", context.view.field.robber_pos);
-        for (id, data) in context.view.players.iter().enumerate() {
-            println!(
-                "opponent {} => resource cards: {}, active dev: {}, queued dev: {}",
-                id, data.resources, data.dev_cards.active, data.dev_cards.queued,
-            );
+        println!("player: {}", context.actor);
+        println!("resources: {}", context.private.resources);
+        println!("robber: {:?}", context.public.board_state.robber_pos);
+        for player in &context.public.players {
+            println!("player {} => {:?}", player.player_id, player.resources);
         }
     }
 
-    fn read_post_dice_action() -> PostDiceAction {
-        loop {
-            let line = Self::read_line(
-                "command [end | build road ... | build settlement ... | build city ... | bank-trade give take kind]: ",
-            );
-
-            if line == "end" || line.is_empty() {
-                return PostDiceAction::RegularAction(RegularAction::EndMove);
-            }
-
-            if let Some(build) = Self::parse_build(&line) {
-                return PostDiceAction::RegularAction(RegularAction::Build(build));
-            }
-
-            if let Some(trade) = Self::parse_bank_trade(&line) {
-                return PostDiceAction::RegularAction(RegularAction::TradeWithBank(trade));
-            }
-
-            println!("could not parse action");
+    pub fn parse_regular_action(line: &str) -> Option<RegularAction> {
+        let line = line.trim();
+        if line == "end" || line.is_empty() {
+            return Some(RegularAction::EndMove);
         }
+        if line == "buy dev" || line == "buy-dev" {
+            return Some(RegularAction::BuyDevCard);
+        }
+        if let Some(build) = Self::parse_build(line) {
+            return Some(RegularAction::Build(build));
+        }
+        if let Some(trade) = Self::parse_bank_trade(line) {
+            return Some(RegularAction::TradeWithBank(trade));
+        }
+        None
     }
 
-    fn read_rest_action() -> RegularAction {
+    fn read_regular_action() -> RegularAction {
         loop {
             let line = Self::read_line(
-                "command [end | build road ... | build settlement ... | build city ... | bank-trade give take kind]: ",
+                "command [end | buy dev | build road ... | build settlement ... | build city ... | bank-trade give take kind]: ",
             );
-            if line == "end" || line.is_empty() {
-                return RegularAction::EndMove;
+            if let Some(action) = Self::parse_regular_action(&line) {
+                return action;
             }
-
-            if let Some(build) = Self::parse_build(&line) {
-                return RegularAction::Build(build);
-            }
-
-            if let Some(trade) = Self::parse_bank_trade(&line) {
-                return RegularAction::TradeWithBank(trade);
-            }
-
             println!("could not parse action");
         }
     }
@@ -361,9 +246,13 @@ impl TerminalUi {
                 .collect::<Result<Vec<_>, _>>();
             match parts {
                 Ok(parts) if parts.len() == 5 => {
-                    return ResourceCollection::new(
-                        parts[0], parts[1], parts[2], parts[3], parts[4],
-                    );
+                    return ResourceCollection {
+                        brick: parts[0],
+                        wood: parts[1],
+                        wheat: parts[2],
+                        sheep: parts[3],
+                        ore: parts[4],
+                    };
                 }
                 _ => println!("expected five unsigned integers"),
             }
@@ -373,14 +262,10 @@ impl TerminalUi {
     fn read_hex(prompt: &str) -> Hex {
         loop {
             let line = Self::read_line(prompt);
-            let parts = line
-                .split_whitespace()
-                .map(str::parse::<i32>)
-                .collect::<Result<Vec<_>, _>>();
-            match parts {
-                Ok(parts) if parts.len() == 1 => return HexIndex::spiral_to_hex(parts[0] as usize),
-                _ => println!("expected spiral hex 0-based index (usize)"),
+            if let Ok(index) = line.parse::<usize>() {
+                return HexIndex::spiral_to_hex(index);
             }
+            println!("expected spiral hex 0-based index");
         }
     }
 
@@ -389,33 +274,21 @@ impl TerminalUi {
             let line = Self::read_line(prompt);
             let parts = line
                 .split_whitespace()
-                .map(str::parse::<i32>)
+                .map(str::parse::<usize>)
                 .collect::<Result<Vec<_>, _>>();
-            match parts {
-                Ok(parts) if parts.len() == 2 => {
-                    let result_canon = Path::try_from((
-                        HexIndex::spiral_to_hex(parts[0] as usize),
-                        HexIndex::spiral_to_hex(parts[1] as usize),
-                    ));
-
-                    let result_dual = Path::<Dual>::try_from((
-                        HexIndex::spiral_to_hex(parts[0] as usize),
-                        HexIndex::spiral_to_hex(parts[1] as usize),
-                    ));
-
-                    match (result_canon, result_dual) {
-                        (Ok(path), _) => {
-                            return path;
-                        }
-                        (_, Ok(path)) => {
-                            return path.canon();
-                        }
-                        _ => {}
-                    }
+            if let Ok(parts) = parts
+                && parts.len() == 2
+            {
+                let h1 = HexIndex::spiral_to_hex(parts[0]);
+                let h2 = HexIndex::spiral_to_hex(parts[1]);
+                if let Ok(path) = Path::try_from((h1, h2)) {
+                    return path;
                 }
-                _ => {}
+                if let Ok(path) = Path::<Dual>::try_from((h1, h2)) {
+                    return path.canon();
+                }
             }
-            println!("expected adjacent hex pair: h1 h2 or a dual representation");
+            println!("expected adjacent hex pair");
         }
     }
 
@@ -424,28 +297,19 @@ impl TerminalUi {
             let line = Self::read_line(prompt);
             let parts = line
                 .split_whitespace()
-                .map(str::parse::<i32>)
+                .map(str::parse::<usize>)
                 .collect::<Result<Vec<_>, _>>();
-            match parts {
-                Ok(parts) if parts.len() == 3 => {
-                    let result = Intersection::try_from([
-                        HexIndex::spiral_to_hex(parts[0] as usize),
-                        HexIndex::spiral_to_hex(parts[1] as usize),
-                        HexIndex::spiral_to_hex(parts[2] as usize),
-                    ]);
-                    match result {
-                        Ok(intersection) => return intersection,
-                        Err(_) => {
-                            log::error!("hexes are not adjacent");
-                        }
-                    }
-                    if let Ok(intersection) = result {
-                        return intersection;
-                    }
-                }
-                _ => {}
+            if let Ok(parts) = parts
+                && parts.len() == 3
+                && let Ok(intersection) = Intersection::try_from([
+                    HexIndex::spiral_to_hex(parts[0]),
+                    HexIndex::spiral_to_hex(parts[1]),
+                    HexIndex::spiral_to_hex(parts[2]),
+                ])
+            {
+                return intersection;
             }
-            println!("expected adjacent hex triplet: h1 h2 h3");
+            println!("expected adjacent hex triplet");
         }
     }
 

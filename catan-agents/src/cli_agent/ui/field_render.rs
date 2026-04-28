@@ -1,6 +1,6 @@
 use catan_core::{
     gameplay::{
-        game::event::PlayerContext,
+        game::view::PublicGameView,
         primitives::{Tile, build::EstablishmentType, player::PlayerId, resource::Resource},
     },
     topology::{Hex, HexIndex, Intersection, Path},
@@ -219,14 +219,14 @@ impl FieldRenderer {
         self.fmt.clear();
     }
 
-    pub fn draw_skeleton(&mut self, _context: &PlayerContext) -> &mut Self {
+    pub fn draw_skeleton(&mut self, _view: &PublicGameView<'_>) -> &mut Self {
         // TODO: ports
         self.draw_field(ColorSpec::new().set_dimmed(true).clone());
         self
     }
 
-    pub fn draw_tile_info(&mut self, context: &PlayerContext) -> &mut Self {
-        for (hex, tile) in context.view.field.arrangement.hex_enum_iter() {
+    pub fn draw_tile_info(&mut self, view: &PublicGameView<'_>) -> &mut Self {
+        for (hex, tile) in view.board.arrangement.hex_enum_iter() {
             match tile {
                 Tile::Resource { resource, number } => {
                     self.draw_hex_attr(hex, HexAttr::TileNum(number.into()));
@@ -239,13 +239,13 @@ impl FieldRenderer {
         self
     }
 
-    pub fn draw_robber(&mut self, context: &PlayerContext) -> &mut Self {
-        self.draw_hex_attr(context.view.field.robber_pos, HexAttr::Robber);
+    pub fn draw_robber(&mut self, view: &PublicGameView<'_>) -> &mut Self {
+        self.draw_hex_attr(view.board_state.robber_pos, HexAttr::Robber);
         self
     }
 
-    pub fn draw_builds(&mut self, context: &PlayerContext) -> &mut Self {
-        for (id, player) in context.view.builds.players().iter().enumerate() {
+    pub fn draw_builds(&mut self, view: &PublicGameView<'_>) -> &mut Self {
+        for (id, player) in view.builds.players().iter().enumerate() {
             for road in player.roads.iter() {
                 self.draw_path_attr(
                     road.pos,
@@ -266,28 +266,38 @@ impl FieldRenderer {
         self
     }
 
-    pub fn draw_index(&mut self, context: &PlayerContext) -> &mut Self {
-        for hex in context.view.field.arrangement.hex_iter_with_ocean() {
+    pub fn draw_index(&mut self, view: &PublicGameView<'_>) -> &mut Self {
+        for hex in view.board.arrangement.hex_iter_with_ocean() {
             self.draw_hex_attr(hex, HexAttr::Index);
         }
         self
     }
 
-    pub fn draw_context(&mut self, context: &PlayerContext) {
+    pub fn draw_context(&mut self, view: &PublicGameView<'_>) {
         // render skeleton
-        self.draw_skeleton(context);
+        self.draw_skeleton(view);
 
         // render tile info
-        self.draw_tile_info(context);
+        self.draw_tile_info(view);
 
         // render hex indices
-        self.draw_index(context);
+        self.draw_index(view);
 
         // render robber
-        self.draw_robber(context);
+        self.draw_robber(view);
 
         // render builds
-        self.draw_builds(context);
+        self.draw_builds(view);
+    }
+
+    pub fn plain_lines(&self) -> Vec<String> {
+        (0..self.height)
+            .map(|y| {
+                let start = y * self.width;
+                let end = (y + 1) * self.width;
+                String::from_utf8_lossy(&self.buf.slice()[start..end]).into_owned()
+            })
+            .collect()
     }
 
     pub fn render(&self) {

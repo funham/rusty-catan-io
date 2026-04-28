@@ -1,8 +1,8 @@
+pub mod algorithm;
 pub mod common;
 pub mod gameplay;
 pub mod math;
 pub mod topology;
-pub mod algorithm;
 
 pub use gameplay::agent;
 
@@ -10,7 +10,7 @@ use crate::{
     gameplay::{
         agent::Agent,
         game::{
-            controller::{GameController, GameResult},
+            controller::{GameController, GameResult, RunOptions},
             init::GameInitializationState,
             state::GameState,
         },
@@ -47,5 +47,10 @@ impl GameRunner {
     pub fn run(self, dice: &mut dyn DiceRoller) -> GameResult {
         let mut controller = GameController::new(self.state, self.agents);
         controller.run(dice)
+    }
+
+    pub fn run_with_options(self, dice: &mut dyn DiceRoller, options: RunOptions) -> GameResult {
+        let mut controller = GameController::new(self.state, self.agents);
+        controller.run_with_options(dice, options)
     }
 }

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     gameplay::{
         field::FieldArrangement,
-        primitives::{Tile, PortKind, resource::Resource},
+        primitives::{PortKind, Tile, resource::Resource},
     },
     math::dice::DiceVal,
     topology::Path,
@@ -38,9 +38,7 @@ impl Serialize for FieldArrangement {
                 Tile::Resource { resource, number } => {
                     HexTypeJsonVal::Resource((resource, number.into()))
                 }
-                Tile::River { number } => {
-                    HexTypeJsonVal::Resource((Resource::Ore, number.into()))
-                }
+                Tile::River { number } => HexTypeJsonVal::Resource((Resource::Ore, number.into())),
             })
             .collect();
 

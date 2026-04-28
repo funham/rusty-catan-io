@@ -11,17 +11,32 @@ use crate::gameplay::game::index::GameIndex;
 use crate::gameplay::game::init::GameInitializationState;
 use crate::gameplay::game::query::GameQuery;
 use crate::gameplay::game::view::{ContextFactory, SearchFactory, VisibilityConfig};
+use crate::gameplay::primitives::Tile;
 use crate::gameplay::primitives::bank::BankResourceExchangeError;
 use crate::gameplay::primitives::build::{BuildingError, Establishment, EstablishmentType};
 use crate::gameplay::primitives::dev_card::DevCardUsage;
 use crate::gameplay::primitives::player::PlayerId;
 use crate::gameplay::primitives::turn::GameTurn;
-use crate::gameplay::primitives::Tile;
 use crate::{math::dice::DiceRoller, math::dice::DiceVal};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GameResult {
     Win(PlayerId),
-    Interrupted,
+    Interrupted { reason: String },
+    LimitReached { turns: u64 },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RunOptions {
+    pub max_turns: Option<u64>,
+}
+
+impl Default for RunOptions {
+    fn default() -> Self {
+        Self {
+            max_turns: Some(500),
+        }
+    }
 }
 
 enum TurnFlow {
@@ -152,6 +167,10 @@ impl GameController {
                 ObserverKind::Spectator => ObserverNotificationContext::Spectator {
                     public: factory.spectator_public_view(),
                 },
+                ObserverKind::Player(player_id) => ObserverNotificationContext::Player {
+                    public: factory.public_view(visibility.player_policy(player_id)),
+                    private: factory.private_view(player_id),
+                },
                 ObserverKind::Omniscient => ObserverNotificationContext::Omniscient {
                     public: factory.spectator_public_view(),
                     full: factory.omniscient_view(),
@@ -207,7 +226,26 @@ impl GameController {
     }
 
     pub fn run(&mut self, dice: &mut dyn DiceRoller) -> GameResult {
+        self.run_with_options(dice, RunOptions { max_turns: None })
+    }
+
+    pub fn run_with_options(
+        &mut self,
+        dice: &mut dyn DiceRoller,
+        options: RunOptions,
+    ) -> GameResult {
+        self.notify_observers(&GameEvent::GameStarted);
         loop {
+            let turn_no = self.game.turn.get_turns_played();
+            if let Some(max_turns) = options.max_turns
+                && turn_no >= max_turns
+            {
+                self.notify_observers(&GameEvent::GameInterrupted {
+                    reason: format!("turn limit reached ({max_turns})"),
+                });
+                return GameResult::LimitReached { turns: turn_no };
+            }
+
             if let Some(winner) = GameQuery::new(&self.game, &self.index).check_win_condition() {
                 self.notify_observers(&GameEvent::GameEnded { winner_id: winner });
                 return GameResult::Win(winner);
@@ -215,7 +253,11 @@ impl GameController {
 
             match self.handle_turn(dice) {
                 TurnFlow::Continue => unreachable!("turn handler should not yield Continue"),
-                TurnFlow::EndTurn => self.game.turn.next(),
+                TurnFlow::EndTurn => {
+                    let player_id = self.curr_player();
+                    self.notify_observers(&GameEvent::TurnEnded { player_id, turn_no });
+                    self.game.turn.next();
+                }
             }
         }
     }
@@ -227,6 +269,11 @@ impl GameController {
             .players
             .get_mut(current_player)
             .dev_cards_reset_queue();
+
+        self.notify_observers(&GameEvent::TurnStarted {
+            player_id: current_player,
+            turn_no: self.game.turn.get_turns_played(),
+        });
 
         self.handle_move_init(dice)
     }
@@ -252,7 +299,10 @@ impl GameController {
                     log::error!("{:?}", e);
                 } else {
                     self.index = GameIndex::rebuild(&self.game);
-                    self.notify_observers(&GameEvent::DevCardUsed(usage));
+                    self.notify_observers(&GameEvent::DevCardUsed {
+                        player_id: self.curr_player(),
+                        usage,
+                    });
                 }
                 self.handle_rest()
             }
@@ -268,7 +318,10 @@ impl GameController {
             log::error!("{:?}", e);
         } else {
             self.index = GameIndex::rebuild(&self.game);
-            self.notify_observers(&GameEvent::DevCardUsed(usage));
+            self.notify_observers(&GameEvent::DevCardUsed {
+                player_id: self.curr_player(),
+                usage,
+            });
         }
 
         let _ = self.request_post_dev_card_action(self.curr_player());
@@ -295,19 +348,26 @@ impl GameController {
             RegularAction::Build(build) => {
                 if let Ok(()) = self.execute_build(current_player, build) {
                     self.index = GameIndex::rebuild(&self.game);
-                    self.notify_observers(&GameEvent::Built(build));
+                    self.notify_observers(&GameEvent::Built {
+                        player_id: current_player,
+                        build,
+                    });
                 }
                 TurnFlow::Continue
             }
             RegularAction::TradeWithBank(trade) => {
                 if let Ok(()) = self.game.trade_with_bank(current_player, trade) {
-                    self.notify_observers(&GameEvent::Traded);
+                    self.notify_observers(&GameEvent::Traded {
+                        player_id: current_player,
+                    });
                 }
                 TurnFlow::Continue
             }
             RegularAction::BuyDevCard => {
                 if let Ok(()) = self.execute_buy_dev_card(current_player) {
-                    self.notify_observers(&GameEvent::DevCardBought);
+                    self.notify_observers(&GameEvent::DevCardBought {
+                        player_id: current_player,
+                    });
                 }
                 TurnFlow::Continue
             }
@@ -370,11 +430,18 @@ impl GameController {
             Into::<u8>::into(roll)
         );
 
-        self.notify_observers(&GameEvent::DiceRolled(roll));
+        self.notify_observers(&GameEvent::DiceRolled {
+            player_id: current_player,
+            value: roll,
+        });
 
         match roll {
             seven if seven == DiceVal::seven() => self.execute_seven(current_player),
             other => Self::execute_harvesting(&mut self.game, current_player, other),
+        }
+
+        if roll != DiceVal::seven() {
+            self.notify_observers(&GameEvent::ResourcesDistributed);
         }
     }
 
@@ -436,7 +503,13 @@ impl GameController {
                 }
 
                 match self.game.transfer_to_bank(dropped, pid) {
-                    Ok(()) => break,
+                    Ok(()) => {
+                        self.notify_observers(&GameEvent::PlayerDiscarded {
+                            player_id: pid,
+                            resources: dropped,
+                        });
+                        break;
+                    }
                     Err(BankResourceExchangeError::AccountIsShort { .. }) => {
                         log::warn!(
                             "Player#{} attempted to discard resources they do not possess: {}",
@@ -493,7 +566,14 @@ impl GameController {
             };
 
             match self.game.use_robbers(target_hex, player, robbed_id) {
-                Ok(()) => break,
+                Ok(()) => {
+                    self.notify_observers(&GameEvent::RobberMoved {
+                        player_id: player,
+                        hex: target_hex,
+                        robbed_id,
+                    });
+                    break;
+                }
                 Err(err) => {
                     log::warn!("Invalid robber move by Player#{}: {:?}", player, err);
                 }

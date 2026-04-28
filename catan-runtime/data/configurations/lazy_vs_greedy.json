@@ -1,8 +1,8 @@
 {
   "players": [
-    { "kind": "cli" },
     { "kind": "lazy" },
     { "kind": "greedy" },
+    { "kind": "lazy" },
     { "kind": "greedy" }
   ],
   "observers": [],
