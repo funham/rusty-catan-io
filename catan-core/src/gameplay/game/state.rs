@@ -445,11 +445,10 @@ mod tests {
 
             if player_id == 1 {
                 let board_hexes = init.board.arrangement.hex_iter().collect::<Vec<_>>();
-                victim_hex = establishment
-                    .pos
-                    .as_set()
-                    .into_iter()
-                    .find(|hex| *hex != init.board_state.robber_pos && board_hexes.contains(hex));
+                victim_hex =
+                    establishment.pos.as_set().into_iter().find(|hex| {
+                        *hex != init.board_state.robber_pos && board_hexes.contains(hex)
+                    });
             }
 
             init.builds

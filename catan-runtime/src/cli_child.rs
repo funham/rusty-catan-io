@@ -1,5 +1,5 @@
 use std::{
-    io::{self, BufRead, Write},
+    io::{self, Stdout},
     os::unix::net::UnixStream,
     path::Path as FsPath,
 };
@@ -22,15 +22,30 @@ use catan_core::{
     },
     topology::{Hex, HexIndex, Intersection, Path as BoardPath, repr::Dual},
 };
+use crossterm::{
+    event::{self, Event as CrosstermEvent, KeyCode, KeyEventKind},
+    execute,
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+};
+use ratatui::{
+    Terminal,
+    backend::CrosstermBackend,
+    layout::{Constraint, Direction, Layout},
+    style::{Color, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, Paragraph, Wrap},
+};
 
 pub fn run(socket: &FsPath, _role: &str) -> Result<(), String> {
     let mut stream = UnixStream::connect(socket)
         .map_err(|err| format!("failed to connect to {}: {err}", socket.display()))?;
+    let mut ui = CliUi::new().map_err(|err| format!("failed to initialize TUI: {err}"))?;
     match read_frame::<HostToCli>(&mut stream)
         .map_err(|err| format!("failed to read hello: {err}"))?
     {
         HostToCli::Hello { role } => {
-            println!("connected as {role:?}");
+            ui.set_message(format!("connected as {role:?}"))
+                .map_err(|err| format!("failed to draw TUI: {err}"))?;
             write_frame(&mut stream, &CliToHost::Ready)
                 .map_err(|err| format!("failed to send ready: {err}"))?;
         }
@@ -51,15 +66,17 @@ pub fn run(socket: &FsPath, _role: &str) -> Result<(), String> {
         match msg {
             HostToCli::Hello { .. } => {}
             HostToCli::Shutdown { reason } => {
-                println!("shutdown: {reason}");
+                ui.set_message(format!("shutdown: {reason}"))
+                    .map_err(|err| format!("failed to draw TUI: {err}"))?;
                 return Ok(());
             }
             HostToCli::Event { event, view } => {
-                print_model(&view);
-                println!("event: {event:?}");
+                ui.show_model(&view, format!("event: {event:?}"))
+                    .map_err(|err| format!("failed to draw TUI: {err}"))?;
             }
             HostToCli::DecisionRequest(request) => {
-                let response = handle_decision(request);
+                let response = handle_decision(&mut ui, request)
+                    .map_err(|err| format!("failed to handle decision: {err}"))?;
                 write_frame(&mut stream, &CliToHost::DecisionResponse(response))
                     .map_err(|err| format!("failed to send decision response: {err}"))?;
             }
@@ -67,129 +84,237 @@ pub fn run(socket: &FsPath, _role: &str) -> Result<(), String> {
     }
 }
 
-fn handle_decision(request: DecisionRequestFrame) -> DecisionResponseFrame {
+fn handle_decision(
+    ui: &mut CliUi,
+    request: DecisionRequestFrame,
+) -> io::Result<DecisionResponseFrame> {
     match request {
         DecisionRequestFrame::InitStage(model) => {
-            print_model(&model);
-            DecisionResponseFrame::InitStage(InitStageAction {
-                establishment_position: read_intersection("settlement (h1 h2 h3): "),
+            Ok(DecisionResponseFrame::InitStage(InitStageAction {
+                establishment_position: read_intersection(ui, &model, "settlement (h1 h2 h3): ")?,
                 road: Road {
-                    pos: read_path("road (h1 h2): "),
+                    pos: read_path(ui, &model, "road (h1 h2): ")?,
                 },
-            })
+            }))
         }
-        DecisionRequestFrame::InitAction(model) => {
-            print_model(&model);
-            DecisionResponseFrame::InitAction(read_init_action())
-        }
-        DecisionRequestFrame::PostDice(model) => {
-            print_model(&model);
-            DecisionResponseFrame::PostDice(read_post_dice_action())
-        }
+        DecisionRequestFrame::InitAction(model) => Ok(DecisionResponseFrame::InitAction(
+            read_init_action(ui, &model)?,
+        )),
+        DecisionRequestFrame::PostDice(model) => Ok(DecisionResponseFrame::PostDice(
+            read_post_dice_action(ui, &model)?,
+        )),
         DecisionRequestFrame::PostDevCard(model) => {
-            print_model(&model);
-            DecisionResponseFrame::PostDevCard(PostDevCardAction::RollDice)
+            ui.show_model(&model, "dev card resolved; rolling dice".to_owned())?;
+            Ok(DecisionResponseFrame::PostDevCard(
+                PostDevCardAction::RollDice,
+            ))
         }
-        DecisionRequestFrame::Regular(model) => {
-            print_model(&model);
-            DecisionResponseFrame::Regular(read_regular_action())
-        }
-        DecisionRequestFrame::MoveRobbers(model) => {
-            print_model(&model);
-            DecisionResponseFrame::MoveRobbers(MoveRobbersAction(read_hex("robber hex: ")))
-        }
+        DecisionRequestFrame::Regular(model) => Ok(DecisionResponseFrame::Regular(
+            read_regular_action(ui, &model)?,
+        )),
+        DecisionRequestFrame::MoveRobbers(model) => Ok(DecisionResponseFrame::MoveRobbers(
+            MoveRobbersAction(read_hex(ui, &model, "robber hex: ")?),
+        )),
         DecisionRequestFrame::ChoosePlayerToRob(model) => {
-            print_model(&model);
-            DecisionResponseFrame::ChoosePlayerToRob(ChoosePlayerToRobAction(read_player_id(
-                "robbed player id: ",
-            )))
+            Ok(DecisionResponseFrame::ChoosePlayerToRob(
+                ChoosePlayerToRobAction(read_player_id(ui, &model, "robbed player id: ")?),
+            ))
         }
         DecisionRequestFrame::AnswerTrade(model) => {
-            print_model(&model);
-            let answer = read_line("answer trade [y/N]: ");
+            let answer = ui.prompt(&model, "answer trade [y/N]: ")?;
             let answer = match answer.as_str() {
                 "y" | "yes" => TradeAnswer::Accepted,
                 _ => TradeAnswer::Declined,
             };
-            DecisionResponseFrame::AnswerTrade(answer)
+            Ok(DecisionResponseFrame::AnswerTrade(answer))
         }
         DecisionRequestFrame::DropHalf(model) => {
-            print_model(&model);
-            DecisionResponseFrame::DropHalf(DropHalfAction(read_resource_collection(
-                "drop brick wood wheat sheep ore: ",
+            Ok(DecisionResponseFrame::DropHalf(DropHalfAction(
+                read_resource_collection(ui, &model, "drop brick wood wheat sheep ore: ")?,
             )))
         }
     }
 }
 
-fn print_model(model: &UiModel) {
-    print!("\x1b[2J\x1b[H");
-    println!("turn: {:?}", model.public.board_state.robber_pos);
-    println!("actor: {:?}", model.actor);
+struct CliUi {
+    terminal: Terminal<CrosstermBackend<Stdout>>,
+    message: String,
+}
+
+impl CliUi {
+    fn new() -> io::Result<Self> {
+        enable_raw_mode()?;
+        let mut stdout = io::stdout();
+        execute!(stdout, EnterAlternateScreen)?;
+        let terminal = Terminal::new(CrosstermBackend::new(stdout))?;
+        Ok(Self {
+            terminal,
+            message: "waiting for host".to_owned(),
+        })
+    }
+
+    fn set_message(&mut self, message: String) -> io::Result<()> {
+        self.message = message;
+        self.draw(None, "", "")
+    }
+
+    fn show_model(&mut self, model: &UiModel, message: String) -> io::Result<()> {
+        self.message = message;
+        self.draw(Some(model), "", "")
+    }
+
+    fn prompt(&mut self, model: &UiModel, prompt: &str) -> io::Result<String> {
+        let mut input = String::new();
+        self.message = "enter command".to_owned();
+        loop {
+            self.draw(Some(model), prompt, &input)?;
+            if let CrosstermEvent::Key(key) = event::read()?
+                && key.kind == KeyEventKind::Press
+            {
+                match key.code {
+                    KeyCode::Enter => return Ok(input.trim().to_owned()),
+                    KeyCode::Backspace => {
+                        input.pop();
+                    }
+                    KeyCode::Esc => {
+                        input.clear();
+                    }
+                    KeyCode::Char(c) => input.push(c),
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    fn draw(&mut self, model: Option<&UiModel>, prompt: &str, input: &str) -> io::Result<()> {
+        let message = self.message.clone();
+        self.terminal.draw(|frame| {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(3),
+                    Constraint::Min(8),
+                    Constraint::Length(5),
+                ])
+                .split(frame.area());
+
+            let title = Paragraph::new(Line::from(vec![
+                Span::styled("rusty-catan", Style::default().fg(Color::Green)),
+                Span::raw("  "),
+                Span::raw(message.as_str()),
+            ]))
+            .block(Block::default().borders(Borders::ALL).title("Status"));
+            frame.render_widget(title, chunks[0]);
+
+            let body = model
+                .map(model_lines)
+                .unwrap_or_else(|| vec![Line::from("waiting for game state")]);
+            let body = Paragraph::new(body)
+                .wrap(Wrap { trim: false })
+                .block(Block::default().borders(Borders::ALL).title("Game"));
+            frame.render_widget(body, chunks[1]);
+
+            let input = Paragraph::new(vec![
+                Line::from(prompt.to_owned()),
+                Line::from(Span::styled(
+                    input.to_owned(),
+                    Style::default().fg(Color::Yellow),
+                )),
+                Line::from("Esc clears input. Enter submits."),
+            ])
+            .block(Block::default().borders(Borders::ALL).title("Command"));
+            frame.render_widget(input, chunks[2]);
+        })?;
+        Ok(())
+    }
+}
+
+impl Drop for CliUi {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        let _ = execute!(self.terminal.backend_mut(), LeaveAlternateScreen);
+        let _ = self.terminal.show_cursor();
+    }
+}
+
+fn model_lines(model: &UiModel) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    lines.push(Line::from(format!(
+        "actor: {:?} | robber: {:?} | longest road: {:?} | largest army: {:?}",
+        model.actor,
+        model.public.board_state.robber_pos,
+        model.public.longest_road_owner,
+        model.public.largest_army_owner
+    )));
+    lines.push(Line::from(format!(
+        "board: radius {} | tiles {} | dev cards in bank {}",
+        model.public.board.field_radius,
+        model.public.board.tiles.len(),
+        model.public.bank.dev_card_count
+    )));
     if let Some(private) = &model.private {
-        println!(
+        lines.push(Line::from(format!(
             "you: p{} resources {}",
             private.player_id, private.resources
-        );
-        println!("dev cards: {:?}", private.dev_cards);
+        )));
+        lines.push(Line::from(format!(
+            "your dev cards: {:?}",
+            private.dev_cards
+        )));
     }
-    println!("players:");
+    lines.push(Line::from(""));
+    lines.push(Line::from("players:"));
     for player in &model.public.players {
-        println!(
+        lines.push(Line::from(format!(
             "  p{} resources {:?} active_dev={} queued_dev={} vp={:?}",
             player.player_id,
             player.resources,
             player.active_dev_cards,
             player.queued_dev_cards,
-            player.victory_points,
-        );
+            player.victory_points
+        )));
     }
-    println!(
-        "longest road: {:?}; largest army: {:?}",
-        model.public.longest_road_owner, model.public.largest_army_owner
-    );
-    println!(
-        "commands: roll | end | buy dev | build road h1 h2 | build settlement h1 h2 h3 | build city h1 h2 h3 | bank-trade give take common"
-    );
-    println!(
-        "dev cards: use knight hex [player|none] | use yop res1 res2 | use monopoly res | use roadbuild h1 h2 h3 h4"
-    );
+    lines.push(Line::from(""));
+    lines.push(Line::from("commands: roll | end | buy dev | build road h1 h2 | build settlement h1 h2 h3 | build city h1 h2 h3"));
+    lines.push(Line::from("trades: bank-trade give take common"));
+    lines.push(Line::from("dev cards: use knight hex [player|none] | use yop res1 res2 | use monopoly res | use roadbuild h1 h2 h3 h4"));
+    lines
 }
 
-fn read_init_action() -> InitAction {
+fn read_init_action(ui: &mut CliUi, model: &UiModel) -> io::Result<InitAction> {
     loop {
-        let line = read_line("action [roll]: ");
+        let line = ui.prompt(model, "action [roll]: ")?;
         let line = line.trim();
         if line.is_empty() || line == "roll" {
-            return InitAction::RollDice;
+            return Ok(InitAction::RollDice);
         }
         if let Some(usage) = parse_dev_card_usage(line) {
-            return InitAction::UseDevCard(usage);
+            return Ok(InitAction::UseDevCard(usage));
         }
-        println!("could not parse action");
+        ui.set_message("could not parse action".to_owned())?;
     }
 }
 
-fn read_post_dice_action() -> PostDiceAction {
+fn read_post_dice_action(ui: &mut CliUi, model: &UiModel) -> io::Result<PostDiceAction> {
     loop {
-        let line = read_line("action: ");
+        let line = ui.prompt(model, "action: ")?;
         if let Some(usage) = parse_dev_card_usage(&line) {
-            return PostDiceAction::UseDevCard(usage);
+            return Ok(PostDiceAction::UseDevCard(usage));
         }
         if let Some(action) = parse_regular_action(&line) {
-            return PostDiceAction::RegularAction(action);
+            return Ok(PostDiceAction::RegularAction(action));
         }
-        println!("could not parse action");
+        ui.set_message("could not parse action".to_owned())?;
     }
 }
 
-fn read_regular_action() -> RegularAction {
+fn read_regular_action(ui: &mut CliUi, model: &UiModel) -> io::Result<RegularAction> {
     loop {
-        let line = read_line("action: ");
+        let line = ui.prompt(model, "action: ")?;
         if let Some(action) = parse_regular_action(&line) {
-            return action;
+            return Ok(action);
         }
-        println!("could not parse action");
+        ui.set_message("could not parse action".to_owned())?;
     }
 }
 
@@ -305,82 +430,74 @@ fn intersection_from_tokens(h1: &str, h2: &str, h3: &str) -> Option<Intersection
     .ok()
 }
 
-fn read_resource_collection(prompt: &str) -> ResourceCollection {
+fn read_resource_collection(
+    ui: &mut CliUi,
+    model: &UiModel,
+    prompt: &str,
+) -> io::Result<ResourceCollection> {
     loop {
-        let line = read_line(prompt);
+        let line = ui.prompt(model, prompt)?;
         let parts = line
             .split_whitespace()
             .map(str::parse::<u16>)
             .collect::<Result<Vec<_>, _>>();
         match parts {
             Ok(parts) if parts.len() == 5 => {
-                return ResourceCollection {
+                return Ok(ResourceCollection {
                     brick: parts[0],
                     wood: parts[1],
                     wheat: parts[2],
                     sheep: parts[3],
                     ore: parts[4],
-                };
+                });
             }
-            _ => println!("expected five unsigned integers"),
+            _ => ui.set_message("expected five unsigned integers".to_owned())?,
         }
     }
 }
 
-fn read_hex(prompt: &str) -> Hex {
+fn read_hex(ui: &mut CliUi, model: &UiModel, prompt: &str) -> io::Result<Hex> {
     loop {
-        let line = read_line(prompt);
+        let line = ui.prompt(model, prompt)?;
         if let Ok(index) = line.parse::<usize>() {
-            return HexIndex::spiral_to_hex(index);
+            return Ok(HexIndex::spiral_to_hex(index));
         }
-        println!("expected spiral hex index");
+        ui.set_message("expected spiral hex index".to_owned())?;
     }
 }
 
-fn read_path(prompt: &str) -> BoardPath {
+fn read_path(ui: &mut CliUi, model: &UiModel, prompt: &str) -> io::Result<BoardPath> {
     loop {
-        let line = read_line(prompt);
+        let line = ui.prompt(model, prompt)?;
         let parts = line.split_whitespace().collect::<Vec<_>>();
         if let [h1, h2] = parts.as_slice()
             && let Some(path) = path_from_tokens(h1, h2)
         {
-            return path;
+            return Ok(path);
         }
-        println!("expected adjacent hex pair");
+        ui.set_message("expected adjacent hex pair".to_owned())?;
     }
 }
 
-fn read_intersection(prompt: &str) -> Intersection {
+fn read_intersection(ui: &mut CliUi, model: &UiModel, prompt: &str) -> io::Result<Intersection> {
     loop {
-        let line = read_line(prompt);
+        let line = ui.prompt(model, prompt)?;
         let parts = line.split_whitespace().collect::<Vec<_>>();
         if let [h1, h2, h3] = parts.as_slice()
             && let Some(intersection) = intersection_from_tokens(h1, h2, h3)
         {
-            return intersection;
+            return Ok(intersection);
         }
-        println!("expected adjacent hex triplet");
+        ui.set_message("expected adjacent hex triplet".to_owned())?;
     }
 }
 
-fn read_player_id(prompt: &str) -> PlayerId {
+fn read_player_id(ui: &mut CliUi, model: &UiModel, prompt: &str) -> io::Result<PlayerId> {
     loop {
-        let line = read_line(prompt);
+        let line = ui.prompt(model, prompt)?;
         if let Ok(id) = line.parse() {
-            return id;
+            return Ok(id);
         }
-        println!("expected unsigned integer");
+        ui.set_message("expected unsigned integer".to_owned())?;
     }
-}
-
-fn read_line(prompt: &str) -> String {
-    print!("{prompt}");
-    io::stdout().flush().expect("failed to flush stdout");
-
-    let mut line = String::new();
-    io::stdin()
-        .lock()
-        .read_line(&mut line)
-        .expect("failed to read line");
-    line.trim().to_owned()
 }
