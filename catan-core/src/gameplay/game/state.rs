@@ -1,14 +1,14 @@
-use serde::{Deserialize, Serialize};
-
 use crate::{
     gameplay::{
-        field::state::BuildCollection,
-        game::view::{GameSnapshot, GameView, PrivatePlayerData, PublicPlayerState},
+        game::{
+            event::PlayerContext,
+            view::{GameSnapshot, GameView, PrivatePlayerData, PublicPlayerState},
+        },
         primitives::{
-            bank::{Bank, BankResourceExchangeError, BankViewOwned, PlayerResourceExchangeError},
+            bank::{Bank, BankResourceExchangeError, PlayerResourceExchangeError},
             build::{BoardBuildData, Build, Road},
             dev_card::DevCardUsage,
-            player::{PlayerData, PlayerDataContainer, PlayerId, SecuredPlayerData},
+            player::{PlayerDataContainer, PlayerId, SecuredPlayerData},
             resource::{Resource, ResourceCollection},
             turn::GameTurn,
         },
@@ -25,31 +25,6 @@ pub struct GameState {
     pub bank: Bank,
     pub players: PlayerDataContainer,
     pub builds: BoardBuildData,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VisiblePlayer {
-    pub player_id: PlayerId,
-    pub public_data: SecuredPlayerData,
-    pub builds: BuildCollection,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Perspective {
-    pub player_id: PlayerId,
-    pub player_view: PlayerData,
-    pub field: FieldState,
-    pub bank: BankViewOwned,
-    pub builds: BoardBuildData,
-    // TODO: change to just visible_players so that there'd be one source of information for how player's occuring to the opponents
-    pub other_players: Vec<VisiblePlayer>,
-}
-
-impl Perspective {
-    pub fn turn_ids_from_next(&self) -> impl Iterator<Item = PlayerId> {
-        let n_players = self.other_players.len() + 1;
-        (self.player_id + 1..n_players).chain(0..self.player_id)
-    }
 }
 
 #[derive(Debug)]
@@ -84,10 +59,17 @@ impl GameState {
     }
 
     pub fn view(&self) -> GameView {
-        todo!()
+        
+        
+        GameView {
+            field: self.field.clone(),
+            turn: self.turn.clone(),
+            builds: self.builds.clone(),
+            players: todo!(),
+        }
     }
 
-    pub fn private_view(&self, _player_id: PlayerId) -> PrivatePlayerData {
+    pub fn private_view(&self, player_id: PlayerId) -> PrivatePlayerData {
         todo!()
     }
 

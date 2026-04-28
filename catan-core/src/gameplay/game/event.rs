@@ -28,7 +28,9 @@ pub trait SpectatorObserver {
 
 pub trait PlayerObserver {
     fn player_id(&self) -> PlayerId;
-    fn on_event(&mut self, event: &GameEvent, context: &PlayerContext) {}
+    fn on_event(&mut self, event: &GameEvent, context: &PlayerContext) {
+        let _ = (event, context);
+    }
 }
 
 pub trait AuthorizedObserver {
@@ -40,6 +42,7 @@ pub enum GameEvent {
     DiceRolled(DiceVal),
     DevCardBought,
     DevCardUsed(DevCardUsage),
-    Buit(Build),
+    Built(Build),
     Traded,
+    GameEnded { winner_id: PlayerId },
 }

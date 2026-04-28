@@ -2,11 +2,12 @@ pub mod buffer;
 pub mod cursor;
 pub mod field_render;
 
+#[allow(unused)]
 pub mod test {
     use super::field_render::*;
     use catan_core::{
         gameplay::{
-            game::{init::GameInitializationState, state::Perspective},
+            game::{event::PlayerContext, init::GameInitializationState, state::GameState},
             primitives::{
                 Tile,
                 build::{Build, Establishment, EstablishmentType, Road},
@@ -29,7 +30,7 @@ pub mod test {
         Intersection::try_from((h1, h2, h3)).unwrap()
     }
 
-    fn build_perspective() -> Perspective {
+    fn build_state<'a, 'b>() -> GameState {
         let mut game = GameInitializationState::default();
 
         let settlements = [
@@ -77,7 +78,7 @@ pub mod test {
                 ));
         }
 
-        game.perspective(0)
+        game.finish()
     }
 
     #[test]
@@ -166,14 +167,19 @@ pub mod test {
 
     #[test]
     fn field_example() {
-        let perspective = build_perspective();
+        let state = build_state();
+        let context = PlayerContext {
+            view: &state.view(),
+            player_data: &state.private_view(0),
+        };
+
         let mut renderer = FieldRenderer::new();
 
-        renderer.draw_skeleton(&perspective);
-        renderer.draw_tile_info(&perspective);
-        renderer.draw_index(&perspective);
-        renderer.draw_robber(&perspective);
-        renderer.draw_builds(&perspective);
+        renderer.draw_skeleton(&context);
+        renderer.draw_tile_info(&context);
+        renderer.draw_index(&context);
+        renderer.draw_robber(&context);
+        renderer.draw_builds(&context);
 
         renderer.render();
     }

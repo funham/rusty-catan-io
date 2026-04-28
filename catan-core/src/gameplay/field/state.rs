@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{FieldArrangement, HexesByNum, PortsByPlayer};
 use crate::gameplay::primitives::{
-    Tile, PortKind,
-    build::{Road, Establishment},
+    PortKind, Tile,
+    build::{Establishment, Road},
     player::PlayerId,
 };
 use crate::math::dice::DiceVal;

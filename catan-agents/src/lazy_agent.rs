@@ -1,10 +1,13 @@
 use catan_core::{
     agent::{
         Agent,
-        action::{InitAction, PostDevCardAction, PostDiceAction, RegularAction, TradeAnswer},
+        action::{
+            self, ChoosePlayerToRobAction, DropHalfAction, InitAction, InitStageAction,
+            MoveRobbersAction, PostDevCardAction, PostDiceAction, RegularAction, TradeAnswer,
+        },
     },
     gameplay::{
-        game::{event::PlayerObserver, state::Perspective},
+        game::event::{PlayerContext, PlayerObserver},
         primitives::{player::PlayerId, resource::ResourceCollection},
     },
 };
@@ -19,20 +22,21 @@ impl LazyAgent {
         Self { id }
     }
 
-    // fn choose_initial(perspective: &Perspective) -> AgentAction {
-    //     let (establishment, road) = perspective
-    //         .builds
-    //         .query()
-    //         .possible_initial_placements(&perspective.field, perspective.player_id)
-    //         .first()
-    //         .expect("there must be a place")
-    //         .clone();
+    fn choose_initial(&self, context: &PlayerContext) -> InitStageAction {
+        let (establishment, road) = context
+            .view
+            .builds
+            .query()
+            .possible_initial_placements(&context.view.field, self.id)
+            .first()
+            .expect("there must be a place")
+            .clone();
 
-    //     AgentAction::Initialization {
-    //         establishment,
-    //         road,
-    //     }
-    // }
+        InitStageAction {
+            establishment_position: establishment.pos,
+            road,
+        }
+    }
 }
 
 impl PlayerObserver for LazyAgent {
@@ -41,53 +45,66 @@ impl PlayerObserver for LazyAgent {
     }
 }
 
-// impl Agent for LazyAgent {
-//     fn respond(&mut self, request: AgentRequest) -> AgentAction {
-//         match request {
-//             AgentRequest::Init(_) => AgentAction::Init(InitAction::RollDice),
-//             AgentRequest::AfterDevCard(_) => AgentAction::AfterDevCard(PostDevCardAction::RollDice),
-//             AgentRequest::AfterDiceThrow(_) => {
-//                 AgentAction::AfterDice(PostDiceAction::RegularAction(RegularAction::EndMove))
-//             }
-//             AgentRequest::Rest(_) => AgentAction::Rest(RegularAction::EndMove),
-//             AgentRequest::RobHex(perspective) => {
-//                 let hex = perspective
-//                     .field
-//                     .arrangement
-//                     .hex_enum_iter()
-//                     .map(|(hex, _)| hex)
-//                     .find(|hex| *hex != perspective.field.robber_pos)
-//                     .unwrap_or(perspective.field.robber_pos);
-//                 AgentAction::RobHex(hex)
-//             }
-//             AgentRequest::RobPlayer(perspective) => {
-//                 let player_id = perspective
-//                     .other_players
-//                     .first()
-//                     .map(|player| player.player_id)
-//                     .unwrap_or(perspective.player_id);
-//                 AgentAction::RobPlayer(player_id)
-//             }
-//             AgentRequest::Initialization(perspective) => Self::choose_initial(&perspective),
-//             AgentRequest::AnswerTrade {
-//                 perspective: _,
-//                 trade: _,
-//             } => AgentAction::AnswerTrade(TradeAnswer::Declined),
-//             AgentRequest::DropHalf(perspective) => {
-//                 let number_to_drop = perspective.player_view.resources.total() / 2;
-//                 let mut to_drop = ResourceCollection::default();
-//                 for (resource, number) in perspective.player_view.resources.unroll() {
-//                     let remaining = number_to_drop - to_drop.total();
+impl Agent for LazyAgent {
+    fn init_stage_action(&mut self, context: &PlayerContext) -> InitStageAction {
+        self.choose_initial(context)
+    }
 
-//                     if remaining == 0 {
-//                         break;
-//                     }
+    fn init_action(&mut self, _context: &PlayerContext) -> InitAction {
+        InitAction::RollDice
+    }
 
-//                     to_drop[resource] = remaining.min(number);
-//                 }
+    fn after_dice_action(&mut self, _context: &PlayerContext) -> PostDiceAction {
+        PostDiceAction::RegularAction(RegularAction::EndMove)
+    }
 
-//                 AgentAction::DropHalf(to_drop)
-//             }
-//         }
-//     }
-// }
+    fn after_dev_card_action(&mut self, _context: &PlayerContext) -> PostDevCardAction {
+        PostDevCardAction::RollDice
+    }
+
+    fn regular_action(&mut self, _context: &PlayerContext) -> RegularAction {
+        RegularAction::EndMove
+    }
+
+    fn move_robbers(&mut self, context: &PlayerContext) -> action::MoveRobbersAction {
+        for hex in context.view.field.arrangement.hex_iter() {
+            if hex != context.view.field.robber_pos {
+                return MoveRobbersAction(hex);
+            }
+        }
+
+        unreachable!("there must be a hex without robbers on it")
+    }
+
+    fn choose_player_to_rob(&mut self, context: &PlayerContext) -> action::ChoosePlayerToRobAction {
+        for id in context.view.players_on_hex(context.view.field.robber_pos) {
+            if id != self.id {
+                return ChoosePlayerToRobAction(id);
+            }
+        }
+
+        unreachable!(
+            "there must be a player that's on that hex that isn't a player (validation on the controller's site)"
+        )
+    }
+
+    fn answer_trade(&mut self, _context: &PlayerContext) -> TradeAnswer {
+        TradeAnswer::Declined
+    }
+
+    fn drop_half(&mut self, context: &PlayerContext) -> action::DropHalfAction {
+        let number_to_drop = context.player_data.resources.total() / 2;
+        let mut to_drop = ResourceCollection::default();
+        for (resource, number) in context.player_data.resources.unroll() {
+            let remaining = number_to_drop - to_drop.total();
+
+            if remaining == 0 {
+                break;
+            }
+
+            to_drop[resource] = remaining.min(number);
+        }
+
+        DropHalfAction(to_drop)
+    }
+}

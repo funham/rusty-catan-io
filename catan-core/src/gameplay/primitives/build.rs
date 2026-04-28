@@ -425,6 +425,11 @@ pub mod data {
         }
 
         #[inline]
+        pub fn by_player(&self, id: PlayerId) -> &PlayerBuildData {
+            &self.players[id]
+        }
+
+        #[inline]
         pub fn players_indexed(&self) -> impl Iterator<Item = (PlayerId, &PlayerBuildData)> {
             self.players
                 .iter()

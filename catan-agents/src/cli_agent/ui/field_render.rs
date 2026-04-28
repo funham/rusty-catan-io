@@ -1,6 +1,6 @@
 use catan_core::{
     gameplay::{
-        game::state::Perspective,
+        game::event::PlayerContext,
         primitives::{Tile, build::EstablishmentType, player::PlayerId, resource::Resource},
     },
     topology::{Hex, HexIndex, Intersection, Path},
@@ -219,14 +219,14 @@ impl FieldRenderer {
         self.fmt.clear();
     }
 
-    pub fn draw_skeleton(&mut self, _perspective: &Perspective) -> &mut Self {
+    pub fn draw_skeleton(&mut self, _context: &PlayerContext) -> &mut Self {
         // TODO: ports
         self.draw_field(ColorSpec::new().set_dimmed(true).clone());
         self
     }
 
-    pub fn draw_tile_info(&mut self, perspective: &Perspective) -> &mut Self {
-        for (hex, tile) in perspective.field.arrangement.hex_enum_iter() {
+    pub fn draw_tile_info(&mut self, context: &PlayerContext) -> &mut Self {
+        for (hex, tile) in context.view.field.arrangement.hex_enum_iter() {
             match tile {
                 Tile::Resource { resource, number } => {
                     self.draw_hex_attr(hex, HexAttr::TileNum(number.into()));
@@ -239,13 +239,13 @@ impl FieldRenderer {
         self
     }
 
-    pub fn draw_robber(&mut self, perspective: &Perspective) -> &mut Self {
-        self.draw_hex_attr(perspective.field.robber_pos, HexAttr::Robber);
+    pub fn draw_robber(&mut self, context: &PlayerContext) -> &mut Self {
+        self.draw_hex_attr(context.view.field.robber_pos, HexAttr::Robber);
         self
     }
 
-    pub fn draw_builds(&mut self, perspective: &Perspective) -> &mut Self {
-        for (id, player) in perspective.builds.players().iter().enumerate() {
+    pub fn draw_builds(&mut self, context: &PlayerContext) -> &mut Self {
+        for (id, player) in context.view.builds.players().iter().enumerate() {
             for road in player.roads.iter() {
                 self.draw_path_attr(
                     road.pos,
@@ -266,28 +266,28 @@ impl FieldRenderer {
         self
     }
 
-    pub fn draw_index(&mut self, perspective: &Perspective) -> &mut Self {
-        for hex in perspective.field.arrangement.hex_iter_with_ocean() {
+    pub fn draw_index(&mut self, context: &PlayerContext) -> &mut Self {
+        for hex in context.view.field.arrangement.hex_iter_with_ocean() {
             self.draw_hex_attr(hex, HexAttr::Index);
         }
         self
     }
 
-    pub fn draw_perspective(&mut self, perspective: &Perspective) {
+    pub fn draw_context(&mut self, context: &PlayerContext) {
         // render skeleton
-        self.draw_skeleton(perspective);
+        self.draw_skeleton(context);
 
         // render tile info
-        self.draw_tile_info(perspective);
+        self.draw_tile_info(context);
 
         // render hex indices
-        self.draw_index(perspective);
+        self.draw_index(context);
 
         // render robber
-        self.draw_robber(perspective);
+        self.draw_robber(context);
 
         // render builds
-        self.draw_builds(perspective);
+        self.draw_builds(context);
     }
 
     pub fn render(&self) {

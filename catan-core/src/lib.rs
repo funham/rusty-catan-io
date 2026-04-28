@@ -2,6 +2,7 @@ pub mod common;
 pub mod gameplay;
 pub mod math;
 pub mod topology;
+pub mod algorithm;
 
 pub use gameplay::agent;
 

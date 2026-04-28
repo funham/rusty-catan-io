@@ -4,7 +4,7 @@ use crate::agent::action::{
     PostDevCardAction, PostDiceAction, RegularAction, Request,
 };
 use crate::gameplay::game::event::{
-    AuthorizedContext, AuthorizedObserver, GameEvent, PlayerContext, PlayerObserver,
+    self, AuthorizedContext, AuthorizedObserver, GameEvent, PlayerContext, PlayerObserver,
     SpectatorContext, SpectatorObserver,
 };
 use crate::gameplay::game::init::GameInitializationState;
@@ -56,7 +56,10 @@ impl GameController {
     }
 
     // TODO: move into GameInitializer
-    pub fn init(mut game_init: GameInitializationState, agents: &mut Vec<Box<dyn Agent>>) -> GameState {
+    pub fn init(
+        mut game_init: GameInitializationState,
+        agents: &mut Vec<Box<dyn Agent>>,
+    ) -> GameState {
         while game_init.turn.get_rounds_played() < 2 {
             let player_id = game_init.turn.get_turn_index();
 
@@ -109,11 +112,13 @@ impl GameController {
         }
     }
 
-    fn get_agent(&mut self) -> &mut dyn Agent {
+    fn curr_agent(&mut self) -> &mut dyn Agent {
         self.agents[self.current_player].as_mut()
     }
 
     fn notify_observers(&mut self, event: &GameEvent) {
+        log::info!("Event: {:?}", event);
+
         let view = self.game.view();
 
         for obs in &mut self.spectator_observers {
@@ -164,7 +169,7 @@ impl GameController {
         let private = self.game.private_view(self.current_player);
 
         R::request(
-            self.get_agent(),
+            self.curr_agent(),
             &PlayerContext {
                 view: &view,
                 player_data: &private,
@@ -223,13 +228,23 @@ impl GameController {
 
             PostDiceAction::RegularAction(action) => match action {
                 RegularAction::Build(build) => {
-                    Self::execute_build(&mut self.game, self.current_player, build)
+                    if let Ok(()) = Self::execute_build(&mut self.game, self.current_player, build)
+                    {
+                        self.notify_observers(&GameEvent::Built(build));
+                    }
                 }
                 RegularAction::TradeWithBank(trade) => {
-                    Self::execute_bank_trade(&mut self.game, self.current_player, trade)
+                    if let Ok(()) =
+                        Self::execute_bank_trade(&mut self.game, self.current_player, trade)
+                    {
+                        self.notify_observers(&GameEvent::Traded);
+                    }
                 }
                 RegularAction::BuyDevCard => {
-                    Self::execute_buy_dev_card(&mut self.game, self.current_player)
+                    if let Ok(()) = Self::execute_buy_dev_card(&mut self.game, self.current_player)
+                    {
+                        self.notify_observers(&GameEvent::DevCardBought);
+                    }
                 }
                 RegularAction::OfferPublicTrade(_) => {
                     log::error!("P2P trades not implemented")
@@ -253,7 +268,8 @@ impl GameController {
             log::error!("{:?}", e);
         }
 
-        if self.game.check_win_condition().is_some() {
+        if let Some(winner_id) = self.game.check_win_condition() {
+            self.notify_observers(&GameEvent::GameEnded { winner_id });
             return Err(());
         }
 
@@ -268,13 +284,20 @@ impl GameController {
 
         match answer {
             RegularAction::Build(build) => {
-                Self::execute_build(&mut self.game, self.current_player, build)
+                if let Ok(()) = Self::execute_build(&mut self.game, self.current_player, build) {
+                    self.notify_observers(&GameEvent::Built(build));
+                }
             }
             RegularAction::TradeWithBank(trade) => {
-                Self::execute_bank_trade(&mut self.game, self.current_player, trade)
+                if let Ok(()) = Self::execute_bank_trade(&mut self.game, self.current_player, trade)
+                {
+                    self.notify_observers(&GameEvent::Traded);
+                }
             }
             RegularAction::BuyDevCard => {
-                Self::execute_buy_dev_card(&mut self.game, self.current_player)
+                if let Ok(()) = Self::execute_buy_dev_card(&mut self.game, self.current_player) {
+                    self.notify_observers(&GameEvent::DevCardBought);
+                }
             }
             RegularAction::OfferPublicTrade(_) => log::error!("P2P trades not implemented"),
             RegularAction::OfferPersonalTrade(_) => log::error!("P2P trades not implemented"),
@@ -288,15 +311,22 @@ impl GameController {
         self.handle_rest()
     }
 
-    fn execute_bank_trade(game: &mut GameState, player: PlayerId, bank_trade: BankTrade) {
+    fn execute_bank_trade(
+        game: &mut GameState,
+        player: PlayerId,
+        bank_trade: BankTrade,
+    ) -> Result<(), BankResourceExchangeError> {
         if let Err(err) =
             game.bank_resource_exchange(player, bank_trade.to_bank(), bank_trade.from_bank())
         {
-            log::error!("Invalid bank trade {:?}", err)
+            log::error!("Invalid bank trade {:?}", err);
+            return Err(err);
         }
+
+        Ok(())
     }
 
-    fn execute_build(game: &mut GameState, player: PlayerId, build: Build) {
+    fn execute_build(game: &mut GameState, player: PlayerId, build: Build) -> Result<(), ()> {
         if let Err(err) = game.transfer_to_bank(build.cost(), player) {
             match err {
                 BankResourceExchangeError::BankIsShort => unreachable!(),
@@ -307,22 +337,26 @@ impl GameController {
                         id,
                         game.players.get(id).resources(),
                     );
-                    return;
+                    return Err(());
                 }
             }
         }
 
-        if let Err(err) = game.builds.try_build(player, build.clone()) {
-            log::warn!("Couldn't build {}: {:?}", Into::<&str>::into(build), err);
+        match game.builds.try_build(player, build.clone()) {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                log::warn!("Couldn't build {}: {:?}", Into::<&str>::into(build), err);
+                Err(())
+            }
         }
     }
 
-    fn execute_buy_dev_card(game: &mut GameState, player: PlayerId) {
+    fn execute_buy_dev_card(game: &mut GameState, player: PlayerId) -> Result<(), ()> {
         const COST: ResourceCollection = ResourceCollection::new(0, 0, 1, 1, 1);
 
         if game.bank.dev_cards.is_empty() {
             log::warn!("Bank out of dev cards");
-            return;
+            return Err(());
         }
 
         if let Err(err) = game.transfer_to_bank(COST, player) {
@@ -330,9 +364,12 @@ impl GameController {
                 BankResourceExchangeError::BankIsShort => unreachable!(),
                 BankResourceExchangeError::AccountIsShort { id } => {
                     log::warn!("Player#{} can't afford dev card", id);
+                    return Err(());
                 }
             }
         }
+
+        Ok(())
     }
 
     fn execute_dice_roll(&mut self, dice: &mut dyn DiceRoller) {
