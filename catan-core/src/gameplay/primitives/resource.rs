@@ -135,6 +135,16 @@ impl ResourceCollection {
         Resource::list().into_iter().all(|r| self[r] >= set[r])
     }
 
+    pub fn missing(&self, target: &ResourceCollection) -> ResourceCollection {
+        ResourceCollection {
+            brick: target.brick.saturating_sub(self.brick),
+            wood: target.wood.saturating_sub(self.wood),
+            wheat: target.wheat.saturating_sub(self.wheat),
+            sheep: target.sheep.saturating_sub(self.sheep),
+            ore: target.ore.saturating_sub(self.ore),
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         self.total() == 0
     }

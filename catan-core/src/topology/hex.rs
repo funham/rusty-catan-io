@@ -405,8 +405,18 @@ mod tests {
     #[test]
     fn hex_vertices() {
         let h1 = Hex::new(0, 0);
-        let vs = h1.vertices().collect::<Vec<_>>();
-        assert_eq!(vs, [v(h(0, 0), h(-1, 0), h(0, -1))]); // TODO: edit test
+        let vs = h1.vertices().collect::<BTreeSet<_>>();
+        assert_eq!(
+            vs,
+            BTreeSet::from([
+                v(h(0, 0), h(-1, 0), h(0, -1)),
+                v(h(0, 0), h(1, -1), h(0, -1)),
+                v(h(0, 0), h(1, -1), h(1, 0)),
+                v(h(0, 0), h(1, 0), h(0, 1)),
+                v(h(0, 0), h(0, 1), h(-1, 1)),
+                v(h(0, 0), h(-1, 1), h(-1, 0)),
+            ])
+        );
     }
 
     #[test]
