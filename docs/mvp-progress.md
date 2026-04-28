@@ -2,6 +2,8 @@
 
 Branch: `codex/mvp-hardening`
 
+Selector branch: `codex/cli-selectors`
+
 ## Implemented
 
 - Knight dev cards now move the robber, require a valid robbed target when one exists, steal one random resource, and move the card from active to used.
@@ -9,6 +11,7 @@ Branch: `codex/mvp-hardening`
 - Robber blocks resource production on its hex.
 - River tiles no longer panic in harvesting or CLI field rendering.
 - Remote CLI child has a basic Ratatui alternate-screen command UI.
+- `codex/cli-selectors` adds keyboard selectors for hex, road/path, and settlement/intersection prompts.
 - Greedy bot priority is covered by tests: city, settlement, dev card, road.
 
 ## Useful Commands
@@ -42,8 +45,8 @@ use roadbuild h1 h2 h3 h4
 
 ## Remaining Work
 
-- Add cursor/keyboard board selection on top of the Ratatui command UI.
 - Improve remote CLI display with the existing field renderer rather than only textual board summaries.
+- Highlight selector choices directly on the board once field-renderer output is integrated into Ratatui.
 - Replace panic-based remote agent failures with recoverable controller/runtime errors.
 - Add controller-level tests for invalid remote/player decisions where practical.
 - Revisit player-to-player trades, which are still explicitly not implemented.
