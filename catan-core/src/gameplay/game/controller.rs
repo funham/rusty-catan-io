@@ -295,14 +295,8 @@ impl GameController {
 
         match answer {
             PostDiceAction::UseDevCard(usage) => {
-                if let Err(e) = self.game.use_dev_card(usage.clone(), self.curr_player()) {
-                    log::error!("{:?}", e);
-                } else {
-                    self.index = GameIndex::rebuild(&self.game);
-                    self.notify_observers(&GameEvent::DevCardUsed {
-                        player_id: self.curr_player(),
-                        usage,
-                    });
+                if !self.execute_dev_card(usage) {
+                    return self.handle_dice_rolled();
                 }
                 self.handle_rest()
             }
@@ -314,14 +308,8 @@ impl GameController {
     }
 
     fn handle_dev_card_used(&mut self, usage: DevCardUsage, dice: &mut dyn DiceRoller) -> TurnFlow {
-        if let Err(e) = self.game.use_dev_card(usage.clone(), self.curr_player()) {
-            log::error!("{:?}", e);
-        } else {
-            self.index = GameIndex::rebuild(&self.game);
-            self.notify_observers(&GameEvent::DevCardUsed {
-                player_id: self.curr_player(),
-                usage,
-            });
+        if !self.execute_dev_card(usage) {
+            return self.handle_move_init(dice);
         }
 
         let _ = self.request_post_dev_card_action(self.curr_player());
@@ -337,6 +325,31 @@ impl GameController {
             match self.execute_regular_action(answer) {
                 TurnFlow::Continue => continue,
                 TurnFlow::EndTurn => return TurnFlow::EndTurn,
+            }
+        }
+    }
+
+    fn execute_dev_card(&mut self, usage: DevCardUsage) -> bool {
+        let player_id = self.curr_player();
+        match self.game.use_dev_card(usage.clone(), player_id) {
+            Ok(()) => {
+                self.index = GameIndex::rebuild(&self.game);
+                self.notify_observers(&GameEvent::DevCardUsed {
+                    player_id,
+                    usage: usage.clone(),
+                });
+                if let DevCardUsage::Knight { rob_hex, robbed_id } = usage {
+                    self.notify_observers(&GameEvent::RobberMoved {
+                        player_id,
+                        hex: rob_hex,
+                        robbed_id,
+                    });
+                }
+                true
+            }
+            Err(err) => {
+                log::warn!("Invalid dev card use by Player#{}: {:?}", player_id, err);
+                false
             }
         }
     }
