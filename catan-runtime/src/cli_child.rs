@@ -25,7 +25,7 @@ use catan_core::{
 };
 use catan_render::{
     adapters::ratatui::canvas_lines,
-    field::{FieldOverlay, FieldRenderer, FieldSelection},
+    field::{FieldOverlay, FieldPreview, FieldRenderer, FieldSelection, SelectionStatus},
     model::{RenderBoard, RenderGameView, RenderPlayerBuilds},
 };
 use crossterm::{
@@ -96,11 +96,11 @@ fn handle_decision(
 ) -> io::Result<DecisionResponseFrame> {
     match request {
         DecisionRequestFrame::InitStage(model) => {
+            let settlement = read_initial_settlement(ui, &model, "settlement: ")?;
+            let road = read_initial_road(ui, &model, settlement, "road: ")?;
             Ok(DecisionResponseFrame::InitStage(InitStageAction {
-                establishment_position: read_intersection(ui, &model, "settlement (h1 h2 h3): ")?,
-                road: Road {
-                    pos: read_path(ui, &model, "road (h1 h2): ")?,
-                },
+                establishment_position: settlement,
+                road,
             }))
         }
         DecisionRequestFrame::InitAction(model) => Ok(DecisionResponseFrame::InitAction(
@@ -164,12 +164,16 @@ impl CliUi {
     fn set_message(&mut self, message: String) -> io::Result<()> {
         self.message = message;
         self.overlay.selected = None;
+        self.overlay.status = SelectionStatus::Neutral;
+        self.overlay.preview.clear();
         self.draw(None, "", "")
     }
 
     fn show_model(&mut self, model: &UiModel, message: String) -> io::Result<()> {
         self.message = message;
         self.overlay.selected = None;
+        self.overlay.status = SelectionStatus::Neutral;
+        self.overlay.preview.clear();
         self.draw(Some(model), "", "")
     }
 
@@ -177,6 +181,8 @@ impl CliUi {
         let mut input = String::new();
         self.message = "enter command".to_owned();
         self.overlay.selected = None;
+        self.overlay.status = SelectionStatus::Neutral;
+        self.overlay.preview.clear();
         loop {
             self.draw(Some(model), prompt, &input)?;
             if let CrosstermEvent::Key(key) = event::read()?
@@ -197,7 +203,12 @@ impl CliUi {
         }
     }
 
-    fn select_hex(&mut self, model: &UiModel, prompt: &str) -> io::Result<Hex> {
+    fn select_hex_where(
+        &mut self,
+        model: &UiModel,
+        prompt: &str,
+        is_available: impl Fn(Hex) -> bool,
+    ) -> io::Result<Hex> {
         let board_hexes = board_hex_set(model);
         let mut selected = Hex::new(0, 0);
         if !board_hexes.contains(&selected) {
@@ -209,13 +220,20 @@ impl CliUi {
         self.message = "select hex with arrows; enter confirms".to_owned();
         loop {
             self.overlay.selected = Some(FieldSelection::Hex(selected));
+            self.overlay.status = selection_status(is_available(selected));
             self.draw(Some(model), prompt, &hex_label(selected))?;
             if let CrosstermEvent::Key(key) = event::read()?
                 && key.kind == KeyEventKind::Press
             {
                 match key.code {
                     KeyCode::Enter => {
+                        if !is_available(selected) {
+                            self.message = "unavailable hex".to_owned();
+                            self.overlay.status = SelectionStatus::Unavailable;
+                            continue;
+                        }
                         self.overlay.selected = None;
+                        self.overlay.status = SelectionStatus::Neutral;
                         return Ok(selected);
                     }
                     KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
@@ -227,71 +245,12 @@ impl CliUi {
         }
     }
 
-    fn select_path(&mut self, model: &UiModel, prompt: &str) -> io::Result<BoardPath> {
-        let board_hexes = board_hex_set(model);
-        let mut hex = Hex::new(0, 0);
-        if !board_hexes.contains(&hex) {
-            hex = *board_hexes.iter().next().ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidInput, "selector has no board hexes")
-            })?;
-        }
-
-        self.message = "stage 1: select hex; enter chooses surrounding road".to_owned();
-        loop {
-            loop {
-                self.overlay.selected = Some(FieldSelection::Hex(hex));
-                self.draw(
-                    Some(model),
-                    prompt,
-                    &format!("{}; enter for roads", hex_label(hex)),
-                )?;
-                if let CrosstermEvent::Key(key) = event::read()?
-                    && key.kind == KeyEventKind::Press
-                {
-                    match key.code {
-                        KeyCode::Enter => break,
-                        KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
-                            hex = move_hex_by_key(hex, key.code, &board_hexes);
-                        }
-                        _ => {}
-                    }
-                }
-            }
-
-            let paths = hex.paths_arr();
-            let mut selected = 0;
-            self.message = "stage 2: cycle roads with arrows/tab; esc returns to hex".to_owned();
-            loop {
-                let path = paths[selected];
-                self.overlay.selected = Some(FieldSelection::Path(path));
-                self.draw(Some(model), prompt, &path_label(path))?;
-                if let CrosstermEvent::Key(key) = event::read()?
-                    && key.kind == KeyEventKind::Press
-                {
-                    match key.code {
-                        KeyCode::Enter => {
-                            self.overlay.selected = None;
-                            return Ok(path);
-                        }
-                        KeyCode::Esc => {
-                            self.message =
-                                "stage 1: select hex; enter chooses surrounding road".to_owned();
-                            break;
-                        }
-                        KeyCode::Left | KeyCode::Down | KeyCode::Tab => {
-                            selected = (selected + 1) % paths.len();
-                        }
-                        KeyCode::Right | KeyCode::Up | KeyCode::BackTab => {
-                            selected = selected.checked_sub(1).unwrap_or(paths.len() - 1);
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
-    }
-
-    fn select_intersection(&mut self, model: &UiModel, prompt: &str) -> io::Result<Intersection> {
+    fn select_intersection_where(
+        &mut self,
+        model: &UiModel,
+        prompt: &str,
+        is_available: impl Fn(Intersection) -> bool,
+    ) -> io::Result<Intersection> {
         let board_hexes = board_hex_set(model);
         let mut hex = Hex::new(0, 0);
         if !board_hexes.contains(&hex) {
@@ -328,18 +287,26 @@ impl CliUi {
             loop {
                 let intersection = intersections[selected];
                 self.overlay.selected = Some(FieldSelection::Intersection(intersection));
+                self.overlay.status = selection_status(is_available(intersection));
                 self.draw(Some(model), prompt, &intersection_label(intersection))?;
                 if let CrosstermEvent::Key(key) = event::read()?
                     && key.kind == KeyEventKind::Press
                 {
                     match key.code {
                         KeyCode::Enter => {
+                            if !is_available(intersection) {
+                                self.message = "unavailable intersection".to_owned();
+                                self.overlay.status = SelectionStatus::Unavailable;
+                                continue;
+                            }
                             self.overlay.selected = None;
+                            self.overlay.status = SelectionStatus::Neutral;
                             return Ok(intersection);
                         }
                         KeyCode::Esc => {
                             self.message =
                                 "stage 1: select hex; enter chooses surrounding vertex".to_owned();
+                            self.overlay.status = SelectionStatus::Neutral;
                             break;
                         }
                         KeyCode::Left | KeyCode::Down | KeyCode::Tab => {
@@ -350,6 +317,58 @@ impl CliUi {
                         }
                         _ => {}
                     }
+                }
+            }
+        }
+    }
+
+    fn select_initial_road(
+        &mut self,
+        model: &UiModel,
+        settlement_pos: Intersection,
+        prompt: &str,
+    ) -> io::Result<Road> {
+        let roads = initial_roads_for_settlement(model, settlement_pos);
+        if roads.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "selected settlement has no legal adjacent initial roads",
+            ));
+        }
+
+        let actor = model.actor.unwrap_or_default();
+        self.overlay.preview = vec![FieldPreview::Establishment {
+            player_id: actor,
+            establishment: Establishment {
+                pos: settlement_pos,
+                stage: EstablishmentType::Settlement,
+            },
+        }];
+        self.message = "cycle adjacent initial roads with arrows/tab; enter confirms".to_owned();
+
+        let mut selected = 0;
+        loop {
+            let road = roads[selected];
+            self.overlay.selected = Some(FieldSelection::Path(road.pos));
+            self.overlay.status = SelectionStatus::Available;
+            self.draw(Some(model), prompt, &path_label(road.pos))?;
+            if let CrosstermEvent::Key(key) = event::read()?
+                && key.kind == KeyEventKind::Press
+            {
+                match key.code {
+                    KeyCode::Enter => {
+                        self.overlay.selected = None;
+                        self.overlay.status = SelectionStatus::Neutral;
+                        self.overlay.preview.clear();
+                        return Ok(road);
+                    }
+                    KeyCode::Left | KeyCode::Down | KeyCode::Tab => {
+                        selected = selected.checked_sub(1).unwrap_or(roads.len() - 1);
+                    }
+                    KeyCode::Right | KeyCode::Up | KeyCode::BackTab => {
+                        selected = (selected + 1) % roads.len();
+                    }
+                    _ => {}
                 }
             }
         }
@@ -651,16 +670,27 @@ fn read_resource_collection(
     }
 }
 
+fn read_initial_settlement(
+    ui: &mut CliUi,
+    model: &UiModel,
+    prompt: &str,
+) -> io::Result<Intersection> {
+    let legal = legal_initial_settlements(model);
+    ui.select_intersection_where(model, prompt, |intersection| legal.contains(&intersection))
+}
+
+fn read_initial_road(
+    ui: &mut CliUi,
+    model: &UiModel,
+    settlement: Intersection,
+    prompt: &str,
+) -> io::Result<Road> {
+    ui.select_initial_road(model, settlement, prompt)
+}
+
 fn read_hex(ui: &mut CliUi, model: &UiModel, prompt: &str) -> io::Result<Hex> {
-    ui.select_hex(model, prompt)
-}
-
-fn read_path(ui: &mut CliUi, model: &UiModel, prompt: &str) -> io::Result<BoardPath> {
-    ui.select_path(model, prompt)
-}
-
-fn read_intersection(ui: &mut CliUi, model: &UiModel, prompt: &str) -> io::Result<Intersection> {
-    ui.select_intersection(model, prompt)
+    let robber_pos = model.public.board_state.robber_pos;
+    ui.select_hex_where(model, prompt, |hex| hex != robber_pos)
 }
 
 fn read_player_id(ui: &mut CliUi, model: &UiModel, prompt: &str) -> io::Result<PlayerId> {
@@ -700,6 +730,14 @@ fn intersection_label(intersection: Intersection) -> String {
     format!("intersection {label}")
 }
 
+fn selection_status(is_available: bool) -> SelectionStatus {
+    if is_available {
+        SelectionStatus::Available
+    } else {
+        SelectionStatus::Unavailable
+    }
+}
+
 fn move_hex_by_key(current: Hex, key: KeyCode, board_hexes: &BTreeSet<Hex>) -> Hex {
     let next = match key {
         KeyCode::Left => Hex::new(current.q - 1, current.r),
@@ -724,6 +762,71 @@ fn board_hexes(model: &UiModel) -> Vec<Hex> {
 
 fn board_hex_set(model: &UiModel) -> BTreeSet<Hex> {
     board_hexes(model).into_iter().collect()
+}
+
+fn board_path_set(model: &UiModel) -> BTreeSet<BoardPath> {
+    board_hexes(model)
+        .into_iter()
+        .flat_map(|hex| hex.paths_arr())
+        .collect()
+}
+
+fn board_intersection_set(model: &UiModel) -> BTreeSet<Intersection> {
+    board_hexes(model)
+        .into_iter()
+        .flat_map(|hex| hex.vertices_arr())
+        .collect()
+}
+
+fn occupied_roads(model: &UiModel) -> BTreeSet<BoardPath> {
+    model
+        .public
+        .builds
+        .iter()
+        .flat_map(|builds| builds.roads.iter().map(|road| road.pos))
+        .collect()
+}
+
+fn occupied_intersections(model: &UiModel) -> BTreeSet<Intersection> {
+    model
+        .public
+        .builds
+        .iter()
+        .flat_map(|builds| builds.establishments.iter().map(|est| est.pos))
+        .collect()
+}
+
+fn settlement_deadzone(model: &UiModel) -> BTreeSet<Intersection> {
+    occupied_intersections(model)
+        .into_iter()
+        .flat_map(|intersection| {
+            intersection
+                .neighbors()
+                .into_iter()
+                .chain(std::iter::once(intersection))
+        })
+        .collect()
+}
+
+fn legal_initial_settlements(model: &UiModel) -> BTreeSet<Intersection> {
+    let deadzone = settlement_deadzone(model);
+    board_intersection_set(model)
+        .into_iter()
+        .filter(|intersection| !deadzone.contains(intersection))
+        .filter(|intersection| !initial_roads_for_settlement(model, *intersection).is_empty())
+        .collect()
+}
+
+fn initial_roads_for_settlement(model: &UiModel, settlement: Intersection) -> Vec<Road> {
+    let valid_paths = board_path_set(model);
+    let occupied = occupied_roads(model);
+    settlement
+        .paths()
+        .into_iter()
+        .filter(|path| valid_paths.contains(path))
+        .filter(|path| !occupied.contains(path))
+        .map(|pos| Road { pos })
+        .collect()
 }
 
 fn render_game_view(model: &UiModel) -> RenderGameView {
@@ -751,9 +854,27 @@ fn render_game_view(model: &UiModel) -> RenderGameView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use catan_agents::remote_agent::UiModel;
+    use catan_core::gameplay::game::{
+        index::GameIndex,
+        init::GameInitializationState,
+        state::GameState,
+        view::{ContextFactory, VisibilityConfig},
+    };
 
     fn hex_set(hexes: impl IntoIterator<Item = Hex>) -> BTreeSet<Hex> {
         hexes.into_iter().collect()
+    }
+
+    fn model_from_state(state: &GameState) -> UiModel {
+        let index = GameIndex::rebuild(state);
+        let visibility = VisibilityConfig::default();
+        let factory = ContextFactory {
+            state,
+            index: &index,
+            visibility: &visibility,
+        };
+        UiModel::from_decision(&factory.player_decision_context(0, None))
     }
 
     #[test]
@@ -792,5 +913,48 @@ mod tests {
             move_hex_by_key(Hex::new(0, 0), KeyCode::Right, &board),
             Hex::new(0, 0)
         );
+    }
+
+    #[test]
+    fn initial_settlement_legality_excludes_existing_deadzone() {
+        let mut init = GameInitializationState::default();
+        let (settlement, road) = init
+            .builds
+            .query()
+            .possible_initial_placements(&init.board, 0)
+            .into_iter()
+            .next()
+            .expect("default board should have an initial placement");
+        init.builds
+            .try_init_place(0, road, settlement)
+            .expect("generated initial placement should be valid");
+
+        let state = init.finish();
+        let model = model_from_state(&state);
+        let legal = legal_initial_settlements(&model);
+
+        assert!(!legal.contains(&settlement.pos));
+        for neighbor in settlement.pos.neighbors() {
+            assert!(!legal.contains(&neighbor));
+        }
+    }
+
+    #[test]
+    fn initial_roads_are_adjacent_on_board_and_unoccupied() {
+        let init = GameInitializationState::default();
+        let model = model_from_state(&init.finish());
+        let settlement = *legal_initial_settlements(&model)
+            .iter()
+            .next()
+            .expect("default board should have legal settlements");
+
+        let roads = initial_roads_for_settlement(&model, settlement);
+        assert!(!roads.is_empty());
+        assert!(roads.len() <= 3);
+        assert!(roads.iter().all(|road| {
+            road.pos
+                .intersections_iter()
+                .any(|intersection| intersection == settlement)
+        }));
     }
 }

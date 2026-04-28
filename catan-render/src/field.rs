@@ -5,7 +5,7 @@ use catan_core::{
         game::view::PublicGameView,
         primitives::{
             Tile,
-            build::{EstablishmentType, Road},
+            build::{Establishment, EstablishmentType, Road},
             player::PlayerId,
             resource::Resource,
         },
@@ -115,6 +115,28 @@ pub enum FieldSelection {
 #[derive(Debug, Clone, Default)]
 pub struct FieldOverlay {
     pub selected: Option<FieldSelection>,
+    pub status: SelectionStatus,
+    pub preview: Vec<FieldPreview>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub enum SelectionStatus {
+    #[default]
+    Neutral,
+    Available,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum FieldPreview {
+    Establishment {
+        player_id: PlayerId,
+        establishment: Establishment,
+    },
+    Road {
+        player_id: PlayerId,
+        road: Road,
+    },
 }
 
 pub enum PathAttr {
@@ -227,13 +249,51 @@ impl FieldRenderer {
     }
 
     pub fn draw_overlay(&mut self, overlay: &FieldOverlay) {
-        match overlay.selected {
-            Some(FieldSelection::Hex(hex)) => self.draw_hex_attr(hex, HexAttr::Selector),
-            Some(FieldSelection::Path(path)) => self.draw_path_attr(path, PathAttr::Selector),
-            Some(FieldSelection::Intersection(intersection)) => {
-                self.draw_intersection_attr(intersection, IntersectionAttr::Selector)
+        for preview in &overlay.preview {
+            match *preview {
+                FieldPreview::Establishment {
+                    player_id,
+                    establishment,
+                } => self.draw_intersection_attr(
+                    establishment.pos,
+                    IntersectionAttr::Establishment(
+                        establishment.stage,
+                        Self::player_color(player_id),
+                    ),
+                ),
+                FieldPreview::Road { player_id, road } => self.draw_path_attr(
+                    road.pos,
+                    PathAttr::Road {
+                        color: Self::player_color(player_id),
+                    },
+                ),
             }
+        }
+
+        match overlay.selected {
+            Some(FieldSelection::Hex(hex)) => self.draw_hex_selector(
+                hex,
+                Self::selector_color(overlay.status, RenderColor::Ansi256(250)),
+            ),
+            Some(FieldSelection::Path(path)) => self.draw_path(
+                path,
+                RenderStyle::default()
+                    .bg(Self::selector_color(overlay.status, RenderColor::Blue))
+                    .bold(),
+            ),
+            Some(FieldSelection::Intersection(intersection)) => self.draw_intersection_selector(
+                intersection,
+                Self::selector_color(overlay.status, RenderColor::Green),
+            ),
             None => {}
+        }
+    }
+
+    fn selector_color(status: SelectionStatus, available_color: RenderColor) -> RenderColor {
+        match status {
+            SelectionStatus::Neutral => RenderColor::Ansi256(250),
+            SelectionStatus::Available => available_color,
+            SelectionStatus::Unavailable => RenderColor::Red,
         }
     }
 
@@ -259,7 +319,9 @@ impl FieldRenderer {
 
     pub fn draw_intersection_attr(&mut self, intersection: Intersection, attr: IntersectionAttr) {
         match attr {
-            IntersectionAttr::Selector => self.draw_intersection_selector(intersection),
+            IntersectionAttr::Selector => {
+                self.draw_intersection_selector(intersection, RenderColor::Red)
+            }
             IntersectionAttr::Establishment(kind, color) => {
                 self.draw_intersection_establishment(intersection, kind, color)
             }
@@ -272,7 +334,7 @@ impl FieldRenderer {
             HexAttr::Index => self.draw_hex_index(hex),
             HexAttr::Resource(res) => self.draw_hex_resource(hex, res),
             HexAttr::Robber => self.draw_hex_robber(hex),
-            HexAttr::Selector => self.draw_hex_selector(hex),
+            HexAttr::Selector => self.draw_hex_selector(hex, RenderColor::Red),
         }
     }
 
@@ -326,14 +388,8 @@ impl FieldRenderer {
         );
     }
 
-    fn draw_hex_selector(&mut self, hex: Hex) {
-        self.draw_hex_text(
-            hex,
-            3,
-            "[ ]",
-            RenderStyle::default().bg(RenderColor::Red).bold(),
-            true,
-        );
+    fn draw_hex_selector(&mut self, hex: Hex, color: RenderColor) {
+        self.draw_hex_text(hex, 3, "[ ]", RenderStyle::default().bg(color).bold(), true);
     }
 
     fn draw_hex_index(&mut self, hex: Hex) {
@@ -374,13 +430,10 @@ impl FieldRenderer {
         }
     }
 
-    fn draw_intersection_selector(&mut self, v: Intersection) {
+    fn draw_intersection_selector(&mut self, v: Intersection, color: RenderColor) {
         let pos = utils::centered(utils::intersection_anchor(v), "[ ]");
-        self.canvas.write_text_with_blank(
-            pos,
-            "[ ]",
-            RenderStyle::default().bg(RenderColor::Red).bold(),
-        );
+        self.canvas
+            .write_text_with_blank(pos, "[ ]", RenderStyle::default().bg(color).bold());
     }
 
     fn draw_intersection_establishment(
@@ -434,6 +487,8 @@ mod tests {
         let mut renderer = FieldRenderer::new();
         renderer.draw_overlay(&FieldOverlay {
             selected: Some(FieldSelection::Hex(Hex::new(0, 0))),
+            status: SelectionStatus::Unavailable,
+            preview: Vec::new(),
         });
 
         assert!(
