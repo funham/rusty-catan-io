@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeSet,
     io::{self, Stdout},
     os::unix::net::UnixStream,
     path::Path as FsPath,
@@ -186,6 +187,42 @@ impl CliUi {
         }
     }
 
+    fn select<T: Copy>(
+        &mut self,
+        model: &UiModel,
+        prompt: &str,
+        choices: &[(String, T)],
+    ) -> io::Result<T> {
+        if choices.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "selector has no choices",
+            ));
+        }
+
+        let mut selected = 0;
+        self.message = "select with arrows/tab; enter confirms".to_owned();
+        loop {
+            self.draw(Some(model), prompt, &choices[selected].0)?;
+            if let CrosstermEvent::Key(key) = event::read()?
+                && key.kind == KeyEventKind::Press
+            {
+                match key.code {
+                    KeyCode::Enter => return Ok(choices[selected].1),
+                    KeyCode::Right | KeyCode::Down | KeyCode::Tab => {
+                        selected = (selected + 1) % choices.len();
+                    }
+                    KeyCode::Left | KeyCode::Up | KeyCode::BackTab => {
+                        selected = selected.checked_sub(1).unwrap_or(choices.len() - 1);
+                    }
+                    KeyCode::Home => selected = 0,
+                    KeyCode::End => selected = choices.len() - 1,
+                    _ => {}
+                }
+            }
+        }
+    }
+
     fn draw(&mut self, model: Option<&UiModel>, prompt: &str, input: &str) -> io::Result<()> {
         let message = self.message.clone();
         self.terminal.draw(|frame| {
@@ -220,7 +257,9 @@ impl CliUi {
                     input.to_owned(),
                     Style::default().fg(Color::Yellow),
                 )),
-                Line::from("Esc clears input. Enter submits."),
+                Line::from(
+                    "Text: Esc clears, Enter submits. Select: arrows/tab move, Enter picks.",
+                ),
             ])
             .block(Block::default().borders(Borders::ALL).title("Command"));
             frame.render_widget(input, chunks[2]);
@@ -457,39 +496,15 @@ fn read_resource_collection(
 }
 
 fn read_hex(ui: &mut CliUi, model: &UiModel, prompt: &str) -> io::Result<Hex> {
-    loop {
-        let line = ui.prompt(model, prompt)?;
-        if let Ok(index) = line.parse::<usize>() {
-            return Ok(HexIndex::spiral_to_hex(index));
-        }
-        ui.set_message("expected spiral hex index".to_owned())?;
-    }
+    ui.select(model, prompt, &hex_choices(model))
 }
 
 fn read_path(ui: &mut CliUi, model: &UiModel, prompt: &str) -> io::Result<BoardPath> {
-    loop {
-        let line = ui.prompt(model, prompt)?;
-        let parts = line.split_whitespace().collect::<Vec<_>>();
-        if let [h1, h2] = parts.as_slice()
-            && let Some(path) = path_from_tokens(h1, h2)
-        {
-            return Ok(path);
-        }
-        ui.set_message("expected adjacent hex pair".to_owned())?;
-    }
+    ui.select(model, prompt, &path_choices(model))
 }
 
 fn read_intersection(ui: &mut CliUi, model: &UiModel, prompt: &str) -> io::Result<Intersection> {
-    loop {
-        let line = ui.prompt(model, prompt)?;
-        let parts = line.split_whitespace().collect::<Vec<_>>();
-        if let [h1, h2, h3] = parts.as_slice()
-            && let Some(intersection) = intersection_from_tokens(h1, h2, h3)
-        {
-            return Ok(intersection);
-        }
-        ui.set_message("expected adjacent hex triplet".to_owned())?;
-    }
+    ui.select(model, prompt, &intersection_choices(model))
 }
 
 fn read_player_id(ui: &mut CliUi, model: &UiModel, prompt: &str) -> io::Result<PlayerId> {
@@ -500,4 +515,51 @@ fn read_player_id(ui: &mut CliUi, model: &UiModel, prompt: &str) -> io::Result<P
         }
         ui.set_message("expected unsigned integer".to_owned())?;
     }
+}
+
+fn hex_choices(model: &UiModel) -> Vec<(String, Hex)> {
+    board_hexes(model)
+        .into_iter()
+        .map(|hex| (format!("hex {}", hex.index().to_spiral()), hex))
+        .collect()
+}
+
+fn path_choices(model: &UiModel) -> Vec<(String, BoardPath)> {
+    board_hexes(model)
+        .into_iter()
+        .flat_map(|hex| hex.paths_arr())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .map(|path| {
+            let (a, b) = path.as_pair();
+            (
+                format!("road {} {}", a.index().to_spiral(), b.index().to_spiral()),
+                path,
+            )
+        })
+        .collect()
+}
+
+fn intersection_choices(model: &UiModel) -> Vec<(String, Intersection)> {
+    board_hexes(model)
+        .into_iter()
+        .flat_map(|hex| hex.vertices_arr())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .map(|intersection| {
+            let label = intersection
+                .as_set()
+                .into_iter()
+                .map(|hex| hex.index().to_spiral().to_string())
+                .collect::<Vec<_>>()
+                .join(" ");
+            (format!("intersection {label}"), intersection)
+        })
+        .collect()
+}
+
+fn board_hexes(model: &UiModel) -> Vec<Hex> {
+    (0..model.public.board.tiles.len())
+        .map(HexIndex::spiral_to_hex)
+        .collect()
 }
