@@ -2,39 +2,35 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     gameplay::{
-        game::view::{GameSnapshot, GameView, PrivatePlayerData},
+        game::view::{OmniscientGameView, PlayerNotificationContext, PublicGameView},
         primitives::{build::Build, dev_card::DevCardUsage, player::PlayerId},
     },
     math::dice::DiceVal,
 };
 
-pub struct SpectatorContext<'a> {
-    pub view: &'a GameView,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObserverKind {
+    Spectator,
+    Omniscient,
 }
 
-pub struct PlayerContext<'a, 'b> {
-    pub view: &'a GameView,
-    pub player_data: &'b PrivatePlayerData,
+pub enum ObserverNotificationContext<'a> {
+    Spectator { public: PublicGameView<'a> },
+    Omniscient {
+        public: PublicGameView<'a>,
+        full: OmniscientGameView<'a>,
+    },
 }
 
-pub struct AuthorizedContext<'a, 'b> {
-    pub view: &'a GameView,
-    pub snapshot: &'b GameSnapshot,
+pub trait GameObserver {
+    fn kind(&self) -> ObserverKind;
+    fn on_event(&mut self, event: &GameEvent, context: ObserverNotificationContext<'_>);
 }
 
-pub trait SpectatorObserver {
-    fn on_event(&mut self, event: &GameEvent, context: &SpectatorContext);
-}
-
-pub trait PlayerObserver {
-    fn player_id(&self) -> PlayerId;
-    fn on_event(&mut self, event: &GameEvent, context: &PlayerContext) {
+pub trait PlayerNotification {
+    fn on_event(&mut self, event: &GameEvent, context: PlayerNotificationContext<'_>) {
         let _ = (event, context);
     }
-}
-
-pub trait AuthorizedObserver {
-    fn on_event(&mut self, event: &GameEvent, context: &AuthorizedContext);
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

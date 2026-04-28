@@ -1,5 +1,7 @@
+use std::sync::Arc;
+
 use crate::gameplay::{
-    field::state::{FieldBuildParam, FieldState},
+    field::state::{BoardLayout, BoardState, FieldBuildParam},
     game::state::GameState,
     primitives::{
         bank::Bank,
@@ -11,7 +13,8 @@ use crate::gameplay::{
 
 #[derive(Clone)]
 pub struct GameInitializationState {
-    pub field: FieldState,
+    pub board: Arc<BoardLayout>,
+    pub board_state: BoardState,
     pub turn: GameTurn<BackAndForthCycle>,
     pub bank: Bank,
     pub players: PlayerDataContainer,
@@ -26,19 +29,21 @@ impl Default for GameInitializationState {
 
 impl GameInitializationState {
     pub fn new(field_build_param: FieldBuildParam) -> Self {
-        let field = FieldState::new(field_build_param);
+        let board = Arc::new(BoardLayout::new(field_build_param));
         Self {
-            turn: GameTurn::new(field.n_players as u8),
-            players: PlayerDataContainer::new(field.n_players),
-            builds: BoardBuildData::new(field.n_players),
-            field,
+            turn: GameTurn::new(board.n_players as u8),
+            players: PlayerDataContainer::new(board.n_players),
+            builds: BoardBuildData::new(board.n_players),
+            board_state: BoardState::new(&board),
+            board,
             bank: Default::default(),
         }
     }
 
     pub fn finish(self) -> GameState {
         GameState {
-            field: self.field,
+            board: self.board,
+            board_state: self.board_state,
             turn: self.turn.into_regular(),
             bank: self.bank,
             players: self.players,

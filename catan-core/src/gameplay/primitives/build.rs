@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     gameplay::{
-        field::state::{BuildCollection, FieldState},
+        field::state::{BoardLayout, BuildCollection},
         primitives::{
             player::PlayerId,
             resource::{HasCost, ResourceCollection},
@@ -619,7 +619,7 @@ pub mod query {
 
         pub fn possible_initial_placements(
             &self,
-            field: &FieldState,
+            field: &BoardLayout,
             player_id: PlayerId,
         ) -> Vec<(Establishment, Road)> {
             let occ = self.container.occupancy();

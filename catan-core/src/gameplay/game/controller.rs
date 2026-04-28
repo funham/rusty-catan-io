@@ -1,13 +1,13 @@
 use super::state::GameState;
 use crate::agent::action::{
-    self, ChoosePlayerToRobAction, DropHalfAction, InitAction, InitStageAction, MoveRobbersAction,
-    PostDevCardAction, PostDiceAction, RegularAction, Request,
+    self, ChoosePlayerToRobAction, DecisionRequest, DropHalfAction, InitAction, InitStageAction,
+    MoveRobbersAction, PostDevCardAction, PostDiceAction, RegularAction,
 };
 use crate::gameplay::game::event::{
-    self, AuthorizedContext, AuthorizedObserver, GameEvent, PlayerContext, PlayerObserver,
-    SpectatorContext, SpectatorObserver,
+    GameEvent, GameObserver, ObserverKind, ObserverNotificationContext,
 };
 use crate::gameplay::game::init::GameInitializationState;
+use crate::gameplay::game::view::{ContextFactory, SearchFactory, StateIndices, VisibilityConfig};
 use crate::gameplay::primitives::Tile;
 use crate::gameplay::primitives::bank::BankResourceExchangeError;
 use crate::gameplay::primitives::build::{Build, BuildingError, Establishment, EstablishmentType};
@@ -16,60 +16,74 @@ use crate::gameplay::primitives::player::PlayerId;
 use crate::gameplay::primitives::trade::BankTrade;
 use crate::gameplay::primitives::turn::GameTurn;
 use crate::gameplay::{agent::agent::Agent, primitives::resource::HasCost};
-use crate::math::dice::DiceRoller;
 use crate::{
-    gameplay::primitives::resource::ResourceCollection, math::dice::DiceVal, topology::Hex,
+    gameplay::primitives::resource::ResourceCollection, math::dice::DiceRoller, math::dice::DiceVal,
 };
-
-use std::collections::BTreeSet;
 
 pub enum GameResult {
     Win(PlayerId),
     Interrupted,
 }
 
-#[derive(Debug)]
-pub enum RobError {
-    AutoRob { id: PlayerId },
+enum TurnFlow {
+    Continue,
+    EndTurn,
 }
 
 pub struct GameController {
-    spectator_observers: Vec<Box<dyn SpectatorObserver>>,
-    player_observers: Vec<Box<dyn PlayerObserver>>,
-    authorized_observers: Vec<Box<dyn AuthorizedObserver>>,
-
+    observers: Vec<Box<dyn GameObserver>>,
     game: GameState,
-    agents: Vec<Box<dyn Agent>>,
-    current_player: PlayerId,
+    indices: StateIndices,
+    players: Vec<Box<dyn Agent>>,
+    visibility: VisibilityConfig,
 }
 
 impl GameController {
-    pub fn new(game: GameState, agents: Vec<Box<dyn Agent>>) -> Self {
+    pub fn new(game: GameState, players: Vec<Box<dyn Agent>>) -> Self {
+        Self::new_with_visibility(game, players, VisibilityConfig::default())
+    }
+
+    pub fn new_with_visibility(
+        game: GameState,
+        players: Vec<Box<dyn Agent>>,
+        visibility: VisibilityConfig,
+    ) -> Self {
+        let indices = StateIndices::rebuild(&game);
+
         Self {
-            spectator_observers: Vec::new(),
-            player_observers: Vec::new(),
-            authorized_observers: Vec::new(),
-            game: game,
-            agents,
-            current_player: 0,
+            observers: Vec::new(),
+            game,
+            indices,
+            players,
+            visibility,
         }
     }
 
-    // TODO: move into GameInitializer
+    pub fn add_observer(&mut self, observer: Box<dyn GameObserver>) {
+        self.observers.push(observer);
+    }
+
     pub fn init(
         mut game_init: GameInitializationState,
-        agents: &mut Vec<Box<dyn Agent>>,
+        players: &mut Vec<Box<dyn Agent>>,
     ) -> GameState {
+        let visibility = VisibilityConfig::default();
+
         while game_init.turn.get_rounds_played() < 2 {
             let player_id = game_init.turn.get_turn_index();
 
             loop {
+                let state = game_init.clone().finish();
+                let indices = StateIndices::rebuild(&state);
+                let factory = ContextFactory {
+                    state: &state,
+                    indices: &indices,
+                    visibility: &visibility,
+                };
+
                 let action = InitStageAction::request(
-                    agents[player_id].as_mut(),
-                    &PlayerContext {
-                        view: &game_init.clone().finish().view(),
-                        player_data: &game_init.clone().finish().private_view(player_id),
-                    },
+                    players[player_id].as_mut(),
+                    factory.player_decision_context(player_id, None),
                 );
 
                 match game_init.builds.try_init_place(
@@ -93,118 +107,133 @@ impl GameController {
 
                         continue;
                     }
-                    Ok(()) => {
-                        // TODO: notify_observers
-                        break;
-                    }
+                    Ok(()) => break,
                 }
             }
 
             game_init.turn.next();
         }
 
+        let n_players = game_init.board.n_players as u8;
+
         GameState {
-            turn: GameTurn::new(game_init.field.n_players as u8),
-            field: game_init.field,
+            board: game_init.board,
+            board_state: game_init.board_state,
+            turn: GameTurn::new(n_players),
             bank: game_init.bank,
             players: game_init.players,
             builds: game_init.builds,
         }
     }
 
-    fn curr_agent(&mut self) -> &mut dyn Agent {
-        self.agents[self.current_player].as_mut()
-    }
-
     fn notify_observers(&mut self, event: &GameEvent) {
         log::info!("Event: {:?}", event);
 
-        let view = self.game.view();
+        let (game, indices, visibility, players, observers) = (
+            &self.game,
+            &self.indices,
+            &self.visibility,
+            &mut self.players,
+            &mut self.observers,
+        );
+        let factory = ContextFactory {
+            state: game,
+            indices,
+            visibility,
+        };
 
-        for obs in &mut self.spectator_observers {
-            obs.on_event(event, &SpectatorContext { view: &view });
+        for player in players.iter_mut() {
+            let player_id = player.player_id();
+            let cx = factory.player_notification_context(player_id);
+            player.on_event(event, cx);
         }
 
-        for obs in self.agents.iter_mut() {
-            let player = obs.player_id();
-            let private = self.game.private_view(player);
-
-            obs.on_event(
-                event,
-                &PlayerContext {
-                    view: &view,
-                    player_data: &private,
+        for observer in observers.iter_mut() {
+            let cx = match observer.kind() {
+                ObserverKind::Spectator => ObserverNotificationContext::Spectator {
+                    public: factory.spectator_public_view(),
                 },
-            );
-        }
-
-        for obs in self.player_observers.iter_mut() {
-            let player = obs.player_id();
-            let private = self.game.private_view(player);
-
-            obs.on_event(
-                event,
-                &PlayerContext {
-                    view: &view,
-                    player_data: &private,
+                ObserverKind::Omniscient => ObserverNotificationContext::Omniscient {
+                    public: factory.spectator_public_view(),
+                    full: factory.omniscient_view(),
                 },
-            );
-        }
-
-        let snapshot = self.game.snapshot();
-
-        for obs in &mut self.authorized_observers {
-            obs.on_event(
-                event,
-                &AuthorizedContext {
-                    view: &view,
-                    snapshot: &snapshot,
-                },
-            );
+            };
+            observer.on_event(event, cx);
         }
     }
 
-    fn request_dispatch<R: action::Request>(&mut self) -> R {
-        let view = self.game.view();
-        let private = self.game.private_view(self.current_player);
+    fn curr_player(&self) -> PlayerId {
+        self.game.turn.get_turn_index()
+    }
 
-        R::request(
-            self.curr_agent(),
-            &PlayerContext {
-                view: &view,
-                player_data: &private,
-            },
-        )
+    fn request_dispatch<R: action::DecisionRequest>(&mut self, player_id: PlayerId) -> R {
+        let policy = self.visibility.player_policy(player_id);
+        let search = Some(SearchFactory::new(&self.game, policy, player_id));
+        let factory = ContextFactory {
+            state: &self.game,
+            indices: &self.indices,
+            visibility: &self.visibility,
+        };
+        let context = factory.player_decision_context(player_id, search);
+
+        R::request(self.players[player_id].as_mut(), context)
+    }
+
+    fn request_init_action(&mut self, player_id: PlayerId) -> InitAction {
+        self.request_dispatch::<InitAction>(player_id)
+    }
+
+    fn request_post_dice_action(&mut self, player_id: PlayerId) -> PostDiceAction {
+        self.request_dispatch::<PostDiceAction>(player_id)
+    }
+
+    fn request_post_dev_card_action(&mut self, player_id: PlayerId) -> PostDevCardAction {
+        self.request_dispatch::<PostDevCardAction>(player_id)
+    }
+
+    fn request_regular_action(&mut self, player_id: PlayerId) -> RegularAction {
+        self.request_dispatch::<RegularAction>(player_id)
+    }
+
+    fn request_drop_half(&mut self, player_id: PlayerId) -> DropHalfAction {
+        self.request_dispatch::<DropHalfAction>(player_id)
+    }
+
+    fn request_move_robbers(&mut self, player_id: PlayerId) -> MoveRobbersAction {
+        self.request_dispatch::<MoveRobbersAction>(player_id)
+    }
+
+    fn request_choose_player_to_rob(&mut self, player_id: PlayerId) -> ChoosePlayerToRobAction {
+        self.request_dispatch::<ChoosePlayerToRobAction>(player_id)
     }
 
     pub fn run(&mut self, dice: &mut dyn DiceRoller) -> GameResult {
         loop {
             if let Some(winner) = self.game.check_win_condition() {
+                self.notify_observers(&GameEvent::GameEnded { winner_id: winner });
                 return GameResult::Win(winner);
             }
 
-            self.current_player = self.game.turn.get_turn_index();
-
             match self.handle_turn(dice) {
-                Ok(_) => self.game.turn.next(),
-                Err(_) => break,
+                TurnFlow::Continue => unreachable!("turn handler should not yield Continue"),
+                TurnFlow::EndTurn => self.game.turn.next(),
             }
         }
-
-        GameResult::Interrupted
     }
 
-    fn handle_turn(&mut self, dice: &mut dyn DiceRoller) -> Result<(), ()> {
+    fn handle_turn(&mut self, dice: &mut dyn DiceRoller) -> TurnFlow {
+        let current_player = self.curr_player();
+
         self.game
             .players
-            .get_mut(self.current_player)
+            .get_mut(current_player)
             .dev_cards_reset_queue();
 
         self.handle_move_init(dice)
     }
 
-    fn handle_move_init(&mut self, dice: &mut dyn DiceRoller) -> Result<(), ()> {
-        let answer = self.request_dispatch::<InitAction>();
+    fn handle_move_init(&mut self, dice: &mut dyn DiceRoller) -> TurnFlow {
+        let answer = self.request_init_action(self.curr_player());
 
         match answer {
             InitAction::RollDice => {
@@ -215,100 +244,82 @@ impl GameController {
         }
     }
 
-    fn handle_dice_rolled(&mut self) -> Result<(), ()> {
-        let answer = self.request_dispatch::<PostDiceAction>();
+    fn handle_dice_rolled(&mut self) -> TurnFlow {
+        let answer = self.request_post_dice_action(self.curr_player());
 
         match answer {
             PostDiceAction::UseDevCard(usage) => {
-                if let Err(e) = self.game.use_dev_card(usage, self.current_player) {
+                if let Err(e) = self.game.use_dev_card(usage.clone(), self.curr_player()) {
                     log::error!("{:?}", e);
+                } else {
+                    self.notify_observers(&GameEvent::DevCardUsed(usage));
                 }
-                self.handle_rest()?;
+                self.handle_rest()
             }
-
-            PostDiceAction::RegularAction(action) => match action {
-                RegularAction::Build(build) => {
-                    if let Ok(()) = Self::execute_build(&mut self.game, self.current_player, build)
-                    {
-                        self.notify_observers(&GameEvent::Built(build));
-                    }
-                }
-                RegularAction::TradeWithBank(trade) => {
-                    if let Ok(()) =
-                        Self::execute_bank_trade(&mut self.game, self.current_player, trade)
-                    {
-                        self.notify_observers(&GameEvent::Traded);
-                    }
-                }
-                RegularAction::BuyDevCard => {
-                    if let Ok(()) = Self::execute_buy_dev_card(&mut self.game, self.current_player)
-                    {
-                        self.notify_observers(&GameEvent::DevCardBought);
-                    }
-                }
-                RegularAction::OfferPublicTrade(_) => {
-                    log::error!("P2P trades not implemented")
-                }
-                RegularAction::OfferPersonalTrade(_) => {
-                    log::error!("P2P trades not implemented")
-                }
-                RegularAction::EndMove => return Err(()),
+            PostDiceAction::RegularAction(action) => match self.execute_regular_action(action) {
+                TurnFlow::Continue => self.handle_dice_rolled(),
+                TurnFlow::EndTurn => TurnFlow::EndTurn,
             },
         }
-
-        self.handle_dice_rolled()
     }
 
-    fn handle_dev_card_used(
-        &mut self,
-        usage: DevCardUsage,
-        dice: &mut dyn DiceRoller,
-    ) -> Result<(), ()> {
-        if let Err(e) = self.game.use_dev_card(usage, self.current_player) {
+    fn handle_dev_card_used(&mut self, usage: DevCardUsage, dice: &mut dyn DiceRoller) -> TurnFlow {
+        if let Err(e) = self.game.use_dev_card(usage.clone(), self.curr_player()) {
             log::error!("{:?}", e);
+        } else {
+            self.notify_observers(&GameEvent::DevCardUsed(usage));
         }
 
-        if let Some(winner_id) = self.game.check_win_condition() {
-            self.notify_observers(&GameEvent::GameEnded { winner_id });
-            return Err(());
-        }
-
-        let _ = self.request_dispatch::<PostDevCardAction>();
+        let _ = self.request_post_dev_card_action(self.curr_player());
 
         self.execute_dice_roll(dice);
         self.handle_rest()
     }
 
-    fn handle_rest(&mut self) -> Result<(), ()> {
-        let answer = self.request_dispatch::<RegularAction>();
+    fn handle_rest(&mut self) -> TurnFlow {
+        loop {
+            let answer = self.request_regular_action(self.curr_player());
 
-        match answer {
+            match self.execute_regular_action(answer) {
+                TurnFlow::Continue => continue,
+                TurnFlow::EndTurn => return TurnFlow::EndTurn,
+            }
+        }
+    }
+
+    fn execute_regular_action(&mut self, action: RegularAction) -> TurnFlow {
+        let current_player = self.curr_player();
+
+        match action {
             RegularAction::Build(build) => {
-                if let Ok(()) = Self::execute_build(&mut self.game, self.current_player, build) {
+                if let Ok(()) = Self::execute_build(&mut self.game, current_player, build) {
+                    self.indices = StateIndices::rebuild(&self.game);
                     self.notify_observers(&GameEvent::Built(build));
                 }
+                TurnFlow::Continue
             }
             RegularAction::TradeWithBank(trade) => {
-                if let Ok(()) = Self::execute_bank_trade(&mut self.game, self.current_player, trade)
-                {
+                if let Ok(()) = Self::execute_bank_trade(&mut self.game, current_player, trade) {
                     self.notify_observers(&GameEvent::Traded);
                 }
+                TurnFlow::Continue
             }
             RegularAction::BuyDevCard => {
-                if let Ok(()) = Self::execute_buy_dev_card(&mut self.game, self.current_player) {
+                if let Ok(()) = Self::execute_buy_dev_card(&mut self.game, current_player) {
                     self.notify_observers(&GameEvent::DevCardBought);
                 }
+                TurnFlow::Continue
             }
-            RegularAction::OfferPublicTrade(_) => log::error!("P2P trades not implemented"),
-            RegularAction::OfferPersonalTrade(_) => log::error!("P2P trades not implemented"),
-            RegularAction::EndMove => return Err(()),
+            RegularAction::OfferPublicTrade(_) => {
+                log::error!("P2P trades not implemented");
+                TurnFlow::Continue
+            }
+            RegularAction::OfferPersonalTrade(_) => {
+                log::error!("P2P trades not implemented");
+                TurnFlow::Continue
+            }
+            RegularAction::EndMove => TurnFlow::EndTurn,
         }
-
-        if self.game.check_win_condition().is_some() {
-            return Err(());
-        }
-
-        self.handle_rest()
     }
 
     fn execute_bank_trade(
@@ -342,7 +353,7 @@ impl GameController {
             }
         }
 
-        match game.builds.try_build(player, build.clone()) {
+        match game.builds.try_build(player, build) {
             Ok(()) => Ok(()),
             Err(err) => {
                 log::warn!("Couldn't build {}: {:?}", Into::<&str>::into(build), err);
@@ -374,32 +385,31 @@ impl GameController {
 
     fn execute_dice_roll(&mut self, dice: &mut dyn DiceRoller) {
         let roll = dice.roll();
+        let current_player = self.curr_player();
 
         log::info!(
             "Player#[{}] rolled {}",
-            self.current_player,
+            current_player,
             Into::<u8>::into(roll)
         );
 
         self.notify_observers(&GameEvent::DiceRolled(roll));
 
         match roll {
-            seven if seven == DiceVal::seven() => {
-                Self::execute_seven(&mut self.game, self.current_player)
-            }
-            other => Self::execute_harvesting(&mut self.game, self.current_player, other),
+            seven if seven == DiceVal::seven() => self.execute_seven(current_player),
+            other => Self::execute_harvesting(&mut self.game, current_player, other),
         }
     }
 
     fn execute_harvesting(game: &mut GameState, player: PlayerId, num: DiceVal) {
-        let hexes = game.field.hexes_by_num(num).clone();
+        let hexes = game.board.hexes_by_num(num).clone();
 
         for pid in game.player_ids_starting_from(player) {
             for est in game.builds[pid].establishments.clone() {
                 let coinc = est.pos.as_set();
 
                 for hex in coinc.intersection(&hexes) {
-                    match game.field.arrangement[*hex] {
+                    match game.board.arrangement[*hex] {
                         Tile::Resource { resource, .. } => {
                             let _ = game.transfer_from_bank(
                                 (resource, est.stage.harvest_amount() as u16).into(),
@@ -414,7 +424,98 @@ impl GameController {
         }
     }
 
-    fn execute_seven(_game: &mut GameState, _player: PlayerId) {
-        log::trace!("seven rolled — robber logic here");
+    fn execute_seven(&mut self, player: PlayerId) {
+        self.execute_seven_discards(player);
+        self.execute_seven_robber(player);
+    }
+
+    fn execute_seven_discards(&mut self, player: PlayerId) {
+        for pid in self.game.player_ids_starting_from(player) {
+            let total_cards = self.game.players.get(pid).resources().total();
+            if total_cards <= 7 {
+                continue;
+            }
+
+            let required_drop = total_cards / 2;
+
+            loop {
+                let DropHalfAction(dropped) = self.request_drop_half(pid);
+
+                /* validations */
+
+                if dropped.total() != required_drop {
+                    log::warn!(
+                        "Player#{} attempted to discard {} cards, but must discard exactly {}",
+                        pid,
+                        dropped.total(),
+                        required_drop
+                    );
+                    continue;
+                }
+
+                match self.game.transfer_to_bank(dropped, pid) {
+                    Ok(()) => break,
+                    Err(BankResourceExchangeError::AccountIsShort { .. }) => {
+                        log::warn!(
+                            "Player#{} attempted to discard resources they do not possess: {}",
+                            pid,
+                            dropped
+                        );
+                    }
+
+                    // TODO: refactor whole banking system (don't remove this comment)
+                    Err(BankResourceExchangeError::BankIsShort) => unreachable!(),
+                }
+            }
+        }
+    }
+
+    fn execute_seven_robber(&mut self, player: PlayerId) {
+        loop {
+            let MoveRobbersAction(target_hex) = self.request_move_robbers(player);
+
+            /* validations */
+
+            if target_hex == self.game.board_state.robber_pos {
+                log::warn!(
+                    "Player#{} attempted to keep the robber on the same hex",
+                    player
+                );
+                continue;
+            }
+
+            let candidates = self
+                .game
+                .players_on_hex(target_hex)
+                .into_iter()
+                .filter(|id| *id != player)
+                .filter(|id| !self.game.players.get(*id).resources().empty())
+                .collect::<Vec<_>>();
+
+            let robbed_id = match candidates.as_slice() {
+                [] => None,
+                [only] => Some(*only),
+                _ => loop {
+                    let chosen = self.request_choose_player_to_rob(player).0;
+                    if candidates.contains(&chosen) {
+                        break Some(chosen);
+                    }
+
+                    log::warn!(
+                        "Player#{} attempted to rob Player#{} who is not a legal target on {:?}",
+                        player,
+                        chosen,
+                        target_hex
+                    );
+                },
+            };
+
+            match self.game.use_robbers(target_hex, player, robbed_id) {
+                Ok(()) => break,
+                Err(err) => {
+                    log::warn!("Invalid robber move by Player#{}: {:?}", player, err);
+                }
+            }
+        }
     }
 }

@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    agent::Agent,
     gameplay::{
-        game::event::PlayerContext,
+        agent::agent::PlayerRuntime,
+        game::view::PlayerDecisionContext,
         primitives::{
             build::{Build, Road},
             dev_card::DevCardUsage,
@@ -63,60 +63,60 @@ pub enum RegularAction {
     EndMove,
 }
 
-pub trait Request: Sized {
-    fn request(agent: &mut dyn Agent, context: &PlayerContext) -> Self;
+pub trait DecisionRequest: Sized {
+    fn request(player: &mut dyn PlayerRuntime, context: PlayerDecisionContext<'_>) -> Self;
 }
 
-impl Request for InitStageAction {
-    fn request(agent: &mut dyn Agent, context: &PlayerContext) -> Self {
-        agent.init_stage_action(context)
+impl DecisionRequest for InitStageAction {
+    fn request(player: &mut dyn PlayerRuntime, context: PlayerDecisionContext<'_>) -> Self {
+        player.init_stage_action(context)
     }
 }
 
-impl Request for InitAction {
-    fn request(agent: &mut dyn Agent, context: &PlayerContext) -> Self {
-        agent.init_action(context)
+impl DecisionRequest for InitAction {
+    fn request(player: &mut dyn PlayerRuntime, context: PlayerDecisionContext<'_>) -> Self {
+        player.init_action(context)
     }
 }
 
-impl Request for TradeAnswer {
-    fn request(agent: &mut dyn Agent, context: &PlayerContext) -> Self {
-        agent.answer_trade(context)
+impl DecisionRequest for TradeAnswer {
+    fn request(player: &mut dyn PlayerRuntime, context: PlayerDecisionContext<'_>) -> Self {
+        player.answer_trade(context)
     }
 }
 
-impl Request for PostDevCardAction {
-    fn request(agent: &mut dyn Agent, context: &PlayerContext) -> Self {
-        agent.after_dev_card_action(context)
+impl DecisionRequest for PostDevCardAction {
+    fn request(player: &mut dyn PlayerRuntime, context: PlayerDecisionContext<'_>) -> Self {
+        player.after_dev_card_action(context)
     }
 }
 
-impl Request for PostDiceAction {
-    fn request(agent: &mut dyn Agent, context: &PlayerContext) -> Self {
-        agent.after_dice_action(context)
+impl DecisionRequest for PostDiceAction {
+    fn request(player: &mut dyn PlayerRuntime, context: PlayerDecisionContext<'_>) -> Self {
+        player.after_dice_action(context)
     }
 }
 
-impl Request for RegularAction {
-    fn request(agent: &mut dyn Agent, context: &PlayerContext) -> Self {
-        agent.regular_action(context)
+impl DecisionRequest for RegularAction {
+    fn request(player: &mut dyn PlayerRuntime, context: PlayerDecisionContext<'_>) -> Self {
+        player.regular_action(context)
     }
 }
 
-impl Request for ChoosePlayerToRobAction {
-    fn request(agent: &mut dyn Agent, context: &PlayerContext) -> Self {
-        agent.choose_player_to_rob(context)
+impl DecisionRequest for ChoosePlayerToRobAction {
+    fn request(player: &mut dyn PlayerRuntime, context: PlayerDecisionContext<'_>) -> Self {
+        player.choose_player_to_rob(context)
     }
 }
 
-impl Request for MoveRobbersAction {
-    fn request(agent: &mut dyn Agent, context: &PlayerContext) -> Self {
-        agent.move_robbers(context)
+impl DecisionRequest for MoveRobbersAction {
+    fn request(player: &mut dyn PlayerRuntime, context: PlayerDecisionContext<'_>) -> Self {
+        player.move_robbers(context)
     }
 }
 
-impl Request for DropHalfAction {
-    fn request(agent: &mut dyn Agent, context: &PlayerContext) -> Self {
-        agent.drop_half(context)
+impl DecisionRequest for DropHalfAction {
+    fn request(player: &mut dyn PlayerRuntime, context: PlayerDecisionContext<'_>) -> Self {
+        player.drop_half(context)
     }
 }

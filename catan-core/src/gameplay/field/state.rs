@@ -19,10 +19,9 @@ struct FieldCache {
 }
 
 #[derive(Debug, Clone)]
-pub struct FieldState {
+pub struct BoardLayout {
     pub n_players: usize,
     pub arrangement: FieldArrangement,
-    pub robber_pos: Hex,
     cache_: FieldCache,
 }
 
@@ -84,41 +83,43 @@ impl FieldCache {
 }
 
 #[derive(Serialize, Deserialize)]
-struct FieldStateSerde {
+struct BoardLayoutSerde {
     n_players: usize,
     arrangement: FieldArrangement,
-    robber_pos: Hex,
 }
 
-impl Serialize for FieldState {
+impl Serialize for BoardLayout {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        FieldStateSerde {
+        BoardLayoutSerde {
             n_players: self.n_players,
             arrangement: self.arrangement.clone(),
-            robber_pos: self.robber_pos,
         }
         .serialize(serializer)
     }
 }
 
-impl<'de> Deserialize<'de> for FieldState {
+impl<'de> Deserialize<'de> for BoardLayout {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        let raw = FieldStateSerde::deserialize(deserializer)?;
+        let raw = BoardLayoutSerde::deserialize(deserializer)?;
         let cache_ = FieldCache::new(raw.n_players, &raw.arrangement);
 
         Ok(Self {
             n_players: raw.n_players,
             arrangement: raw.arrangement,
-            robber_pos: raw.robber_pos,
             cache_,
         })
     }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct BoardState {
+    pub robber_pos: Hex,
 }
 
 #[derive(Debug)]
@@ -154,7 +155,7 @@ impl FieldBuildParam {
         field_radius: usize,
         hex_arrangement: FieldArrangement,
     ) -> Result<Self, FieldBuildError> {
-        if hex_arrangement.len() != FieldState::field_size_by_radius(field_radius) {
+        if hex_arrangement.len() != BoardLayout::field_size_by_radius(field_radius) {
             return Err(FieldBuildError::WrongAmountOfHexesProvided);
         }
 
@@ -175,7 +176,7 @@ pub struct BuildCollection {
     pub roads: Vec<Road>,
 }
 
-impl FieldState {
+impl BoardLayout {
     pub const fn field_size_by_radius(radius: usize) -> usize {
         1 + 3 * radius * (radius + 1)
     }
@@ -186,12 +187,11 @@ impl FieldState {
         Self {
             n_players: param.n_players,
             arrangement: param.arrangement,
-            robber_pos: cache.desert_pos,
             cache_: cache,
         }
     }
 
-    pub fn get_desert_pos(&self) -> Hex {
+    pub fn desert_pos(&self) -> Hex {
         self.cache_.desert_pos
     }
 
@@ -201,5 +201,13 @@ impl FieldState {
 
     pub fn ports_aquired(&self, player_id: PlayerId) -> &BTreeSet<PortKind> {
         &self.cache_.ports_by_player[player_id]
+    }
+}
+
+impl BoardState {
+    pub fn new(layout: &BoardLayout) -> Self {
+        Self {
+            robber_pos: layout.desert_pos(),
+        }
     }
 }

@@ -1,14 +1,13 @@
+use std::sync::Arc;
+
 use crate::{
     gameplay::{
-        game::{
-            event::PlayerContext,
-            view::{GameSnapshot, GameView, PrivatePlayerData, PublicPlayerState},
-        },
+        field::state::{BoardLayout, BoardState},
         primitives::{
             bank::{Bank, BankResourceExchangeError, PlayerResourceExchangeError},
             build::{BoardBuildData, Build, Road},
             dev_card::DevCardUsage,
-            player::{PlayerDataContainer, PlayerId, SecuredPlayerData},
+            player::{PlayerDataContainer, PlayerId},
             resource::{Resource, ResourceCollection},
             turn::GameTurn,
         },
@@ -16,11 +15,12 @@ use crate::{
     topology::Hex,
 };
 
-use crate::{gameplay::field::state::FieldState, topology::Path};
+use crate::topology::Path;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct GameState {
-    pub field: FieldState,
+    pub board: Arc<BoardLayout>,
+    pub board_state: BoardState,
     pub turn: GameTurn,
     pub bank: Bank,
     pub players: PlayerDataContainer,
@@ -37,40 +37,12 @@ pub enum DevCardUsageError {
 }
 
 impl GameState {
-    pub fn snapshot(&self) -> GameSnapshot {
-        GameSnapshot {
-            current_player_id: self.turn.get_turn_index(),
-            rounds_played: self.turn.get_rounds_played(),
-            field: self.field.clone(),
-            bank: self.bank.public_view(),
-            players: self
-                .players
-                .iter()
-                .enumerate()
-                .map(|(player_id, player)| PublicPlayerState {
-                    player_id,
-                    public_data: SecuredPlayerData::from(&player),
-                    builds: self.builds.query().all_builds()[player_id].clone(),
-                })
-                .collect(),
-            longest_road_owner: self.builds.longest_road(),
-            largest_army_owner: self.players.best_army(),
-        }
+    pub fn largest_army_owner(&self) -> Option<PlayerId> {
+        self.players.best_army()
     }
 
-    pub fn view(&self) -> GameView {
-        
-        
-        GameView {
-            field: self.field.clone(),
-            turn: self.turn.clone(),
-            builds: self.builds.clone(),
-            players: todo!(),
-        }
-    }
-
-    pub fn private_view(&self, player_id: PlayerId) -> PrivatePlayerData {
-        todo!()
+    pub fn longest_road_owner(&self) -> Option<PlayerId> {
+        self.builds.longest_road()
     }
 
     pub fn bank_resource_exchange(
@@ -203,10 +175,8 @@ impl GameState {
     pub fn count_dev_card_build_vp(&self, player_id: PlayerId) -> u16 {
         let mut score = 0;
 
-        // dev card victory points
         score += self.players.get(player_id).dev_cards().victory_pts;
 
-        // build victory points
         score += self.builds[player_id]
             .establishments
             .iter()
@@ -227,11 +197,11 @@ impl GameState {
     ) -> Result<(), DevCardUsageError> {
         log::trace!("use robbers");
 
-        if (self.field.arrangement.field_radius as usize) < rob_hex.norm() {
+        if (self.board.arrangement.field_radius as usize) < rob_hex.norm() {
             return Err(DevCardUsageError::InvalidHex);
         }
 
-        self.field.robber_pos = rob_hex;
+        self.board_state.robber_pos = rob_hex;
 
         if let Some(robbed_id) = robbed_id {
             match self.builds.query().builds_on_hex(rob_hex).get(&robbed_id) {
