@@ -464,10 +464,7 @@ fn model_lines(model: &UiModel) -> Vec<Line<'static>> {
             "you: p{} resources {}",
             private.player_id, private.resources
         )));
-        lines.push(Line::from(format!(
-            "your dev cards: {:?}",
-            private.dev_cards
-        )));
+        lines.push(Line::from(format!("your dev cards: {}", private.dev_cards)));
     }
     lines.push(Line::from(""));
     lines.push(Line::from("players:"));

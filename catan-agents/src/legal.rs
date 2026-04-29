@@ -4,7 +4,7 @@ use catan_core::{
         game::view::{PlayerDecisionContext, PublicPlayerResources},
         primitives::{
             build::{Build, Establishment, EstablishmentType, Road},
-            dev_card::{DevCardUsage, UsableDevCardKind},
+            dev_card::{DevCardUsage, UsableDevCard},
             player::PlayerId,
             resource::Resource,
         },
@@ -100,7 +100,7 @@ pub fn legal_dev_card_usages(
     let active = context.private.dev_cards.active;
     let mut candidates = Vec::new();
 
-    if active.contains(UsableDevCardKind::Knight) {
+    if active.contains(UsableDevCard::Knight) {
         for rob_hex in context.public.board.arrangement.hex_iter() {
             if rob_hex == context.public.board_state.robber_pos {
                 continue;
@@ -127,7 +127,7 @@ pub fn legal_dev_card_usages(
         }
     }
 
-    if active.contains(UsableDevCardKind::YearOfPlenty) {
+    if active.contains(UsableDevCard::YearOfPlenty) {
         for first in Resource::list() {
             for second in Resource::list() {
                 candidates.push(DevCardUsage::YearOfPlenty([first, second]));
@@ -135,11 +135,11 @@ pub fn legal_dev_card_usages(
         }
     }
 
-    if active.contains(UsableDevCardKind::Monopoly) {
+    if active.contains(UsableDevCard::Monopoly) {
         candidates.extend(Resource::list().into_iter().map(DevCardUsage::Monopoly));
     }
 
-    if active.contains(UsableDevCardKind::RoadBuild) {
+    if active.contains(UsableDevCard::RoadBuild) {
         let roads = context
             .public
             .board

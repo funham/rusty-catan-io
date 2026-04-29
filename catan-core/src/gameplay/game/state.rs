@@ -424,7 +424,7 @@ mod tests {
     use crate::gameplay::{
         game::init::GameInitializationState,
         primitives::{
-            dev_card::{DevCardKind, DevCardUsage, UsableDevCardKind},
+            dev_card::{DevCardKind, DevCardUsage, UsableDevCard},
             resource::{Resource, ResourceCollection},
         },
     };
@@ -466,7 +466,7 @@ mod tests {
         state
             .players
             .get_mut(player_id)
-            .dev_cards_add(DevCardKind::Usable(UsableDevCardKind::Knight));
+            .dev_cards_add(DevCardKind::Usable(UsableDevCard::Knight));
         state.players.get_mut(player_id).dev_cards_reset_queue();
     }
 
@@ -492,11 +492,11 @@ mod tests {
         assert_eq!(state.players.get(0).resources().total(), 1);
         assert_eq!(state.players.get(1).resources().total(), 0);
         assert_eq!(
-            state.players.get(0).dev_cards().used[UsableDevCardKind::Knight],
+            state.players.get(0).dev_cards().used[UsableDevCard::Knight],
             1
         );
         assert_eq!(
-            state.players.get(0).dev_cards().active[UsableDevCardKind::Knight],
+            state.players.get(0).dev_cards().active[UsableDevCard::Knight],
             0
         );
     }
@@ -523,11 +523,11 @@ mod tests {
         assert_eq!(err, DevCardUsageError::InvalidRobbery);
         assert_eq!(state.board_state.robber_pos, initial_robber);
         assert_eq!(
-            state.players.get(0).dev_cards().active[UsableDevCardKind::Knight],
+            state.players.get(0).dev_cards().active[UsableDevCard::Knight],
             1
         );
         assert_eq!(
-            state.players.get(0).dev_cards().used[UsableDevCardKind::Knight],
+            state.players.get(0).dev_cards().used[UsableDevCard::Knight],
             0
         );
     }

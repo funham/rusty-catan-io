@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::gameplay::primitives::{
-    dev_card::{DevCardData, DevCardDataPlayingError, DevCardKind, UsableDevCardKind},
+    dev_card::{DevCardData, DevCardDataPlayingError, DevCardKind, UsableDevCard},
     resource::ResourceCollection,
 };
 
@@ -36,12 +36,12 @@ impl PlayerDataContainer {
     pub fn dev_card_play(
         &mut self,
         player_id: PlayerId,
-        card: UsableDevCardKind,
+        card: UsableDevCard,
     ) -> Result<(), DevCardDataPlayingError> {
-        if card == UsableDevCardKind::Knight {
-            let candidate = self.players[player_id].dev_cards.used[UsableDevCardKind::Knight] + 1;
+        if card == UsableDevCard::Knight {
+            let candidate = self.players[player_id].dev_cards.used[UsableDevCard::Knight] + 1;
             let number_to_beat = match self.best_army {
-                Some(id) => self.players[id].dev_cards.used[UsableDevCardKind::Knight],
+                Some(id) => self.players[id].dev_cards.used[UsableDevCard::Knight],
                 None => 2,
             };
 
@@ -159,7 +159,7 @@ impl<'a> PlayerDataProxyMut<'a> {
 
     pub fn dev_cards_move_to_used(
         &mut self,
-        card: UsableDevCardKind,
+        card: UsableDevCard,
     ) -> Result<(), DevCardDataPlayingError> {
         self.container.dev_card_play(self.player_id, card)
     }
