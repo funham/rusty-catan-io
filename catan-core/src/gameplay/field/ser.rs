@@ -45,7 +45,7 @@ impl Serialize for BoardArrangement {
             .collect();
 
         FieldArrangementJsonVal {
-            field_radius: self.field_radius,
+            field_radius: self.radius(),
             tile_info,
             port_map: self.ports().clone(),
         }

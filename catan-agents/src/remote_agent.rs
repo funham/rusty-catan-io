@@ -520,7 +520,7 @@ impl UiBoard {
     fn from_board(board: &BoardLayout) -> Self {
         Self {
             n_players: board.n_players,
-            field_radius: board.arrangement.field_radius,
+            field_radius: board.arrangement.radius(),
             tiles: board.arrangement.iter().collect(),
             ports: board
                 .arrangement

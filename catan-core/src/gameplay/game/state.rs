@@ -241,7 +241,7 @@ impl GameState {
     ) -> Result<(), DevCardUsageError> {
         log::trace!("use robbers");
 
-        if (self.board.arrangement.field_radius as usize) < rob_hex.norm() {
+        if (self.board.arrangement.radius() as usize) < rob_hex.norm() {
             return Err(DevCardUsageError::InvalidHex);
         }
 
@@ -334,7 +334,7 @@ impl GameState {
         robber_id: PlayerId,
         robbed_id: Option<PlayerId>,
     ) -> Result<(), DevCardUsageError> {
-        if (self.board.arrangement.field_radius as usize) < rob_hex.norm() {
+        if (self.board.arrangement.radius() as usize) < rob_hex.norm() {
             return Err(DevCardUsageError::InvalidHex);
         }
         if rob_hex == self.board_state.robber_pos {

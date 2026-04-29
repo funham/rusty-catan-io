@@ -19,9 +19,19 @@ pub struct PortPos {
     pub orient: SignedAxis,
 }
 
+impl PortPos {
+    pub fn intersections(&self) -> [Intersection; 2] {
+        self.path().intersections()
+    }
+
+    pub fn path(&self) -> Path {
+        Path::try_from((self.hex, self.hex + self.orient.dir())).unwrap()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct BoardArrangement {
-    pub field_radius: u8,
+    field_radius: u8,
     tiles: Vec<Tile>,
     port_map: PortMap,
 }
@@ -78,6 +88,10 @@ impl BoardArrangement {
         self.hex_iter()
             .flat_map(|h| h.paths_arr())
             .collect::<BTreeSet<_>>()
+    }
+
+    pub fn radius(&self) -> u8 {
+        self.field_radius
     }
 
     pub fn paths(&self) -> impl IntoIterator<Item = Path> {

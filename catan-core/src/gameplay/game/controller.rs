@@ -503,7 +503,10 @@ impl GameController {
 
     fn execute_trade_with_bank(&mut self, player: PlayerId, trade: BankTrade) -> Result<(), ()> {
         log::trace!("Executing bank trade for player {}: {:?}", player, trade);
-        let ports = self.game.board.ports_aquired(player);
+
+        let index = GameIndex::rebuild(&self.game);
+
+        let ports = &index.ports_aquired[player];
         let required_port = match trade.kind {
             BankTradeKind::BankGeneric => None,
             BankTradeKind::PortGeneric => Some(PortKind::Universal),

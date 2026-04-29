@@ -1,4 +1,7 @@
-use std::{collections::BTreeSet, usize};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    usize,
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -6,41 +9,37 @@ use super::{BoardArrangement, HexesByNum};
 use crate::gameplay::primitives::{
     PortKind, Tile,
     build::{Establishment, Road},
-    player::PlayerId,
 };
 use crate::math::dice::DiceVal;
 use crate::topology::*;
 
 // TODO: move to FieldIndex maybe?
 #[derive(Debug, Clone)]
-struct Cache {
-    desert_pos: Hex,
-    hex_by_num: HexesByNum,
-    ports_by_player: Vec<BTreeSet<PortKind>>, // may be moved to PlayerData later
+pub struct BoardIndex {
+    pub desert_pos: Hex,
+    pub hex_by_num: HexesByNum,
+    pub ports_intersection: BTreeMap<Intersection, PortKind>,
 }
 
-#[derive(Debug, Clone)]
-pub struct BoardLayout {
-    pub n_players: usize,
-    pub arrangement: BoardArrangement,
-    cache_: Cache,
-}
-
-impl Cache {
-    fn new(n_players: usize, hexes: &BoardArrangement) -> Self {
-        let desert_pos = Self::find_desert_pos(hexes);
-        let hex_by_num = Self::get_hex_by_num(hexes);
-        let ports_by_player = Self::get_ports_by_player(n_players);
+impl BoardIndex {
+    fn new(board: &BoardArrangement) -> Self {
+        let desert_pos = Self::find_desert_pos(board);
+        let hex_by_num = Self::get_hex_by_num(board);
+        let ports_intersection = board
+            .ports()
+            .iter()
+            .flat_map(|(pos, port)| {
+                pos.intersections()
+                    .into_iter()
+                    .zip(std::iter::repeat(port).cloned())
+            })
+            .collect::<BTreeMap<_, _>>();
 
         Self {
             desert_pos,
             hex_by_num,
-            ports_by_player,
+            ports_intersection,
         }
-    }
-
-    fn get_ports_by_player(n_players: usize) -> Vec<BTreeSet<PortKind>> {
-        vec![BTreeSet::default(); n_players]
     }
 
     fn get_hex_by_num(arrangement: &BoardArrangement) -> HexesByNum {
@@ -108,12 +107,12 @@ impl<'de> Deserialize<'de> for BoardLayout {
         D: serde::Deserializer<'de>,
     {
         let raw = BoardLayoutSerde::deserialize(deserializer)?;
-        let cache_ = Cache::new(raw.n_players, &raw.arrangement);
+        let cache_ = BoardIndex::new(&raw.arrangement);
 
         Ok(Self {
             n_players: raw.n_players,
             arrangement: raw.arrangement,
-            cache_,
+            index: cache_,
         })
     }
 }
@@ -177,31 +176,38 @@ pub struct BuildCollection {
     pub roads: Vec<Road>,
 }
 
+#[derive(Debug, Clone)]
+pub struct BoardLayout {
+    pub n_players: usize,
+    pub arrangement: BoardArrangement,
+    index: BoardIndex,
+}
+
 impl BoardLayout {
     pub const fn field_size_by_radius(radius: usize) -> usize {
         1 + 3 * radius * (radius + 1) // TODO: use `HexIndex`` instead
     }
 
     pub fn new(param: FieldBuildParam) -> Self {
-        let cache = Cache::new(param.n_players, &param.arrangement);
+        let cache = BoardIndex::new(&param.arrangement);
 
         Self {
             n_players: param.n_players,
             arrangement: param.arrangement,
-            cache_: cache,
+            index: cache,
         }
     }
 
     pub fn desert_pos(&self) -> Hex {
-        self.cache_.desert_pos
+        self.index.desert_pos
     }
 
     pub fn hexes_by_num(&self, num: DiceVal) -> &BTreeSet<Hex> {
-        &self.cache_.hex_by_num[num]
+        &self.index.hex_by_num[num]
     }
 
-    pub fn ports_aquired(&self, player_id: PlayerId) -> &BTreeSet<PortKind> {
-        &self.cache_.ports_by_player[player_id]
+    pub fn index(&self) -> BoardIndex {
+        self.index.clone()
     }
 }
 
