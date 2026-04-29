@@ -6,16 +6,34 @@ use num::Integer;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub enum UsableDevCardKind {
+pub enum UsableDevCard {
     Knight,
     YearOfPlenty,
     RoadBuild,
     Monopoly,
 }
 
+impl UsableDevCard {
+    const LIST: [UsableDevCard; 4] = [
+        Self::Knight,
+        Self::YearOfPlenty,
+        Self::RoadBuild,
+        Self::Monopoly,
+    ];
+
+    pub fn abbrev(&self) -> &'static str {
+        match self {
+            UsableDevCard::Knight => "KN",
+            UsableDevCard::YearOfPlenty => "YOP",
+            UsableDevCard::RoadBuild => "RB",
+            UsableDevCard::Monopoly => "M",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum DevCardKind {
-    Usable(UsableDevCardKind),
+    Usable(UsableDevCard),
     VictoryPoint,
 }
 
@@ -27,7 +45,7 @@ pub struct DevCardCollection {
 
 #[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct UsableDevCardCollection {
-    data: [<UsableDevCardCollection as Index<UsableDevCardKind>>::Output; 4],
+    data: [<UsableDevCardCollection as Index<UsableDevCard>>::Output; 4],
 }
 
 impl UsableDevCardCollection {
@@ -35,32 +53,32 @@ impl UsableDevCardCollection {
         self.data.iter().sum()
     }
 
-    pub fn contains(&self, card: UsableDevCardKind) -> bool {
+    pub fn contains(&self, card: UsableDevCard) -> bool {
         self[card] > 0
     }
 }
 
-impl Index<UsableDevCardKind> for UsableDevCardCollection {
+impl Index<UsableDevCard> for UsableDevCardCollection {
     type Output = u16;
 
-    fn index(&self, kind: UsableDevCardKind) -> &Self::Output {
+    fn index(&self, kind: UsableDevCard) -> &Self::Output {
         let index = match kind {
-            UsableDevCardKind::Knight => 0,
-            UsableDevCardKind::YearOfPlenty => 1,
-            UsableDevCardKind::RoadBuild => 2,
-            UsableDevCardKind::Monopoly => 3,
+            UsableDevCard::Knight => 0,
+            UsableDevCard::YearOfPlenty => 1,
+            UsableDevCard::RoadBuild => 2,
+            UsableDevCard::Monopoly => 3,
         };
 
         &self.data[index]
     }
 }
-impl IndexMut<UsableDevCardKind> for UsableDevCardCollection {
-    fn index_mut(&mut self, kind: UsableDevCardKind) -> &mut Self::Output {
+impl IndexMut<UsableDevCard> for UsableDevCardCollection {
+    fn index_mut(&mut self, kind: UsableDevCard) -> &mut Self::Output {
         let index = match kind {
-            UsableDevCardKind::Knight => 0,
-            UsableDevCardKind::YearOfPlenty => 1,
-            UsableDevCardKind::RoadBuild => 2,
-            UsableDevCardKind::Monopoly => 3,
+            UsableDevCard::Knight => 0,
+            UsableDevCard::YearOfPlenty => 1,
+            UsableDevCard::RoadBuild => 2,
+            UsableDevCard::Monopoly => 3,
         };
 
         &mut self.data[index]
@@ -75,15 +93,34 @@ pub struct DevCardData {
     pub victory_pts: u16,
 }
 
+impl std::fmt::Display for DevCardData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "VP: {};", self.victory_pts)?;
+
+        for x in UsableDevCard::LIST {
+            write!(
+                f,
+                " {}: {}|{}|{};",
+                x.abbrev(),
+                self.used[x],
+                self.active[x],
+                self.queued[x]
+            )?;
+        }
+
+        write!(f, " (used|active|queued)")
+    }
+}
+
 pub struct DevCardDataPlayingError;
 
 impl DevCardData {
     pub fn reset_queue(&mut self) {
         for kind in [
-            UsableDevCardKind::Knight,
-            UsableDevCardKind::YearOfPlenty,
-            UsableDevCardKind::RoadBuild,
-            UsableDevCardKind::Monopoly,
+            UsableDevCard::Knight,
+            UsableDevCard::YearOfPlenty,
+            UsableDevCard::RoadBuild,
+            UsableDevCard::Monopoly,
         ] {
             self.active[kind] += self.queued[kind];
         }
@@ -101,7 +138,7 @@ impl DevCardData {
         }
     }
 
-    pub fn move_to_used(&mut self, card: UsableDevCardKind) -> Result<(), DevCardDataPlayingError> {
+    pub fn move_to_used(&mut self, card: UsableDevCard) -> Result<(), DevCardDataPlayingError> {
         match self.active.contains(card) {
             true => Ok({
                 self.active[card].dec();
@@ -114,19 +151,22 @@ impl DevCardData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DevCardUsage {
-    Knight(Hex),
+    Knight {
+        rob_hex: Hex,
+        robbed_id: Option<crate::gameplay::primitives::player::PlayerId>,
+    },
     YearOfPlenty([Resource; 2]),
     RoadBuild([Path; 2]),
     Monopoly(Resource),
 }
 
 impl DevCardUsage {
-    pub fn card_kind(&self) -> UsableDevCardKind {
+    pub fn card_kind(&self) -> UsableDevCard {
         match self {
-            DevCardUsage::Knight(_) => UsableDevCardKind::Knight,
-            DevCardUsage::YearOfPlenty(_) => UsableDevCardKind::YearOfPlenty,
-            DevCardUsage::RoadBuild(_) => UsableDevCardKind::RoadBuild,
-            DevCardUsage::Monopoly(_) => UsableDevCardKind::Monopoly,
+            DevCardUsage::Knight { .. } => UsableDevCard::Knight,
+            DevCardUsage::YearOfPlenty(_) => UsableDevCard::YearOfPlenty,
+            DevCardUsage::RoadBuild(_) => UsableDevCard::RoadBuild,
+            DevCardUsage::Monopoly(_) => UsableDevCard::Monopoly,
         }
     }
 }

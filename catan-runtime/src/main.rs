@@ -5,8 +5,6 @@ mod host;
 use std::path::PathBuf;
 
 fn main() {
-    env_logger::init();
-
     let args = std::env::args().collect::<Vec<_>>();
     if args.get(1).map(String::as_str) == Some("cli-child") {
         let socket = arg_value(&args, "--socket").unwrap_or_else(|| {
@@ -21,13 +19,15 @@ fn main() {
         return;
     }
 
-    let path = args
+    env_logger::init();
+
+    let config_path = args
         .get(1)
         .cloned()
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("catan-runtime/data/configurations/cli_single.json"));
 
-    let config = match host::load_config(&path) {
+    let config = match host::load_config(&config_path) {
         Ok(config) => config,
         Err(err) => {
             eprintln!("{err}");

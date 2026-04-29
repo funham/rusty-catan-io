@@ -94,11 +94,13 @@ pub type ResourceCollection = ResourceMap<u16>;
 
 impl std::fmt::Display for ResourceCollection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Brick: {}; ", self.brick)?;
-        write!(f, "Wood: {}; ", self.wood)?;
-        write!(f, "Wheat: {}; ", self.wheat)?;
-        write!(f, "Sheep: {}; ", self.sheep)?;
-        write!(f, "Ore: {}", self.ore)
+        write!(f, "{{")?;
+        write!(f, "Brick: {}, ", self.brick)?;
+        write!(f, "Wood: {}, ", self.wood)?;
+        write!(f, "Wheat: {}, ", self.wheat)?;
+        write!(f, "Sheep: {}, ", self.sheep)?;
+        write!(f, "Ore: {}", self.ore)?;
+        write!(f, "}}")
     }
 }
 

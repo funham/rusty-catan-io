@@ -8,7 +8,7 @@ use crate::{
             build::{BoardBuildData, Build, BuildingError, Road},
             dev_card::DevCardUsage,
             player::{PlayerDataContainer, PlayerId},
-            resource::{HasCost, Resource, ResourceCollection},
+            resource::{HasCost, Resource, ResourceCollection, ResourceCollectionError},
             trade::BankTrade,
             turn::GameTurn,
         },
@@ -28,7 +28,7 @@ pub struct GameState {
     pub builds: BoardBuildData,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DevCardUsageError {
     CardNotFoundInInventory,
     InvalidHex,
@@ -56,8 +56,12 @@ impl GameState {
         to_bank: ResourceCollection,
         from_bank: ResourceCollection,
     ) -> Result<(), BankResourceExchangeError> {
-        if !self.players.get(player_id).resources().has_enough(&to_bank) {
-            return Err(BankResourceExchangeError::AccountIsShort { id: player_id });
+        let missing = self.players.get(player_id).resources().missing(&to_bank);
+        if !missing.is_empty() {
+            return Err(BankResourceExchangeError::AccountIsShort {
+                account: player_id,
+                short: missing,
+            });
         }
         if !self.bank.can_pay(&from_bank) {
             return Err(BankResourceExchangeError::BankIsShort);
@@ -67,7 +71,14 @@ impl GameState {
             .get_mut(player_id)
             .resources()
             .subtract_in_place(&to_bank)
-            .map_err(|_| BankResourceExchangeError::AccountIsShort { id: player_id })?;
+            .map_err(|_| BankResourceExchangeError::AccountIsShort {
+                account: player_id,
+                short: self
+                    .players
+                    .get_mut(player_id)
+                    .resources()
+                    .missing(&to_bank),
+            })?;
         self.bank.deposit(to_bank);
         self.bank.withdraw(from_bank)?;
         *self.players.get_mut(player_id).resources() += &from_bank;
@@ -97,9 +108,10 @@ impl GameState {
         self.transfer_to_bank(cost, player_id)
             .map_err(|err| match err {
                 BankResourceExchangeError::BankIsShort => unreachable!(),
-                BankResourceExchangeError::AccountIsShort { id } => {
-                    BuildActionError::AccountIsShort { id }
-                }
+                BankResourceExchangeError::AccountIsShort {
+                    account: id,
+                    short: _,
+                } => BuildActionError::AccountIsShort { id },
             })?;
         self.builds = builds;
 
@@ -124,9 +136,10 @@ impl GameState {
         self.transfer_to_bank(COST, player_id)
             .map_err(|err| match err {
                 BankResourceExchangeError::BankIsShort => unreachable!(),
-                BankResourceExchangeError::AccountIsShort { id } => {
-                    BuyDevCardError::AccountIsShort { id }
-                }
+                BankResourceExchangeError::AccountIsShort {
+                    account: id,
+                    short: _,
+                } => BuyDevCardError::AccountIsShort { id },
             })?;
 
         let card = self
@@ -148,7 +161,16 @@ impl GameState {
             &mut self.bank.resources,
             resources,
         )
-        .map_err(|_| BankResourceExchangeError::AccountIsShort { id: player_id })
+        .map_err(|err| BankResourceExchangeError::AccountIsShort {
+            account: player_id,
+            short: match err {
+                ResourceCollectionError::InsufficientResources {
+                    available,
+                    required,
+                } => available.missing(&required),
+                ResourceCollectionError::ResourceAppearsTwice => unreachable!(),
+            },
+        })
     }
 
     pub fn transfer_from_bank(
@@ -219,18 +241,22 @@ impl GameState {
     ) -> Result<(), DevCardUsageError> {
         log::trace!("use robbers");
 
-        if (self.board.arrangement.field_radius as usize) < rob_hex.norm() {
+        if (self.board.arrangement.radius() as usize) < rob_hex.norm() {
             return Err(DevCardUsageError::InvalidHex);
         }
 
+        if rob_hex == self.board_state.robber_pos {
+            return Err(DevCardUsageError::InvalidRobbery);
+        }
+
+        let candidates = self.robbery_candidates(rob_hex, robber_id);
         if let Some(robbed_id) = robbed_id {
-            match self.builds.query().builds_on_hex(rob_hex).get(&robbed_id) {
-                Some(v) if !v.establishments.is_empty() => {}
-                _ => {
-                    log::trace!("use robbers fail");
-                    return Err(DevCardUsageError::InvalidRobbery);
-                }
+            if !candidates.contains(&robbed_id) {
+                log::trace!("use robbers fail");
+                return Err(DevCardUsageError::InvalidRobbery);
             }
+        } else if !candidates.is_empty() {
+            return Err(DevCardUsageError::InvalidRobbery);
         }
 
         self.board_state.robber_pos = rob_hex;
@@ -239,6 +265,20 @@ impl GameState {
         }
         log::trace!("use robbers success");
         Ok(())
+    }
+
+    fn robbery_candidates(&self, rob_hex: Hex, robber_id: PlayerId) -> Vec<PlayerId> {
+        self.builds
+            .query()
+            .builds_on_hex(rob_hex)
+            .into_iter()
+            .filter(|(id, builds)| {
+                *id != robber_id
+                    && !builds.establishments.is_empty()
+                    && !self.players.get(*id).resources().is_empty()
+            })
+            .map(|(id, _)| id)
+            .collect()
     }
 
     pub fn use_dev_card(
@@ -257,7 +297,9 @@ impl GameState {
         }
 
         match &usage {
-            DevCardUsage::Knight(_rob_hex) => return Err(DevCardUsageError::InvalidRobbery),
+            DevCardUsage::Knight { rob_hex, robbed_id } => {
+                self.validate_robbers(*rob_hex, user, *robbed_id)?
+            }
             DevCardUsage::YearOfPlenty(list) => self.validate_year_of_plenty(*list)?,
             DevCardUsage::RoadBuild(poses) => {
                 self.validated_roadbuild_state(*poses, user)?;
@@ -275,13 +317,37 @@ impl GameState {
         }
 
         match usage {
-            DevCardUsage::Knight(_) => unreachable!(),
+            DevCardUsage::Knight { rob_hex, robbed_id } => {
+                self.use_robbers(rob_hex, user, robbed_id)?
+            }
             DevCardUsage::YearOfPlenty(list) => self.apply_year_of_plenty(list, user)?,
             DevCardUsage::RoadBuild(poses) => self.apply_roadbuild(poses, user)?,
             DevCardUsage::Monopoly(resource) => self.use_monopoly(resource, user)?,
         }
 
         Ok(())
+    }
+
+    fn validate_robbers(
+        &self,
+        rob_hex: Hex,
+        robber_id: PlayerId,
+        robbed_id: Option<PlayerId>,
+    ) -> Result<(), DevCardUsageError> {
+        if (self.board.arrangement.radius() as usize) < rob_hex.norm() {
+            return Err(DevCardUsageError::InvalidHex);
+        }
+        if rob_hex == self.board_state.robber_pos {
+            return Err(DevCardUsageError::InvalidRobbery);
+        }
+
+        let candidates = self.robbery_candidates(rob_hex, robber_id);
+        match robbed_id {
+            Some(id) if candidates.contains(&id) => Ok(()),
+            Some(_) => Err(DevCardUsageError::InvalidRobbery),
+            None if candidates.is_empty() => Ok(()),
+            None => Err(DevCardUsageError::InvalidRobbery),
+        }
     }
 
     fn steal(&mut self, robbed_id: PlayerId, robber_id: PlayerId) {
@@ -371,5 +437,120 @@ impl GameState {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DevCardUsageError, GameState};
+    use crate::gameplay::{
+        game::init::GameInitializationState,
+        primitives::{
+            dev_card::{DevCardKind, DevCardUsage, UsableDevCard},
+            resource::{Resource, ResourceCollection},
+        },
+    };
+    use crate::topology::Hex;
+
+    fn state_with_two_initial_settlements() -> (GameState, Hex) {
+        let mut init = GameInitializationState::default();
+        let mut victim_hex = None;
+
+        for player_id in 0..2 {
+            let (establishment, road) = init
+                .builds
+                .query()
+                .possible_initial_placements(&init.board, player_id)
+                .into_iter()
+                .next()
+                .expect("default board should have initial placements");
+
+            if player_id == 1 {
+                let board_hexes = init.board.arrangement.hex_iter().collect::<Vec<_>>();
+                victim_hex =
+                    establishment.pos.as_set().into_iter().find(|hex| {
+                        *hex != init.board_state.robber_pos && board_hexes.contains(hex)
+                    });
+            }
+
+            init.builds
+                .try_init_place(player_id, road, establishment)
+                .expect("generated initial placement should be valid");
+        }
+
+        (
+            init.finish(),
+            victim_hex.expect("victim settlement should touch a non-robber hex"),
+        )
+    }
+
+    fn give_active_knight(state: &mut GameState, player_id: usize) {
+        state
+            .players
+            .get_mut(player_id)
+            .dev_cards_add(DevCardKind::Usable(UsableDevCard::Knight));
+        state.players.get_mut(player_id).dev_cards_reset_queue();
+    }
+
+    #[test]
+    fn knight_moves_robber_steals_and_marks_card_used() {
+        let (mut state, victim_hex) = state_with_two_initial_settlements();
+        give_active_knight(&mut state, 0);
+        state
+            .transfer_from_bank(Resource::Brick.into(), 1)
+            .expect("bank should fund test player");
+
+        state
+            .use_dev_card(
+                DevCardUsage::Knight {
+                    rob_hex: victim_hex,
+                    robbed_id: Some(1),
+                },
+                0,
+            )
+            .expect("knight usage should be legal");
+
+        assert_eq!(state.board_state.robber_pos, victim_hex);
+        assert_eq!(state.players.get(0).resources().total(), 1);
+        assert_eq!(state.players.get(1).resources().total(), 0);
+        assert_eq!(
+            state.players.get(0).dev_cards().used[UsableDevCard::Knight],
+            1
+        );
+        assert_eq!(
+            state.players.get(0).dev_cards().active[UsableDevCard::Knight],
+            0
+        );
+    }
+
+    #[test]
+    fn knight_requires_target_when_robbable_player_exists() {
+        let (mut state, victim_hex) = state_with_two_initial_settlements();
+        let initial_robber = state.board_state.robber_pos;
+        give_active_knight(&mut state, 0);
+        state
+            .transfer_from_bank(ResourceCollection::from(Resource::Brick), 1)
+            .expect("bank should fund test player");
+
+        let err = state
+            .use_dev_card(
+                DevCardUsage::Knight {
+                    rob_hex: victim_hex,
+                    robbed_id: None,
+                },
+                0,
+            )
+            .expect_err("target must be provided when a player can be robbed");
+
+        assert_eq!(err, DevCardUsageError::InvalidRobbery);
+        assert_eq!(state.board_state.robber_pos, initial_robber);
+        assert_eq!(
+            state.players.get(0).dev_cards().active[UsableDevCard::Knight],
+            1
+        );
+        assert_eq!(
+            state.players.get(0).dev_cards().used[UsableDevCard::Knight],
+            0
+        );
     }
 }

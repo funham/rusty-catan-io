@@ -1,5 +1,9 @@
+use std::collections::BTreeSet;
+
 use crate::gameplay::{
-    field::state::BuildCollection, game::state::GameState, primitives::player::PlayerId,
+    field::state::BuildCollection,
+    game::state::GameState,
+    primitives::{PortKind, player::PlayerId},
 };
 
 #[derive(Debug, Clone)]
@@ -8,6 +12,7 @@ pub struct GameIndex {
     pub longest_road_lengths: Vec<u16>,
     pub longest_road_owner: Option<PlayerId>,
     pub largest_army_owner: Option<PlayerId>,
+    pub ports_aquired: Vec<BTreeSet<PortKind>>,
 }
 
 impl GameIndex {
@@ -19,6 +24,23 @@ impl GameIndex {
                 .collect(),
             longest_road_owner: state.builds.longest_road(),
             largest_army_owner: state.players.best_army(),
+            ports_aquired: Self::get_ports_aquired(state),
         }
+    }
+
+    fn get_ports_aquired(state: &GameState) -> Vec<BTreeSet<PortKind>> {
+        let ports = state.board.index().ports_intersection;
+        let mut result = Vec::new();
+        for id in 0..state.board.n_players {
+            let mut set = BTreeSet::new();
+            for est in state.builds.by_player(id).establishments.iter() {
+                if let Some(port) = ports.get(&est.pos) {
+                    set.insert(*port);
+                }
+            }
+            result.push(set);
+        }
+
+        result
     }
 }

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::gameplay::primitives::{
-    dev_card::{DevCardKind, UsableDevCardKind},
+    dev_card::{DevCardKind, UsableDevCard},
     player::PlayerId,
     resource::{Resource, ResourceCollection, ResourceMap},
 };
@@ -66,10 +66,10 @@ impl Default for Bank {
         let mut dev_cards = Vec::new();
 
         dev_cards.extend([DevCardKind::VictoryPoint; 5]);
-        dev_cards.extend([DevCardKind::Usable(UsableDevCardKind::Knight); 14]);
-        dev_cards.extend([DevCardKind::Usable(UsableDevCardKind::Monopoly); 2]);
-        dev_cards.extend([DevCardKind::Usable(UsableDevCardKind::YearOfPlenty); 2]);
-        dev_cards.extend([DevCardKind::Usable(UsableDevCardKind::RoadBuild); 2]);
+        dev_cards.extend([DevCardKind::Usable(UsableDevCard::Knight); 14]);
+        dev_cards.extend([DevCardKind::Usable(UsableDevCard::Monopoly); 2]);
+        dev_cards.extend([DevCardKind::Usable(UsableDevCard::YearOfPlenty); 2]);
+        dev_cards.extend([DevCardKind::Usable(UsableDevCard::RoadBuild); 2]);
 
         Self {
             resources,
@@ -139,7 +139,10 @@ impl DeckFullnessLevel {
 #[derive(Debug)]
 pub enum BankResourceExchangeError {
     BankIsShort,
-    AccountIsShort { id: PlayerId },
+    AccountIsShort {
+        account: PlayerId,
+        short: ResourceCollection,
+    },
 }
 
 #[derive(Debug)]

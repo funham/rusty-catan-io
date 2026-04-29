@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 catan-core = { path = "../catan-core" }
+catan-render = { path = "../catan-render" }
 log = "0.4.29"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
