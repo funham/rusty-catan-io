@@ -1,15 +1,14 @@
-use std::{collections::BTreeMap, fs::File, io::BufReader};
+use std::{fs::File, io::BufReader};
 
 use serde::{Deserialize, Serialize};
 use serde_with::{Seq, serde_as};
 
 use crate::{
     gameplay::{
-        field::FieldArrangement,
-        primitives::{PortKind, Tile, resource::Resource},
+        field::{BoardArrangement, PortMap},
+        primitives::{Tile, resource::Resource},
     },
     math::dice::DiceVal,
-    topology::Path,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -26,10 +25,10 @@ struct FieldArrangementJsonVal {
     tile_info: Vec<HexTypeJsonVal>,
     #[serde(default)]
     #[serde_as(as = "Seq<(_, _)>")]
-    ports_info: BTreeMap<Path, PortKind>,
+    port_map: PortMap,
 }
 
-impl Serialize for FieldArrangement {
+impl Serialize for BoardArrangement {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -48,13 +47,13 @@ impl Serialize for FieldArrangement {
         FieldArrangementJsonVal {
             field_radius: self.field_radius,
             tile_info,
-            ports_info: self.ports().clone(),
+            port_map: self.ports().clone(),
         }
         .serialize(serializer)
     }
 }
 
-impl<'de> Deserialize<'de> for FieldArrangement {
+impl<'de> Deserialize<'de> for BoardArrangement {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -73,12 +72,12 @@ impl<'de> Deserialize<'de> for FieldArrangement {
             }
         }
 
-        FieldArrangement::new(raw.field_radius, tile_info, raw.ports_info)
+        BoardArrangement::try_build(raw.field_radius, tile_info, raw.port_map)
             .map_err(|err| serde::de::Error::custom(format!("{err:?}")))
     }
 }
 
-pub fn arrangement_from_json(path: &std::path::Path) -> Option<FieldArrangement> {
+pub fn arrangement_from_json(path: &std::path::Path) -> Option<BoardArrangement> {
     let file = File::open(path).ok()?;
     let reader = BufReader::new(file);
     serde_json::from_reader(reader).ok()
@@ -87,9 +86,9 @@ pub fn arrangement_from_json(path: &std::path::Path) -> Option<FieldArrangement>
     // Some(val.into())
 }
 
-impl From<FieldArrangementJsonVal> for FieldArrangement {
+impl From<FieldArrangementJsonVal> for BoardArrangement {
     fn from(json: FieldArrangementJsonVal) -> Self {
-        Self::new(
+        Self::try_build(
             json.field_radius,
             json.tile_info
                 .into_iter()
@@ -101,7 +100,7 @@ impl From<FieldArrangementJsonVal> for FieldArrangement {
                     },
                 })
                 .collect(),
-            json.ports_info,
+            json.port_map,
         )
         .unwrap()
     }

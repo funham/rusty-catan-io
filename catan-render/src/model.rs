@@ -1,14 +1,14 @@
-use catan_core::{
-    gameplay::{
-        field::state::{BoardLayout, BoardState},
-        game::view::PublicGameView,
-        primitives::{
-            PortKind, Tile,
-            build::{Establishment, Road},
-            player::PlayerId,
-        },
+use catan_core::gameplay::{
+    field::{
+        PortPos,
+        state::{BoardLayout, BoardState},
     },
-    topology::Path,
+    game::view::PublicGameView,
+    primitives::{
+        PortKind, Tile,
+        build::{Establishment, Road},
+        player::PlayerId,
+    },
 };
 
 #[derive(Debug, Clone)]
@@ -23,7 +23,7 @@ pub struct RenderBoard {
     pub n_players: usize,
     pub field_radius: u8,
     pub tiles: Vec<Tile>,
-    pub ports: Vec<(Path, PortKind)>,
+    pub ports: Vec<(PortPos, PortKind)>,
 }
 
 #[derive(Debug, Clone)]

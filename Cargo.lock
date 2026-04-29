@@ -234,6 +234,7 @@ name = "catan-render"
 version = "0.1.0"
 dependencies = [
  "catan-core",
+ "itertools 0.14.0",
  "ratatui",
  "termcolor",
 ]

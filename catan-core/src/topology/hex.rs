@@ -196,16 +196,18 @@ impl Hex {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SignedAxis {
-    QP, // Q+
-    QN, // Q-
-    RP,
-    RN,
-    SP,
-    SN,
+    RP, // South-East
+    SP, // North-East
+    QP, // North
+    RN, // North-West
+    SN, // South-West
+    QN, // South
 }
 
 /// Q: [_], R: [/], S: [\\]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Axis {
     Q,
     R,

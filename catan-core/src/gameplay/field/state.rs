@@ -2,7 +2,7 @@ use std::{collections::BTreeSet, usize};
 
 use serde::{Deserialize, Serialize};
 
-use super::{FieldArrangement, HexesByNum, PortsByPlayer};
+use super::{BoardArrangement, HexesByNum};
 use crate::gameplay::primitives::{
     PortKind, Tile,
     build::{Establishment, Road},
@@ -11,22 +11,25 @@ use crate::gameplay::primitives::{
 use crate::math::dice::DiceVal;
 use crate::topology::*;
 
+
+
+// TODO: move to FieldIndex maybe?
 #[derive(Debug, Clone)]
-struct FieldCache {
+struct Cache {
     desert_pos: Hex,
     hex_by_num: HexesByNum,
-    ports_by_player: PortsByPlayer, // may be moved to PlayerData later
+    ports_by_player: Vec<BTreeSet<PortKind>>, // may be moved to PlayerData later
 }
 
 #[derive(Debug, Clone)]
 pub struct BoardLayout {
     pub n_players: usize,
-    pub arrangement: FieldArrangement,
-    cache_: FieldCache,
+    pub arrangement: BoardArrangement,
+    cache_: Cache,
 }
 
-impl FieldCache {
-    fn new(n_players: usize, hexes: &FieldArrangement) -> Self {
+impl Cache {
+    fn new(n_players: usize, hexes: &BoardArrangement) -> Self {
         let desert_pos = Self::find_desert_pos(hexes);
         let hex_by_num = Self::get_hex_by_num(hexes);
         let ports_by_player = Self::get_ports_by_player(n_players);
@@ -38,11 +41,11 @@ impl FieldCache {
         }
     }
 
-    fn get_ports_by_player(n_players: usize) -> PortsByPlayer {
+    fn get_ports_by_player(n_players: usize) -> Vec<BTreeSet<PortKind>> {
         vec![BTreeSet::default(); n_players]
     }
 
-    fn get_hex_by_num(arrangement: &FieldArrangement) -> HexesByNum {
+    fn get_hex_by_num(arrangement: &BoardArrangement) -> HexesByNum {
         let mut hex_by_num = HexesByNum::default();
         for num in DiceVal::list() {
             hex_by_num[num] = arrangement
@@ -69,7 +72,7 @@ impl FieldCache {
         hex_by_num
     }
 
-    fn find_desert_pos(hexes: &FieldArrangement) -> Hex {
+    fn find_desert_pos(hexes: &BoardArrangement) -> Hex {
         hexes
             .hex_enum_iter()
             .filter_map(|(k, v)| match v {
@@ -85,7 +88,7 @@ impl FieldCache {
 #[derive(Serialize, Deserialize)]
 struct BoardLayoutSerde {
     n_players: usize,
-    arrangement: FieldArrangement,
+    arrangement: BoardArrangement,
 }
 
 impl Serialize for BoardLayout {
@@ -107,7 +110,7 @@ impl<'de> Deserialize<'de> for BoardLayout {
         D: serde::Deserializer<'de>,
     {
         let raw = BoardLayoutSerde::deserialize(deserializer)?;
-        let cache_ = FieldCache::new(raw.n_players, &raw.arrangement);
+        let cache_ = Cache::new(raw.n_players, &raw.arrangement);
 
         Ok(Self {
             n_players: raw.n_players,
@@ -125,7 +128,7 @@ pub struct BoardState {
 #[derive(Debug)]
 pub struct FieldBuildParam {
     pub n_players: usize,
-    pub arrangement: FieldArrangement,
+    pub arrangement: BoardArrangement,
 }
 
 impl Default for FieldBuildParam {
@@ -153,7 +156,7 @@ impl FieldBuildParam {
     pub fn try_new(
         n_players: usize,
         field_radius: usize,
-        hex_arrangement: FieldArrangement,
+        hex_arrangement: BoardArrangement,
     ) -> Result<Self, FieldBuildError> {
         if hex_arrangement.len() != BoardLayout::field_size_by_radius(field_radius) {
             return Err(FieldBuildError::WrongAmountOfHexesProvided);
@@ -182,7 +185,7 @@ impl BoardLayout {
     }
 
     pub fn new(param: FieldBuildParam) -> Self {
-        let cache = FieldCache::new(param.n_players, &param.arrangement);
+        let cache = Cache::new(param.n_players, &param.arrangement);
 
         Self {
             n_players: param.n_players,

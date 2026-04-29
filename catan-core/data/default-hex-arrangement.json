@@ -1,129 +1,102 @@
 {
     "field_radius": 2,
-    "ports_info": [
+    "port_map": [
         [
-            [
-                {
+            {
+                "hex": {
                     "q": 0,
                     "r": 3
                 },
-                {
-                    "q": 0,
-                    "r": 2
-                }
-            ],
+                "orient": "QP"
+            },
             "Universal"
         ],
         [
-            [
-                {
+            {
+                "hex": {
                     "q": -2,
                     "r": 3
                 },
-                {
-                    "q": -1,
-                    "r": 2
-                }
-            ],
+                "orient": "SP"
+            },
             {
                 "Special": "wheat"
             }
         ],
         [
-            [
-                {
+            {
+                "hex": {
                     "q": -3,
                     "r": 2
                 },
-                {
-                    "q": -2,
-                    "r": 1
-                }
-            ],
+                "orient": "SP"
+            },
             {
                 "Special": "ore"
             }
         ],
         [
-            [
-                {
+            {
+                "hex": {
                     "q": -3,
                     "r": 0
                 },
-                {
-                    "q": -2,
-                    "r": 0
-                }
-            ],
+                "orient": "RP"
+            },
             "Universal"
         ],
         [
-            [
-                {
+            {
+                "hex": {
                     "q": -1,
                     "r": -2
                 },
-                {
-                    "q": -1,
-                    "r": -1
-                }
-            ],
+                "orient": "QN"
+            },
             {
                 "Special": "sheep"
             }
         ],
         [
-            [
-                {
+            {
+                "hex": {
                     "q": 1,
                     "r": -3
                 },
-                {
-                    "q": 1,
-                    "r": -2
-                }
-            ],
+                "orient": "QN"
+            },
             "Universal"
         ],
         [
-            [
-                {
-                    "q": 2,
-                    "r": -2
-                },
-                {
+            {
+                "hex": {
                     "q": 3,
                     "r": -3
-                }
-            ],
+                },
+                "orient": "SN"
+            },
             "Universal"
         ],
         [
-            [
-                {
-                    "q": 2,
-                    "r": -1
-                },
-                {
+            {
+                "hex": {
                     "q": 3,
                     "r": -1
-                }
-            ],
+                },
+                "orient": "RN"
+            },
             {
                 "Special": "brick"
             }
         ],
         [
-            [
-                {
-                    "q": 1,
-                    "r": 1
-                },
-                {
+            {
+                "hex": {
                     "q": 2,
                     "r": 1
-                }
-            ],
+                },
+                "orient": "RN"
+            },
             {
                 "Special": "wood"
             }

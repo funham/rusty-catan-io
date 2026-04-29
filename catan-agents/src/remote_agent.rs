@@ -12,7 +12,10 @@ use catan_core::{
         agent::PlayerRuntime,
     },
     gameplay::{
-        field::state::{BoardLayout, BoardState},
+        field::{
+            PortPos,
+            state::{BoardLayout, BoardState},
+        },
         game::{
             event::{
                 GameEvent, GameObserver, ObserverKind, ObserverNotificationContext,
@@ -33,7 +36,6 @@ use catan_core::{
             resource::{ResourceCollection, ResourceMap},
         },
     },
-    topology::Path,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
@@ -119,7 +121,7 @@ pub struct UiBoard {
     pub n_players: usize,
     pub field_radius: u8,
     pub tiles: Vec<Tile>,
-    pub ports: Vec<(Path, PortKind)>,
+    pub ports: Vec<(PortPos, PortKind)>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

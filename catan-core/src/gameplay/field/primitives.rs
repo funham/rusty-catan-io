@@ -3,19 +3,27 @@ use std::{
     ops::{Index, IndexMut},
 };
 
+use serde::{Deserialize, Serialize};
+
 use crate::{
     gameplay::primitives::{PortKind, Tile},
     math::dice::DiceVal,
-    topology::{Hex, HexIndex, Intersection, Path},
+    topology::{Hex, HexIndex, Intersection, Path, SignedAxis},
 };
 
-pub type PortsByPlayer = Vec<BTreeSet<PortKind>>;
+pub type PortMap = BTreeMap<PortPos, PortKind>;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+pub struct PortPos {
+    pub hex: Hex,
+    pub orient: SignedAxis,
+}
 
 #[derive(Debug, Clone)]
-pub struct FieldArrangement {
+pub struct BoardArrangement {
     pub field_radius: u8,
     tiles: Vec<Tile>,
-    ports_info: BTreeMap<Path, PortKind>,
+    port_map: PortMap,
 }
 
 #[derive(Debug)]
@@ -23,11 +31,11 @@ pub enum HexArrangementError {
     InconsistentSizes(String),
 }
 
-impl FieldArrangement {
-    pub fn new(
+impl BoardArrangement {
+    pub fn try_build(
         field_radius: u8,
         tiles: Vec<Tile>,
-        ports_info: BTreeMap<Path, PortKind>,
+        ports_info: PortMap,
     ) -> Result<Self, HexArrangementError> {
         if HexIndex::spiral_start_of_ring(field_radius as usize + 1) != tiles.len() {
             return Err(HexArrangementError::InconsistentSizes("".to_string()));
@@ -36,7 +44,7 @@ impl FieldArrangement {
         Ok(Self {
             field_radius,
             tiles,
-            ports_info,
+            port_map: ports_info,
         })
     }
 
@@ -76,8 +84,8 @@ impl FieldArrangement {
         self.path_set()
     }
 
-    pub fn ports(&self) -> &BTreeMap<Path, PortKind> {
-        &self.ports_info
+    pub fn ports(&self) -> &PortMap {
+        &self.port_map
     }
 
     pub fn len(&self) -> usize {
@@ -85,7 +93,7 @@ impl FieldArrangement {
     }
 }
 
-impl Index<usize> for FieldArrangement {
+impl Index<usize> for BoardArrangement {
     type Output = Tile;
 
     fn index(&self, index: usize) -> &Self::Output {
@@ -93,7 +101,7 @@ impl Index<usize> for FieldArrangement {
     }
 }
 
-impl Index<Hex> for FieldArrangement {
+impl Index<Hex> for BoardArrangement {
     type Output = Tile;
 
     fn index(&self, index: Hex) -> &Self::Output {

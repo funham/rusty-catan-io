@@ -2,9 +2,10 @@ use std::collections::BTreeSet;
 
 use catan_core::{
     gameplay::{
+        field::PortPos,
         game::view::PublicGameView,
         primitives::{
-            Tile,
+            PortKind, Tile,
             build::{Establishment, EstablishmentType, Road},
             player::PlayerId,
             resource::Resource,
@@ -22,6 +23,17 @@ use crate::{
 
 mod utils {
     use super::*;
+
+    pub fn axis_port_cells(axis: SignedAxis) -> &'static [(i32, i32, char)] {
+        match axis {
+            SignedAxis::RP => &[(9, 2, '_'), (10, 2, '_'), (8, 4, '\\')],
+            SignedAxis::SP => &[(8, 1, '/'), (9, 2, '_')],
+            SignedAxis::QP => &[(2, 1, '\\'), (8, 1, '/')],
+            SignedAxis::RN => &[(2, 1, '\\'), (1, 2, '_')],
+            SignedAxis::SN => &[(0, 2, '_'), (1, 2, '_'), (2, 4, '/')],
+            SignedAxis::QN => &[(2, 4, '/'), (8, 4, '\\')],
+        }
+    }
 
     pub fn axis_path_cells(axis: Axis) -> &'static [(i32, i32, char)] {
         match axis {
@@ -209,6 +221,10 @@ impl FieldRenderer {
         self.clear();
         self.draw_field(RenderStyle::default().dim());
 
+        for (pos, kind) in view.board.ports.iter() {
+            self.draw_port(*pos, *kind, RenderStyle::default().dim());
+        }
+
         for (index, tile) in view.board.tiles.iter().copied().enumerate() {
             let hex = HexIndex::spiral_to_hex(index);
             match tile {
@@ -221,9 +237,9 @@ impl FieldRenderer {
             }
         }
 
-        for index in 0..HexIndex::spiral_start_of_ring(view.board.field_radius as usize + 2) {
-            self.draw_hex_attr(HexIndex::spiral_to_hex(index), HexAttr::Index);
-        }
+        // for index in 0..HexIndex::spiral_start_of_ring(view.board.field_radius as usize + 2) {
+        //     self.draw_hex_attr(HexIndex::spiral_to_hex(index), HexAttr::Index);
+        // }
 
         self.draw_hex_attr(view.board_state.robber_pos, HexAttr::Robber);
 
@@ -312,9 +328,38 @@ impl FieldRenderer {
             Resource::Brick => RenderColor::Red,
             Resource::Wood => RenderColor::Ansi256(28),
             Resource::Wheat => RenderColor::Yellow,
-            Resource::Sheep => RenderColor::Green,
+            Resource::Sheep => RenderColor::Ansi256(42),
             Resource::Ore => RenderColor::Cyan,
         }
+    }
+
+    pub fn draw_port(&mut self, spot: PortPos, kind: PortKind, style: RenderStyle) {
+        let pos = utils::hex_anchor(spot.hex);
+        for &(dx, dy, ch) in utils::axis_port_cells(spot.orient) {
+            self.canvas.set(
+                pos + CursorPosition::new(dx, dy),
+                crate::canvas::Cell { ch, style },
+            );
+        }
+
+        let line = match spot.orient {
+            SignedAxis::RN | SignedAxis::QP | SignedAxis::SP => 2,
+            SignedAxis::SN | SignedAxis::QN | SignedAxis::RP => 3,
+        };
+
+        let port_desc = match kind {
+            PortKind::Special(_) => "2:1",
+            PortKind::Universal => "3:1",
+        };
+
+        let desc_style = match kind {
+            PortKind::Special(resource) => {
+                RenderStyle::default().fg(Self::resource_color(resource))
+            }
+            PortKind::Universal => RenderStyle::default(),
+        };
+
+        self.draw_hex_text(spot.hex, line, port_desc, desc_style, false);
     }
 
     pub fn draw_intersection_attr(&mut self, intersection: Intersection, attr: IntersectionAttr) {
