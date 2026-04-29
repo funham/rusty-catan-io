@@ -5,8 +5,6 @@ mod host;
 use std::path::PathBuf;
 
 fn main() {
-    env_logger::init();
-
     let args = std::env::args().collect::<Vec<_>>();
     if args.get(1).map(String::as_str) == Some("cli-child") {
         let socket = arg_value(&args, "--socket").unwrap_or_else(|| {
@@ -20,6 +18,8 @@ fn main() {
         }
         return;
     }
+
+    env_logger::init();
 
     let config_path = args
         .get(1)

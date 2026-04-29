@@ -11,8 +11,6 @@ use crate::gameplay::primitives::{
 use crate::math::dice::DiceVal;
 use crate::topology::*;
 
-
-
 // TODO: move to FieldIndex maybe?
 #[derive(Debug, Clone)]
 struct Cache {

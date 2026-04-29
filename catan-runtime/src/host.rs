@@ -2,7 +2,7 @@ use std::{
     fs,
     os::unix::net::{UnixListener, UnixStream},
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -150,16 +150,18 @@ fn spawn_terminal(exe: &Path, socket_path: &Path, role_arg: &str) -> Result<(), 
     let socket = socket_path
         .to_str()
         .ok_or_else(|| format!("non-utf8 socket path: {}", socket_path.display()))?;
+    let rust_log = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_owned());
 
     if cfg!(target_os = "macos") {
         let command = format!(
-            "cd {} && RUST_LOG=${{RUST_LOG:-info}} {} cli-child --socket {} --role {}; echo; echo '[catan cli child exited - press enter to close]'; read _",
+            "cd {} && RUST_LOG={} {} cli-child --socket {} --role {}; echo; echo '[catan cli child exited - press enter to close]'; read _",
             shell_quote(
                 std::env::current_dir()
                     .map_err(|err| format!("failed to read current dir: {err}"))?
                     .to_string_lossy()
                     .as_ref()
             ),
+            shell_quote(&rust_log),
             shell_quote(exe),
             shell_quote(socket),
             shell_quote(role_arg),
@@ -171,6 +173,9 @@ fn spawn_terminal(exe: &Path, socket_path: &Path, role_arg: &str) -> Result<(), 
         Command::new("osascript")
             .arg("-e")
             .arg(script)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::inherit())
             .spawn()
             .map_err(|err| format!("failed to spawn Terminal.app: {err}"))?;
         return Ok(());
@@ -178,7 +183,8 @@ fn spawn_terminal(exe: &Path, socket_path: &Path, role_arg: &str) -> Result<(), 
 
     if cfg!(target_os = "linux") {
         let command = format!(
-            "RUST_LOG=${{RUST_LOG:-info}} {} cli-child --socket {} --role {}; echo; echo '[catan cli child exited - press enter to close]'; read _",
+            "RUST_LOG={} {} cli-child --socket {} --role {}; echo; echo '[catan cli child exited - press enter to close]'; read _",
+            shell_quote(&rust_log),
             shell_quote(exe),
             shell_quote(socket),
             shell_quote(role_arg),

@@ -108,9 +108,10 @@ impl GameState {
         self.transfer_to_bank(cost, player_id)
             .map_err(|err| match err {
                 BankResourceExchangeError::BankIsShort => unreachable!(),
-                BankResourceExchangeError::AccountIsShort { account: id, short: _ } => {
-                    BuildActionError::AccountIsShort { id }
-                }
+                BankResourceExchangeError::AccountIsShort {
+                    account: id,
+                    short: _,
+                } => BuildActionError::AccountIsShort { id },
             })?;
         self.builds = builds;
 
@@ -135,9 +136,10 @@ impl GameState {
         self.transfer_to_bank(COST, player_id)
             .map_err(|err| match err {
                 BankResourceExchangeError::BankIsShort => unreachable!(),
-                BankResourceExchangeError::AccountIsShort { account: id, short: _ } => {
-                    BuyDevCardError::AccountIsShort { id }
-                }
+                BankResourceExchangeError::AccountIsShort {
+                    account: id,
+                    short: _,
+                } => BuyDevCardError::AccountIsShort { id },
             })?;
 
         let card = self

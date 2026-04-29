@@ -1,6 +1,7 @@
 use std::{
     io::{self, Read, Write},
     os::unix::net::UnixStream,
+    thread,
 };
 
 use catan_core::{
@@ -61,7 +62,23 @@ pub enum HostToCli {
 pub enum CliToHost {
     Ready,
     DecisionResponse(DecisionResponseFrame),
-    Error { message: String },
+    Error {
+        message: String,
+    },
+    Log {
+        level: RemoteLogLevel,
+        target: String,
+        message: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RemoteLogLevel {
+    Error,
+    Warn,
+    Info,
+    Debug,
+    Trace,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -212,10 +229,17 @@ impl RemoteCliAgent {
     fn request(&mut self, request: DecisionRequestFrame) -> DecisionResponseFrame {
         write_frame(&mut self.stream, &HostToCli::DecisionRequest(request))
             .expect("failed to write CLI decision request");
-        match read_frame::<CliToHost>(&mut self.stream).expect("failed to read CLI response") {
-            CliToHost::DecisionResponse(response) => response,
-            CliToHost::Error { message } => panic!("remote CLI error: {message}"),
-            CliToHost::Ready => panic!("unexpected ready from remote CLI"),
+        loop {
+            match read_frame::<CliToHost>(&mut self.stream).expect("failed to read CLI response") {
+                CliToHost::DecisionResponse(response) => return response,
+                CliToHost::Log {
+                    level,
+                    target,
+                    message,
+                } => log_remote_cli_message(level, &target, &message),
+                CliToHost::Error { message } => panic!("remote CLI error: {message}"),
+                CliToHost::Ready => panic!("unexpected ready from remote CLI"),
+            }
         }
     }
 }
@@ -348,8 +372,34 @@ impl RemoteCliObserver {
         };
         write_frame(&mut stream, &HostToCli::Hello { role })?;
         expect_ready(&mut stream)?;
+        spawn_observer_log_reader(stream.try_clone()?);
         Ok(Self { kind, stream })
     }
+}
+
+fn spawn_observer_log_reader(mut stream: UnixStream) {
+    thread::spawn(move || {
+        loop {
+            match read_frame::<CliToHost>(&mut stream) {
+                Ok(CliToHost::Log {
+                    level,
+                    target,
+                    message,
+                }) => log_remote_cli_message(level, &target, &message),
+                Ok(CliToHost::Error { message }) => {
+                    log::error!(target: "catan_cli_child", "remote CLI observer error: {message}");
+                }
+                Ok(other) => {
+                    log::warn!(target: "catan_cli_child", "unexpected observer frame: {other:?}");
+                }
+                Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => return,
+                Err(err) => {
+                    log::warn!(target: "catan_cli_child", "observer log reader stopped: {err}");
+                    return;
+                }
+            }
+        }
+    });
 }
 
 impl GameObserver for RemoteCliObserver {
@@ -524,12 +574,40 @@ impl UiOmniscient {
 }
 
 fn expect_ready(stream: &mut UnixStream) -> io::Result<()> {
-    match read_frame::<CliToHost>(stream)? {
-        CliToHost::Ready => Ok(()),
-        other => Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("expected ready, got {other:?}"),
-        )),
+    loop {
+        match read_frame::<CliToHost>(stream)? {
+            CliToHost::Ready => return Ok(()),
+            CliToHost::Log {
+                level,
+                target,
+                message,
+            } => log_remote_cli_message(level, &target, &message),
+            other => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("expected ready, got {other:?}"),
+                ));
+            }
+        }
+    }
+}
+
+fn log_remote_cli_message(level: RemoteLogLevel, child_target: &str, message: &str) {
+    let level = log::Level::from(level);
+    for line in message.lines().filter(|line| !line.trim().is_empty()) {
+        log::log!(target: "catan_cli_child", level, "[{child_target}] {line}");
+    }
+}
+
+impl From<RemoteLogLevel> for log::Level {
+    fn from(value: RemoteLogLevel) -> Self {
+        match value {
+            RemoteLogLevel::Error => Self::Error,
+            RemoteLogLevel::Warn => Self::Warn,
+            RemoteLogLevel::Info => Self::Info,
+            RemoteLogLevel::Debug => Self::Debug,
+            RemoteLogLevel::Trace => Self::Trace,
+        }
     }
 }
 
@@ -544,6 +622,29 @@ mod tests {
         write_frame(&mut bytes, &"hello").unwrap();
         let value: String = read_frame(&mut bytes.as_slice()).unwrap();
         assert_eq!(value, "hello");
+    }
+
+    #[test]
+    fn log_frame_round_trip() {
+        let mut bytes = Vec::new();
+        write_frame(
+            &mut bytes,
+            &super::CliToHost::Log {
+                level: super::RemoteLogLevel::Trace,
+                target: "child_target".to_owned(),
+                message: "child log".to_owned(),
+            },
+        )
+        .unwrap();
+        let value: super::CliToHost = read_frame(&mut bytes.as_slice()).unwrap();
+        assert!(matches!(
+            value,
+            super::CliToHost::Log {
+                level: super::RemoteLogLevel::Trace,
+                target,
+                message,
+            } if target == "child_target" && message == "child log"
+        ));
     }
 
     #[test]

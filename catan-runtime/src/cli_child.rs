@@ -1,13 +1,14 @@
 use std::{
     collections::BTreeSet,
-    io::{self, Stdout},
+    io::{self, Stdout, Write},
     os::unix::net::UnixStream,
     path::Path as FsPath,
+    sync::{Arc, Mutex},
 };
 
 use catan_agents::remote_agent::{
-    CliToHost, DecisionRequestFrame, DecisionResponseFrame, HostToCli, UiModel, read_frame,
-    write_frame,
+    CliToHost, DecisionRequestFrame, DecisionResponseFrame, HostToCli, RemoteLogLevel, UiModel,
+    read_frame, write_frame,
 };
 use catan_core::{
     agent::action::{
@@ -42,18 +43,106 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
 };
 
+#[derive(Clone)]
+struct SocketLogWriter {
+    stream: Arc<Mutex<UnixStream>>,
+}
+
+impl Write for SocketLogWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let raw = String::from_utf8_lossy(buf);
+        let (level, target, message) = parse_socket_log_line(&raw);
+        let mut stream = self
+            .stream
+            .lock()
+            .map_err(|_| io::Error::other("CLI log socket mutex poisoned"))?;
+        write_frame(
+            &mut *stream,
+            &CliToHost::Log {
+                level,
+                target,
+                message,
+            },
+        )?;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        let mut stream = self
+            .stream
+            .lock()
+            .map_err(|_| io::Error::other("CLI log socket mutex poisoned"))?;
+        stream.flush()
+    }
+}
+
+fn init_socket_logger(stream: UnixStream) {
+    let writer = SocketLogWriter {
+        stream: Arc::new(Mutex::new(stream)),
+    };
+    let mut builder =
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"));
+    builder.target(env_logger::Target::Pipe(Box::new(writer)));
+    builder.format(|buf, record| {
+        writeln!(
+            buf,
+            "{}\t{}\t{}",
+            record.level(),
+            record.target(),
+            record.args()
+        )
+    });
+    if let Err(err) = builder.try_init() {
+        eprintln!("failed to initialize CLI socket logger: {err}");
+    }
+}
+
+fn parse_socket_log_line(raw: &str) -> (RemoteLogLevel, String, String) {
+    let raw = raw.trim_end_matches(['\r', '\n']);
+    let mut parts = raw.splitn(3, '\t');
+    let level = parts
+        .next()
+        .and_then(parse_remote_log_level)
+        .unwrap_or(RemoteLogLevel::Info);
+    let target = parts
+        .next()
+        .unwrap_or("catan_runtime::cli_child")
+        .to_owned();
+    let message = parts.next().unwrap_or(raw).to_owned();
+    (level, target, message)
+}
+
+fn parse_remote_log_level(raw: &str) -> Option<RemoteLogLevel> {
+    match raw {
+        "ERROR" => Some(RemoteLogLevel::Error),
+        "WARN" => Some(RemoteLogLevel::Warn),
+        "INFO" => Some(RemoteLogLevel::Info),
+        "DEBUG" => Some(RemoteLogLevel::Debug),
+        "TRACE" => Some(RemoteLogLevel::Trace),
+        _ => None,
+    }
+}
+
 pub fn run(socket: &FsPath, _role: &str) -> Result<(), String> {
     let mut stream = UnixStream::connect(socket)
         .map_err(|err| format!("failed to connect to {}: {err}", socket.display()))?;
+    init_socket_logger(
+        stream
+            .try_clone()
+            .map_err(|err| format!("failed to clone CLI socket for logging: {err}"))?,
+    );
+    log::trace!("Starting CLI with socket: {}", socket.display());
     let mut ui = CliUi::new().map_err(|err| format!("failed to initialize TUI: {err}"))?;
     match read_frame::<HostToCli>(&mut stream)
         .map_err(|err| format!("failed to read hello: {err}"))?
     {
         HostToCli::Hello { role } => {
+            log::trace!("Connected as role: {:?}", role);
             ui.set_message(format!("connected as {role:?}"))
                 .map_err(|err| format!("failed to draw TUI: {err}"))?;
             write_frame(&mut stream, &CliToHost::Ready)
                 .map_err(|err| format!("failed to send ready: {err}"))?;
+            log::trace!("Sent ready message to host");
         }
         other => return Err(format!("expected hello, got {other:?}")),
     }
@@ -62,6 +151,7 @@ pub fn run(socket: &FsPath, _role: &str) -> Result<(), String> {
         let msg = match read_frame::<HostToCli>(&mut stream) {
             Ok(msg) => msg,
             Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => {
+                log::error!("Host closed socket unexpectedly");
                 return Err(
                     "host closed the CLI socket without a shutdown message; check the host terminal for a panic or startup error"
                         .to_owned(),
@@ -69,20 +159,27 @@ pub fn run(socket: &FsPath, _role: &str) -> Result<(), String> {
             }
             Err(err) => return Err(format!("failed to read host frame: {err}")),
         };
+        log::trace!("Received message from host: {}:{}", file!(), line!());
         match msg {
-            HostToCli::Hello { .. } => {}
+            HostToCli::Hello { .. } => {
+                log::trace!("Ignoring duplicate hello message");
+            }
             HostToCli::Shutdown { reason } => {
+                log::trace!("Shutdown received with reason: {}", reason);
                 ui.set_message(format!("shutdown: {reason}"))
                     .map_err(|err| format!("failed to draw TUI: {err}"))?;
                 return Ok(());
             }
             HostToCli::Event { event, view } => {
+                log::trace!("Processing event: {:?}", event);
                 ui.show_model(&view, format!("event: {event:?}"))
                     .map_err(|err| format!("failed to draw TUI: {err}"))?;
             }
             HostToCli::DecisionRequest(request) => {
+                log::trace!("Processing decision request: {}:{}", file!(), line!());
                 let response = handle_decision(&mut ui, request)
                     .map_err(|err| format!("failed to handle decision: {err}"))?;
+                log::trace!("Sending decision response: {:?}", response);
                 write_frame(&mut stream, &CliToHost::DecisionResponse(response))
                     .map_err(|err| format!("failed to send decision response: {err}"))?;
             }
@@ -94,50 +191,79 @@ fn handle_decision(
     ui: &mut CliUi,
     request: DecisionRequestFrame,
 ) -> io::Result<DecisionResponseFrame> {
+    log::trace!("Handling decision request: {}:{}", file!(), line!());
     match request {
         DecisionRequestFrame::InitStage(model) => {
+            log::trace!("Processing InitStage decision");
             let settlement = read_initial_settlement(ui, &model, "settlement: ")?;
+            log::trace!("Selected settlement: {:?}", settlement);
             let road = read_initial_road(ui, &model, settlement, "road: ")?;
+            log::trace!("Selected road: {:?}", road);
             Ok(DecisionResponseFrame::InitStage(InitStageAction {
                 establishment_position: settlement,
                 road,
             }))
         }
-        DecisionRequestFrame::InitAction(model) => Ok(DecisionResponseFrame::InitAction(
-            read_init_action(ui, &model)?,
-        )),
-        DecisionRequestFrame::PostDice(model) => Ok(DecisionResponseFrame::PostDice(
-            read_post_dice_action(ui, &model)?,
-        )),
+        DecisionRequestFrame::InitAction(model) => {
+            log::trace!("Processing InitAction decision");
+            let action = read_init_action(ui, &model)?;
+            log::trace!("Init action result: {:?}", action);
+            Ok(DecisionResponseFrame::InitAction(action))
+        }
+        DecisionRequestFrame::PostDice(model) => {
+            log::trace!("Processing PostDice decision");
+            let action = read_post_dice_action(ui, &model)?;
+            log::trace!("Post-dice action result: {:?}", action);
+            Ok(DecisionResponseFrame::PostDice(action))
+        }
         DecisionRequestFrame::PostDevCard(model) => {
+            log::trace!("Processing PostDevCard decision (automatically rolling dice)");
             ui.show_model(&model, "dev card resolved; rolling dice".to_owned())?;
             Ok(DecisionResponseFrame::PostDevCard(
                 PostDevCardAction::RollDice,
             ))
         }
-        DecisionRequestFrame::Regular(model) => Ok(DecisionResponseFrame::Regular(
-            read_regular_action(ui, &model)?,
-        )),
-        DecisionRequestFrame::MoveRobbers(model) => Ok(DecisionResponseFrame::MoveRobbers(
-            MoveRobbersAction(read_hex(ui, &model, "robber hex: ")?),
-        )),
+        DecisionRequestFrame::Regular(model) => {
+            log::trace!("Processing Regular decision");
+            let action = read_regular_action(ui, &model)?;
+            log::trace!("Regular action result: {:?}", action);
+            Ok(DecisionResponseFrame::Regular(action))
+        }
+        DecisionRequestFrame::MoveRobbers(model) => {
+            log::trace!("Processing MoveRobbers decision");
+            let hex = read_hex(ui, &model, "robber hex: ")?;
+            log::trace!("Selected robber hex: {:?}", hex);
+            Ok(DecisionResponseFrame::MoveRobbers(MoveRobbersAction(hex)))
+        }
         DecisionRequestFrame::ChoosePlayerToRob(model) => {
+            log::trace!("Processing ChoosePlayerToRob decision");
+            let player_id = read_player_id(ui, &model, "robbed player id: ")?;
+            log::trace!("Selected player to rob: {}", player_id);
             Ok(DecisionResponseFrame::ChoosePlayerToRob(
-                ChoosePlayerToRobAction(read_player_id(ui, &model, "robbed player id: ")?),
+                ChoosePlayerToRobAction(player_id),
             ))
         }
         DecisionRequestFrame::AnswerTrade(model) => {
+            log::trace!("Processing AnswerTrade decision");
             let answer = ui.prompt(&model, "answer trade [y/N]: ")?;
             let answer = match answer.as_str() {
-                "y" | "yes" => TradeAnswer::Accepted,
-                _ => TradeAnswer::Declined,
+                "y" | "yes" => {
+                    log::trace!("Trade accepted");
+                    TradeAnswer::Accepted
+                }
+                _ => {
+                    log::trace!("Trade declined");
+                    TradeAnswer::Declined
+                }
             };
             Ok(DecisionResponseFrame::AnswerTrade(answer))
         }
         DecisionRequestFrame::DropHalf(model) => {
-            Ok(DecisionResponseFrame::DropHalf(DropHalfAction(
-                read_resource_collection(ui, &model, "drop brick wood wheat sheep ore: ")?,
-            )))
+            log::trace!("Processing DropHalf decision");
+            let resources =
+                read_resource_collection(ui, &model, "drop brick wood wheat sheep ore: ")?;
+            log::trace!("Resources to drop: {:?}", resources);
+            Ok(DecisionResponseFrame::DropHalf(DropHalfAction(resources)))
         }
     }
 }
@@ -150,10 +276,12 @@ struct CliUi {
 
 impl CliUi {
     fn new() -> io::Result<Self> {
+        log::trace!("Initializing CLI UI");
         enable_raw_mode()?;
         let mut stdout = io::stdout();
         execute!(stdout, EnterAlternateScreen)?;
         let terminal = Terminal::new(CrosstermBackend::new(stdout))?;
+        log::trace!("CLI UI initialized successfully");
         Ok(Self {
             terminal,
             message: "waiting for host".to_owned(),
@@ -162,6 +290,7 @@ impl CliUi {
     }
 
     fn set_message(&mut self, message: String) -> io::Result<()> {
+        log::trace!("Setting UI message: {}", message);
         self.message = message;
         self.overlay.selected = None;
         self.overlay.status = SelectionStatus::Neutral;
@@ -170,6 +299,7 @@ impl CliUi {
     }
 
     fn show_model(&mut self, model: &UiModel, message: String) -> io::Result<()> {
+        log::trace!("Showing model with message: {}", message);
         self.message = message;
         self.overlay.selected = None;
         self.overlay.status = SelectionStatus::Neutral;
@@ -178,6 +308,7 @@ impl CliUi {
     }
 
     fn prompt(&mut self, model: &UiModel, prompt: &str) -> io::Result<String> {
+        log::trace!("Prompting user: {}", prompt);
         let mut input = String::new();
         self.message = "enter command".to_owned();
         self.overlay.selected = None;
@@ -189,7 +320,10 @@ impl CliUi {
                 && key.kind == KeyEventKind::Press
             {
                 match key.code {
-                    KeyCode::Enter => return Ok(input.trim().to_owned()),
+                    KeyCode::Enter => {
+                        log::trace!("User input: {}", input);
+                        return Ok(input.trim().to_owned());
+                    }
                     KeyCode::Backspace => {
                         input.pop();
                     }
@@ -209,10 +343,12 @@ impl CliUi {
         prompt: &str,
         is_available: impl Fn(Hex) -> bool,
     ) -> io::Result<Hex> {
+        log::trace!("Selecting hex with prompt: {}", prompt);
         let board_hexes = board_hex_set(model);
         let mut selected = Hex::new(0, 0);
         if !board_hexes.contains(&selected) {
             selected = *board_hexes.iter().next().ok_or_else(|| {
+                log::error!("No board hexes available for selection");
                 io::Error::new(io::ErrorKind::InvalidInput, "selector has no board hexes")
             })?;
         }
@@ -228,16 +364,22 @@ impl CliUi {
                 match key.code {
                     KeyCode::Enter => {
                         if !is_available(selected) {
+                            log::warn!("Selected hex {:?} is unavailable", selected);
                             self.message = "unavailable hex".to_owned();
                             self.overlay.status = SelectionStatus::Unavailable;
                             continue;
                         }
+                        log::trace!("Hex selected: {:?}", selected);
                         self.overlay.selected = None;
                         self.overlay.status = SelectionStatus::Neutral;
                         return Ok(selected);
                     }
                     KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
+                        let old = selected;
                         selected = move_hex_by_key(selected, key.code, &board_hexes);
+                        if old != selected {
+                            log::trace!("Moved hex from {:?} to {:?}", old, selected);
+                        }
                     }
                     _ => {}
                 }
@@ -251,10 +393,12 @@ impl CliUi {
         prompt: &str,
         is_available: impl Fn(Intersection) -> bool,
     ) -> io::Result<Intersection> {
+        log::trace!("Selecting intersection with prompt: {}", prompt);
         let board_hexes = board_hex_set(model);
         let mut hex = Hex::new(0, 0);
         if !board_hexes.contains(&hex) {
             hex = *board_hexes.iter().next().ok_or_else(|| {
+                log::error!("No board hexes available for intersection selection");
                 io::Error::new(io::ErrorKind::InvalidInput, "selector has no board hexes")
             })?;
         }
@@ -274,7 +418,11 @@ impl CliUi {
                     match key.code {
                         KeyCode::Enter => break,
                         KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
+                            let old = hex;
                             hex = move_hex_by_key(hex, key.code, &board_hexes);
+                            if old != hex {
+                                log::trace!("Moved hex from {:?} to {:?}", old, hex);
+                            }
                         }
                         _ => {}
                     }
@@ -295,15 +443,21 @@ impl CliUi {
                     match key.code {
                         KeyCode::Enter => {
                             if !is_available(intersection) {
+                                log::warn!(
+                                    "Selected intersection {:?} is unavailable",
+                                    intersection
+                                );
                                 self.message = "unavailable intersection".to_owned();
                                 self.overlay.status = SelectionStatus::Unavailable;
                                 continue;
                             }
+                            log::trace!("Intersection selected: {:?}", intersection);
                             self.overlay.selected = None;
                             self.overlay.status = SelectionStatus::Neutral;
                             return Ok(intersection);
                         }
                         KeyCode::Esc => {
+                            log::trace!("Returning to hex selection stage");
                             self.message =
                                 "stage 1: select hex; enter chooses surrounding vertex".to_owned();
                             self.overlay.status = SelectionStatus::Neutral;
@@ -311,9 +465,11 @@ impl CliUi {
                         }
                         KeyCode::Left | KeyCode::Down | KeyCode::Tab => {
                             selected = (selected + 1) % intersections.len();
+                            log::trace!("Cycled to intersection index {}", selected);
                         }
                         KeyCode::Right | KeyCode::Up | KeyCode::BackTab => {
                             selected = selected.checked_sub(1).unwrap_or(intersections.len() - 1);
+                            log::trace!("Cycled to intersection index {}", selected);
                         }
                         _ => {}
                     }
@@ -328,8 +484,10 @@ impl CliUi {
         settlement_pos: Intersection,
         prompt: &str,
     ) -> io::Result<Road> {
+        log::trace!("Selecting initial road for settlement {:?}", settlement_pos);
         let roads = initial_roads_for_settlement(model, settlement_pos);
         if roads.is_empty() {
+            log::error!("No legal initial roads for settlement {:?}", settlement_pos);
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "selected settlement has no legal adjacent initial roads",
@@ -357,6 +515,7 @@ impl CliUi {
             {
                 match key.code {
                     KeyCode::Enter => {
+                        log::trace!("Road selected: {:?}", road);
                         self.overlay.selected = None;
                         self.overlay.status = SelectionStatus::Neutral;
                         self.overlay.preview.clear();
@@ -438,6 +597,7 @@ impl CliUi {
 
 impl Drop for CliUi {
     fn drop(&mut self) {
+        log::trace!("Dropping CLI UI, cleaning up terminal");
         let _ = disable_raw_mode();
         let _ = execute!(self.terminal.backend_mut(), LeaveAlternateScreen);
         let _ = self.terminal.show_cursor();
@@ -498,38 +658,49 @@ fn field_lines(model: &UiModel, overlay: &FieldOverlay) -> Vec<Line<'static>> {
 }
 
 fn read_init_action(ui: &mut CliUi, model: &UiModel) -> io::Result<InitAction> {
+    log::trace!("Reading init action");
     loop {
         let line = ui.prompt(model, "action [roll]: ")?;
         let line = line.trim();
         if line.is_empty() || line == "roll" {
+            log::trace!("Init action: RollDice");
             return Ok(InitAction::RollDice);
         }
         if let Some(usage) = parse_dev_card_usage(line) {
+            log::trace!("Init action: UseDevCard({:?})", usage);
             return Ok(InitAction::UseDevCard(usage));
         }
+        log::warn!("Could not parse init action: {}", line);
         ui.set_message("could not parse action".to_owned())?;
     }
 }
 
 fn read_post_dice_action(ui: &mut CliUi, model: &UiModel) -> io::Result<PostDiceAction> {
+    log::trace!("Reading post-dice action");
     loop {
         let line = ui.prompt(model, "action: ")?;
         if let Some(usage) = parse_dev_card_usage(&line) {
+            log::trace!("Post-dice action: UseDevCard({:?})", usage);
             return Ok(PostDiceAction::UseDevCard(usage));
         }
         if let Some(action) = parse_regular_action(&line) {
+            log::trace!("Post-dice action: RegularAction({:?})", action);
             return Ok(PostDiceAction::RegularAction(action));
         }
+        log::warn!("Could not parse post-dice action: {}", line);
         ui.set_message("could not parse action".to_owned())?;
     }
 }
 
 fn read_regular_action(ui: &mut CliUi, model: &UiModel) -> io::Result<RegularAction> {
+    log::trace!("Reading regular action");
     loop {
         let line = ui.prompt(model, "action: ")?;
         if let Some(action) = parse_regular_action(&line) {
+            log::trace!("Regular action: {:?}", action);
             return Ok(action);
         }
+        log::warn!("Could not parse regular action: {}", line);
         ui.set_message("could not parse action".to_owned())?;
     }
 }
@@ -619,7 +790,7 @@ fn parse_dev_card_usage(line: &str) -> Option<DevCardUsage> {
 }
 
 fn parse_resource(token: &str) -> Option<Resource> {
-    match token {
+    match token.to_lowercase().as_str() {
         "brick" => Some(Resource::Brick),
         "wood" => Some(Resource::Wood),
         "wheat" => Some(Resource::Wheat),
@@ -651,6 +822,7 @@ fn read_resource_collection(
     model: &UiModel,
     prompt: &str,
 ) -> io::Result<ResourceCollection> {
+    log::trace!("Reading resource collection");
     loop {
         let line = ui.prompt(model, prompt)?;
         let parts = line
@@ -659,15 +831,20 @@ fn read_resource_collection(
             .collect::<Result<Vec<_>, _>>();
         match parts {
             Ok(parts) if parts.len() == 5 => {
-                return Ok(ResourceCollection {
+                let resources = ResourceCollection {
                     brick: parts[0],
                     wood: parts[1],
                     wheat: parts[2],
                     sheep: parts[3],
                     ore: parts[4],
-                });
+                };
+                log::trace!("Resource collection read: {:?}", resources);
+                return Ok(resources);
             }
-            _ => ui.set_message("expected five unsigned integers".to_owned())?,
+            _ => {
+                log::warn!("Invalid resource collection input: {}", line);
+                ui.set_message("expected five unsigned integers".to_owned())?
+            }
         }
     }
 }
@@ -692,15 +869,19 @@ fn read_initial_road(
 
 fn read_hex(ui: &mut CliUi, model: &UiModel, prompt: &str) -> io::Result<Hex> {
     let robber_pos = model.public.board_state.robber_pos;
+    log::trace!("Reading hex (robber at {:?})", robber_pos);
     ui.select_hex_where(model, prompt, |hex| hex != robber_pos)
 }
 
 fn read_player_id(ui: &mut CliUi, model: &UiModel, prompt: &str) -> io::Result<PlayerId> {
+    log::trace!("Reading player ID");
     loop {
         let line = ui.prompt(model, prompt)?;
         if let Ok(id) = line.parse() {
+            log::trace!("Player ID read: {}", id);
             return Ok(id);
         }
+        log::warn!("Invalid player ID input: {}", line);
         ui.set_message("expected unsigned integer".to_owned())?;
     }
 }
@@ -812,23 +993,26 @@ fn settlement_deadzone(model: &UiModel) -> BTreeSet<Intersection> {
 
 fn legal_initial_settlements(model: &UiModel) -> BTreeSet<Intersection> {
     let deadzone = settlement_deadzone(model);
-    board_intersection_set(model)
+    let settlements = board_intersection_set(model)
         .into_iter()
         .filter(|intersection| !deadzone.contains(intersection))
         .filter(|intersection| !initial_roads_for_settlement(model, *intersection).is_empty())
-        .collect()
+        .collect::<BTreeSet<_>>();
+    settlements
 }
 
 fn initial_roads_for_settlement(model: &UiModel, settlement: Intersection) -> Vec<Road> {
     let valid_paths = board_path_set(model);
     let occupied = occupied_roads(model);
-    settlement
+    let roads = settlement
         .paths()
         .into_iter()
         .filter(|path| valid_paths.contains(path))
         .filter(|path| !occupied.contains(path))
         .map(|pos| Road { pos })
-        .collect()
+        .collect::<Vec<_>>();
+
+    roads
 }
 
 fn render_game_view(model: &UiModel) -> RenderGameView {
@@ -958,5 +1142,15 @@ mod tests {
                 .intersections_iter()
                 .any(|intersection| intersection == settlement)
         }));
+    }
+
+    #[test]
+    fn socket_log_line_preserves_level_target_and_message() {
+        let (level, target, message) =
+            parse_socket_log_line("TRACE\tcatan_runtime::cli_child\tselected road\n");
+
+        assert_eq!(level, RemoteLogLevel::Trace);
+        assert_eq!(target, "catan_runtime::cli_child");
+        assert_eq!(message, "selected road");
     }
 }
