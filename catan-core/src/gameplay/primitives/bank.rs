@@ -139,7 +139,10 @@ impl DeckFullnessLevel {
 #[derive(Debug)]
 pub enum BankResourceExchangeError {
     BankIsShort,
-    AccountIsShort { id: PlayerId },
+    AccountIsShort {
+        account: PlayerId,
+        short: ResourceCollection,
+    },
 }
 
 #[derive(Debug)]

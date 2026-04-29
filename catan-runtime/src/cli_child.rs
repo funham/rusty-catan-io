@@ -447,9 +447,12 @@ impl Drop for CliUi {
 fn model_lines(model: &UiModel) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     lines.push(Line::from(format!(
-        "actor: {:?} | robber: {:?} | longest road: {:?} | largest army: {:?}",
-        model.actor,
-        model.public.board_state.robber_pos,
+        "actor#: {:?} | robber: {:?} | longest road: {:?} | largest army: {:?}",
+        match model.actor {
+            Some(id) => format!("{}", id),
+            None => "None".to_owned(),
+        },
+        model.public.board_state.robber_pos.index().to_spiral(),
         model.public.longest_road_owner,
         model.public.largest_army_owner
     )));
@@ -479,8 +482,10 @@ fn model_lines(model: &UiModel) -> Vec<Line<'static>> {
         )));
     }
     lines.push(Line::from(""));
-    lines.push(Line::from("commands: roll | end | buy dev | build road h1 h2 | build settlement h1 h2 h3 | build city h1 h2 h3"));
-    lines.push(Line::from("trades: bank-trade give take common"));
+    lines.push(Line::from("commands: roll | end | buy dev | build road [h1] [h2] | build settlement [h1] [h2] [h3] | build city [h1] [h2] [h3]"));
+    lines.push(Line::from(
+        "trades: bank-trade [give] [take] [G4 | G3 | S2]",
+    ));
     lines.push(Line::from("dev cards: use knight hex [player|none] | use yop res1 res2 | use monopoly res | use roadbuild h1 h2 h3 h4"));
     lines
 }
@@ -571,9 +576,9 @@ fn parse_bank_trade(line: &str) -> Option<BankTrade> {
             give: parse_resource(give)?,
             take: parse_resource(take)?,
             kind: match *kind {
-                "common" => BankTradeKind::BankGeneric,
-                "port-3" => BankTradeKind::PortGeneric,
-                "port-2" => BankTradeKind::PortSpecific,
+                "G4" => BankTradeKind::BankGeneric,
+                "G3" => BankTradeKind::PortGeneric,
+                "S2" => BankTradeKind::PortSpecific,
                 _ => return None,
             },
         }),

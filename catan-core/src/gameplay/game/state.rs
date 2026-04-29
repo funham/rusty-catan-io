@@ -8,7 +8,7 @@ use crate::{
             build::{BoardBuildData, Build, BuildingError, Road},
             dev_card::DevCardUsage,
             player::{PlayerDataContainer, PlayerId},
-            resource::{HasCost, Resource, ResourceCollection},
+            resource::{HasCost, Resource, ResourceCollection, ResourceCollectionError},
             trade::BankTrade,
             turn::GameTurn,
         },
@@ -56,8 +56,12 @@ impl GameState {
         to_bank: ResourceCollection,
         from_bank: ResourceCollection,
     ) -> Result<(), BankResourceExchangeError> {
-        if !self.players.get(player_id).resources().has_enough(&to_bank) {
-            return Err(BankResourceExchangeError::AccountIsShort { id: player_id });
+        let missing = self.players.get(player_id).resources().missing(&to_bank);
+        if !missing.is_empty() {
+            return Err(BankResourceExchangeError::AccountIsShort {
+                account: player_id,
+                short: missing,
+            });
         }
         if !self.bank.can_pay(&from_bank) {
             return Err(BankResourceExchangeError::BankIsShort);
@@ -67,7 +71,14 @@ impl GameState {
             .get_mut(player_id)
             .resources()
             .subtract_in_place(&to_bank)
-            .map_err(|_| BankResourceExchangeError::AccountIsShort { id: player_id })?;
+            .map_err(|_| BankResourceExchangeError::AccountIsShort {
+                account: player_id,
+                short: self
+                    .players
+                    .get_mut(player_id)
+                    .resources()
+                    .missing(&to_bank),
+            })?;
         self.bank.deposit(to_bank);
         self.bank.withdraw(from_bank)?;
         *self.players.get_mut(player_id).resources() += &from_bank;
@@ -97,7 +108,7 @@ impl GameState {
         self.transfer_to_bank(cost, player_id)
             .map_err(|err| match err {
                 BankResourceExchangeError::BankIsShort => unreachable!(),
-                BankResourceExchangeError::AccountIsShort { id } => {
+                BankResourceExchangeError::AccountIsShort { account: id, short: _ } => {
                     BuildActionError::AccountIsShort { id }
                 }
             })?;
@@ -124,7 +135,7 @@ impl GameState {
         self.transfer_to_bank(COST, player_id)
             .map_err(|err| match err {
                 BankResourceExchangeError::BankIsShort => unreachable!(),
-                BankResourceExchangeError::AccountIsShort { id } => {
+                BankResourceExchangeError::AccountIsShort { account: id, short: _ } => {
                     BuyDevCardError::AccountIsShort { id }
                 }
             })?;
@@ -148,7 +159,16 @@ impl GameState {
             &mut self.bank.resources,
             resources,
         )
-        .map_err(|_| BankResourceExchangeError::AccountIsShort { id: player_id })
+        .map_err(|err| BankResourceExchangeError::AccountIsShort {
+            account: player_id,
+            short: match err {
+                ResourceCollectionError::InsufficientResources {
+                    available,
+                    required,
+                } => available.missing(&required),
+                ResourceCollectionError::ResourceAppearsTwice => unreachable!(),
+            },
+        })
     }
 
     pub fn transfer_from_bank(
