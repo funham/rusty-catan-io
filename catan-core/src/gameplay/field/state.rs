@@ -178,7 +178,7 @@ pub struct BuildCollection {
 
 impl BoardLayout {
     pub const fn field_size_by_radius(radius: usize) -> usize {
-        1 + 3 * radius * (radius + 1)
+        1 + 3 * radius * (radius + 1) // TODO: use `HexIndex`` instead
     }
 
     pub fn new(param: FieldBuildParam) -> Self {

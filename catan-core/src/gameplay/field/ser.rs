@@ -1,6 +1,7 @@
 use std::{collections::BTreeMap, fs::File, io::BufReader};
 
 use serde::{Deserialize, Serialize};
+use serde_with::{Seq, serde_as};
 
 use crate::{
     gameplay::{
@@ -18,11 +19,13 @@ enum HexTypeJsonVal {
     Resource((Resource, u8)),
 }
 
+#[serde_as]
 #[derive(Debug, Serialize, Deserialize)]
 struct FieldArrangementJsonVal {
     field_radius: u8,
     tile_info: Vec<HexTypeJsonVal>,
     #[serde(default)]
+    #[serde_as(as = "Seq<(_, _)>")]
     ports_info: BTreeMap<Path, PortKind>,
 }
 
@@ -79,4 +82,27 @@ pub fn arrangement_from_json(path: &std::path::Path) -> Option<FieldArrangement>
     let file = File::open(path).ok()?;
     let reader = BufReader::new(file);
     serde_json::from_reader(reader).ok()
+
+    // let val: FieldArrangementJsonVal = serde_json::from_reader(reader).unwrap();
+    // Some(val.into())
+}
+
+impl From<FieldArrangementJsonVal> for FieldArrangement {
+    fn from(json: FieldArrangementJsonVal) -> Self {
+        Self::new(
+            json.field_radius,
+            json.tile_info
+                .into_iter()
+                .map(|h| match h {
+                    HexTypeJsonVal::Desert(_) => Tile::Desert,
+                    HexTypeJsonVal::Resource((resource, tilenum)) => Tile::Resource {
+                        resource,
+                        number: DiceVal::try_from(tilenum).unwrap(),
+                    },
+                })
+                .collect(),
+            json.ports_info,
+        )
+        .unwrap()
+    }
 }

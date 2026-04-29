@@ -21,13 +21,13 @@ fn main() {
         return;
     }
 
-    let path = args
+    let config_path = args
         .get(1)
         .cloned()
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("catan-runtime/data/configurations/cli_single.json"));
 
-    let config = match host::load_config(&path) {
+    let config = match host::load_config(&config_path) {
         Ok(config) => config,
         Err(err) => {
             eprintln!("{err}");
