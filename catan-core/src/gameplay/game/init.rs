@@ -30,13 +30,15 @@ impl Default for GameInitializationState {
 impl GameInitializationState {
     pub fn new(field_build_param: FieldBuildParam) -> Self {
         let board = Arc::new(BoardLayout::new(field_build_param));
+        let mut bank = Bank::default();
+        bank.shuffle_dev_cards();
         Self {
             turn: GameTurn::new(board.n_players as u8),
             players: PlayerDataContainer::new(board.n_players),
             builds: BoardBuildData::new(board.n_players),
             board_state: BoardState::new(&board),
             board,
-            bank: Default::default(),
+            bank,
         }
     }
 
