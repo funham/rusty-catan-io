@@ -18,7 +18,7 @@ use catan_core::{
     gameplay::primitives::{
         bank::DeckFullnessLevel,
         build::{Build, Establishment, EstablishmentType, Road},
-        dev_card::DevCardUsage,
+        dev_card::{DevCardData, DevCardUsage, UsableDevCard},
         player::PlayerId,
         resource::{Resource, ResourceCollection},
         trade::{BankTrade, BankTradeKind},
@@ -650,11 +650,12 @@ fn public_model_lines(model: &UiModel) -> Vec<Line<'static>> {
 fn personal_model_lines(model: &UiModel) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     if let Some(private) = &model.private {
-        lines.push(resource_collection_line(
-            format!("you: p{} resources ", private.player_id),
-            &private.resources,
-        ));
-        lines.push(Line::from(format!("your dev cards: {}", private.dev_cards)));
+        lines.push(Line::from(format!("you: p{}", private.player_id)));
+        lines.push(Line::from("resources"));
+        lines.extend(resource_card_lines(&private.resources, None));
+        lines.push(Line::from(""));
+        lines.push(Line::from("development"));
+        lines.extend(dev_card_lines(&private.dev_cards));
     } else {
         lines.push(Line::from("no private player data"));
     }
@@ -712,10 +713,158 @@ fn public_player_line(player: &catan_agents::remote_agent::UiPublicPlayer) -> Li
     Line::from(spans)
 }
 
-fn resource_collection_line(prefix: String, resources: &ResourceCollection) -> Line<'static> {
-    let mut spans = vec![Span::raw(prefix)];
-    push_resource_values(&mut spans, resources, |count| count.to_string());
-    Line::from(spans)
+fn resource_card_lines(
+    resources: &ResourceCollection,
+    selected_drop: Option<&ResourceCollection>,
+) -> Vec<Line<'static>> {
+    let mut top = Vec::new();
+    let mut middle = Vec::new();
+    let mut bottom = Vec::new();
+    let mut labels = Vec::new();
+    let mut selected = Vec::new();
+
+    for (idx, resource) in Resource::list().into_iter().enumerate() {
+        if idx > 0 {
+            for spans in [
+                &mut top,
+                &mut middle,
+                &mut bottom,
+                &mut labels,
+                &mut selected,
+            ] {
+                spans.push(Span::raw(" "));
+            }
+        }
+        let style = resource_style(resource);
+        top.push(Span::styled("┌──┐", style));
+        middle.push(Span::styled(
+            format!("│{:02}│", resources[resource].min(99)),
+            style,
+        ));
+        bottom.push(Span::styled("└──┘", style));
+        labels.push(Span::styled(resource_abbrev(resource), style));
+        if let Some(drop) = selected_drop {
+            selected.push(Span::styled(
+                format!(" {:02} ", drop[resource].min(99)),
+                style,
+            ));
+        }
+    }
+
+    let mut lines = vec![
+        Line::from(top),
+        Line::from(middle),
+        Line::from(bottom),
+        Line::from(labels),
+    ];
+    if selected_drop.is_some() {
+        lines.push(Line::from(selected));
+    }
+    lines
+}
+
+fn dev_card_lines(dev_cards: &DevCardData) -> Vec<Line<'static>> {
+    let mut top = Vec::new();
+    let mut middle = Vec::new();
+    let mut bottom = Vec::new();
+    let mut labels = Vec::new();
+
+    for (idx, card) in [
+        UsableDevCard::Knight,
+        UsableDevCard::YearOfPlenty,
+        UsableDevCard::Monopoly,
+        UsableDevCard::RoadBuild,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if idx > 0 {
+            push_dev_card_gap(&mut top, &mut middle, &mut bottom, &mut labels);
+        }
+        push_dev_card(
+            &mut top,
+            &mut middle,
+            &mut bottom,
+            &mut labels,
+            dev_card_abbrev(card),
+            [
+                Some(dev_cards.used[card]),
+                Some(dev_cards.active[card]),
+                Some(dev_cards.queued[card]),
+            ],
+        );
+    }
+
+    push_dev_card_gap(&mut top, &mut middle, &mut bottom, &mut labels);
+    push_dev_card(
+        &mut top,
+        &mut middle,
+        &mut bottom,
+        &mut labels,
+        "VP",
+        [None, Some(dev_cards.victory_pts), None],
+    );
+
+    vec![
+        Line::from(top),
+        Line::from(middle),
+        Line::from(bottom),
+        Line::from(labels),
+    ]
+}
+
+fn push_dev_card_gap(
+    top: &mut Vec<Span<'static>>,
+    middle: &mut Vec<Span<'static>>,
+    bottom: &mut Vec<Span<'static>>,
+    labels: &mut Vec<Span<'static>>,
+) {
+    for spans in [top, middle, bottom, labels] {
+        spans.push(Span::raw(" "));
+    }
+}
+
+fn push_dev_card(
+    top: &mut Vec<Span<'static>>,
+    middle: &mut Vec<Span<'static>>,
+    bottom: &mut Vec<Span<'static>>,
+    labels: &mut Vec<Span<'static>>,
+    label: &'static str,
+    counts: [Option<u16>; 3],
+) {
+    let style = Style::default().fg(Color::Magenta);
+    top.push(Span::styled("┌──┐", style));
+    top.push(Span::raw(format!("{:>2}", count_label(counts[0]))));
+    middle.push(Span::styled(format!("│{:^2}│", label), style));
+    middle.push(Span::raw(format!("{:>2}", count_label(counts[1]))));
+    bottom.push(Span::styled("└──┘", style));
+    bottom.push(Span::raw(format!("{:>2}", count_label(counts[2]))));
+    labels.push(Span::raw(format!("{:^6}", label)));
+}
+
+fn count_label(count: Option<u16>) -> String {
+    count
+        .map(|count| count.min(99).to_string())
+        .unwrap_or_else(|| " ".to_owned())
+}
+
+fn resource_abbrev(resource: Resource) -> &'static str {
+    match resource {
+        Resource::Brick => "BRK ",
+        Resource::Wood => "WOD ",
+        Resource::Wheat => "WHT ",
+        Resource::Sheep => "SHP ",
+        Resource::Ore => "ORE ",
+    }
+}
+
+fn dev_card_abbrev(card: UsableDevCard) -> &'static str {
+    match card {
+        UsableDevCard::Knight => "KN",
+        UsableDevCard::YearOfPlenty => "YP",
+        UsableDevCard::Monopoly => "M",
+        UsableDevCard::RoadBuild => "RB",
+    }
 }
 
 fn push_resource_values(
@@ -1278,8 +1427,38 @@ mod tests {
         assert!(
             personal_lines
                 .iter()
-                .any(|line| line.to_string().contains("your dev cards"))
+                .any(|line| line.to_string().contains("development"))
         );
+    }
+
+    #[test]
+    fn card_lines_render_resource_and_dev_counts() {
+        let resources = ResourceCollection {
+            brick: 1,
+            wood: 2,
+            wheat: 13,
+            sheep: 0,
+            ore: 5,
+        };
+        let rendered_resources = resource_card_lines(&resources, None)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+
+        assert!(rendered_resources[0].contains("┌──┐"));
+        assert!(rendered_resources[1].contains("│01│"));
+        assert!(rendered_resources[1].contains("│13│"));
+
+        let dev_cards = DevCardData::default();
+        let rendered_dev = dev_card_lines(&dev_cards)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+
+        assert!(rendered_dev[1].contains("│KN│"));
+        assert!(rendered_dev[1].contains("│YP│"));
+        assert!(rendered_dev[1].contains("│ M│") || rendered_dev[1].contains("│M │"));
+        assert!(rendered_dev[1].contains("│VP│"));
     }
 
     #[test]
