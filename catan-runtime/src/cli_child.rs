@@ -273,6 +273,7 @@ struct CliUi {
     terminal: Terminal<CrosstermBackend<Stdout>>,
     message: String,
     overlay: FieldOverlay,
+    personal_override: Option<Vec<Line<'static>>>,
 }
 
 impl CliUi {
@@ -287,6 +288,7 @@ impl CliUi {
             terminal,
             message: "waiting for host".to_owned(),
             overlay: FieldOverlay::default(),
+            personal_override: None,
         })
     }
 
@@ -296,6 +298,7 @@ impl CliUi {
         self.overlay.selected = None;
         self.overlay.status = SelectionStatus::Neutral;
         self.overlay.preview.clear();
+        self.personal_override = None;
         self.draw(None, "", "")
     }
 
@@ -305,6 +308,7 @@ impl CliUi {
         self.overlay.selected = None;
         self.overlay.status = SelectionStatus::Neutral;
         self.overlay.preview.clear();
+        self.personal_override = None;
         self.draw(Some(model), "", "")
     }
 
@@ -315,6 +319,7 @@ impl CliUi {
         self.overlay.selected = None;
         self.overlay.status = SelectionStatus::Neutral;
         self.overlay.preview.clear();
+        self.personal_override = None;
         loop {
             self.draw(Some(model), prompt, &input)?;
             if let CrosstermEvent::Key(key) = event::read()?
@@ -534,9 +539,139 @@ impl CliUi {
         }
     }
 
+    fn select_build(
+        &mut self,
+        model: &UiModel,
+        builds: Vec<Build>,
+        prompt: &str,
+    ) -> io::Result<Option<Build>> {
+        if builds.is_empty() {
+            self.set_message("no legal placements".to_owned())?;
+            return Ok(None);
+        }
+
+        let actor = model.actor.unwrap_or_default();
+        let mut selected = 0;
+        self.message = "cycle placements with arrows/tab; enter confirms; esc cancels".to_owned();
+        loop {
+            let build = builds[selected];
+            self.overlay.selected = Some(match build {
+                Build::Road(road) => FieldSelection::Path(road.pos),
+                Build::Establishment(establishment) => {
+                    FieldSelection::Intersection(establishment.pos)
+                }
+            });
+            self.overlay.status = SelectionStatus::Available;
+            self.overlay.preview = vec![match build {
+                Build::Road(road) => FieldPreview::Road {
+                    player_id: actor,
+                    road,
+                },
+                Build::Establishment(establishment) => FieldPreview::Establishment {
+                    player_id: actor,
+                    establishment,
+                },
+            }];
+            self.draw(Some(model), prompt, &build_label(build))?;
+
+            if let CrosstermEvent::Key(key) = event::read()?
+                && key.kind == KeyEventKind::Press
+            {
+                match key.code {
+                    KeyCode::Enter => {
+                        self.overlay.selected = None;
+                        self.overlay.status = SelectionStatus::Neutral;
+                        self.overlay.preview.clear();
+                        return Ok(Some(build));
+                    }
+                    KeyCode::Esc => {
+                        self.overlay.selected = None;
+                        self.overlay.status = SelectionStatus::Neutral;
+                        self.overlay.preview.clear();
+                        self.set_message("selection cancelled".to_owned())?;
+                        return Ok(None);
+                    }
+                    KeyCode::Left | KeyCode::Down | KeyCode::Tab => {
+                        selected = selected.checked_sub(1).unwrap_or(builds.len() - 1);
+                    }
+                    KeyCode::Right | KeyCode::Up | KeyCode::BackTab => {
+                        selected = (selected + 1) % builds.len();
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    fn select_drop_cards(&mut self, model: &UiModel) -> io::Result<Option<ResourceCollection>> {
+        let Some(private) = &model.private else {
+            self.set_message("no private resources".to_owned())?;
+            return Ok(None);
+        };
+
+        let required = private.resources.total() / 2;
+        let mut selected_resource = 0;
+        let mut selected = ResourceCollection::ZERO;
+        self.message =
+            format!("select exactly {required} cards to drop; enter confirms; esc cancels");
+
+        loop {
+            self.personal_override = Some(drop_personal_lines(
+                private.player_id,
+                &private.resources,
+                &private.dev_cards,
+                &selected,
+                required,
+                selected_resource,
+            ));
+            self.draw(
+                Some(model),
+                "drop: ",
+                &format!("selected {} of {}", selected.total(), required),
+            )?;
+
+            if let CrosstermEvent::Key(key) = event::read()?
+                && key.kind == KeyEventKind::Press
+            {
+                let resource = Resource::list()[selected_resource];
+                match key.code {
+                    KeyCode::Enter => {
+                        if selected.total() == required {
+                            self.personal_override = None;
+                            return Ok(Some(selected));
+                        }
+                        self.message =
+                            format!("selected {} cards; expected {}", selected.total(), required);
+                    }
+                    KeyCode::Esc => {
+                        self.personal_override = None;
+                        self.set_message("drop cancelled".to_owned())?;
+                        return Ok(None);
+                    }
+                    KeyCode::Left => {
+                        selected_resource = selected_resource
+                            .checked_sub(1)
+                            .unwrap_or(Resource::list().len() - 1);
+                    }
+                    KeyCode::Right => {
+                        selected_resource = (selected_resource + 1) % Resource::list().len();
+                    }
+                    KeyCode::Up => {
+                        adjust_drop_selection(&private.resources, &mut selected, resource, 1);
+                    }
+                    KeyCode::Down => {
+                        adjust_drop_selection(&private.resources, &mut selected, resource, -1);
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
     fn draw(&mut self, model: Option<&UiModel>, prompt: &str, input: &str) -> io::Result<()> {
         let message = self.message.clone();
         let overlay = self.overlay.clone();
+        let personal_override = self.personal_override.clone();
         self.terminal.draw(|frame| {
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
@@ -576,9 +711,11 @@ impl CliUi {
                         .block(Block::default().borders(Borders::ALL).title("Public"));
                     frame.render_widget(public, info_chunks[0]);
 
-                    let personal = Paragraph::new(personal_model_lines(model))
-                        .wrap(Wrap { trim: false })
-                        .block(Block::default().borders(Borders::ALL).title("Personal"));
+                    let personal = Paragraph::new(
+                        personal_override.unwrap_or_else(|| personal_model_lines(model)),
+                    )
+                    .wrap(Wrap { trim: false })
+                    .block(Block::default().borders(Borders::ALL).title("Personal"));
                     frame.render_widget(personal, info_chunks[1]);
                 }
                 None => {
@@ -813,6 +950,54 @@ fn dev_card_lines(dev_cards: &DevCardData) -> Vec<Line<'static>> {
     ]
 }
 
+fn drop_personal_lines(
+    player_id: PlayerId,
+    resources: &ResourceCollection,
+    dev_cards: &DevCardData,
+    selected: &ResourceCollection,
+    required: u16,
+    selected_resource: usize,
+) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        Line::from(format!("you: p{player_id}")),
+        Line::from(format!("drop {} / {} cards", selected.total(), required)),
+    ];
+    lines.extend(resource_card_lines(resources, Some(selected)));
+    lines.push(selected_resource_line(selected_resource));
+    lines.push(Line::from(""));
+    lines.extend(dev_card_lines(dev_cards));
+    lines
+}
+
+fn selected_resource_line(selected_resource: usize) -> Line<'static> {
+    let mut spans = Vec::new();
+    for (idx, resource) in Resource::list().into_iter().enumerate() {
+        if idx > 0 {
+            spans.push(Span::raw(" "));
+        }
+        let marker = if idx == selected_resource {
+            " ^^ "
+        } else {
+            "    "
+        };
+        spans.push(Span::styled(marker, resource_style(resource)));
+    }
+    Line::from(spans)
+}
+
+fn adjust_drop_selection(
+    available: &ResourceCollection,
+    selected: &mut ResourceCollection,
+    resource: Resource,
+    delta: i8,
+) {
+    if delta > 0 {
+        selected[resource] = (selected[resource] + delta as u16).min(available[resource]);
+    } else {
+        selected[resource] = selected[resource].saturating_sub(delta.unsigned_abs() as u16);
+    }
+}
+
 fn push_dev_card_gap(
     top: &mut Vec<Span<'static>>,
     middle: &mut Vec<Span<'static>>,
@@ -959,12 +1144,35 @@ fn read_regular_action(ui: &mut CliUi, model: &UiModel) -> io::Result<RegularAct
     log::trace!("Reading regular action");
     loop {
         let line = ui.prompt(model, "action: ")?;
+        if let Some(kind) = partial_build_command(&line) {
+            let builds = legal_builds_for_mode(model, kind);
+            if let Some(build) = ui.select_build(model, builds, "build: ")? {
+                return Ok(RegularAction::Build(build));
+            }
+            continue;
+        }
         if let Some(action) = parse_regular_action(&line) {
             log::trace!("Regular action: {:?}", action);
             return Ok(action);
         }
         log::warn!("Could not parse regular action: {}", line);
         ui.set_message("could not parse action".to_owned())?;
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PartialBuildMode {
+    Settlement,
+    Road,
+    City,
+}
+
+fn partial_build_command(line: &str) -> Option<PartialBuildMode> {
+    match line.split_whitespace().collect::<Vec<_>>().as_slice() {
+        ["build", "settlement"] | ["bs"] => Some(PartialBuildMode::Settlement),
+        ["build", "road"] | ["br"] => Some(PartialBuildMode::Road),
+        ["build", "city"] | ["bc"] => Some(PartialBuildMode::City),
+        _ => None,
     }
 }
 
@@ -1088,6 +1296,12 @@ fn read_resource_collection(
     log::trace!("Reading resource collection");
     loop {
         let line = ui.prompt(model, prompt)?;
+        if line == "drop" {
+            if let Some(resources) = ui.select_drop_cards(model)? {
+                return Ok(resources);
+            }
+            continue;
+        }
         let parts = line
             .split_whitespace()
             .map(str::parse::<u16>)
@@ -1278,6 +1492,199 @@ fn initial_roads_for_settlement(model: &UiModel, settlement: Intersection) -> Ve
     roads
 }
 
+fn legal_builds_for_mode(model: &UiModel, mode: PartialBuildMode) -> Vec<Build> {
+    match mode {
+        PartialBuildMode::Settlement => legal_regular_settlements(model),
+        PartialBuildMode::Road => legal_regular_roads(model),
+        PartialBuildMode::City => legal_regular_cities(model),
+    }
+}
+
+fn legal_regular_settlements(model: &UiModel) -> Vec<Build> {
+    if !can_afford(
+        model,
+        ResourceCollection {
+            brick: 1,
+            wood: 1,
+            wheat: 1,
+            sheep: 1,
+            ore: 0,
+        },
+    ) || player_settlement_count(model, model.actor.unwrap_or_default()) >= 5
+    {
+        return Vec::new();
+    }
+
+    let actor = model.actor.unwrap_or_default();
+    let deadzone = settlement_deadzone(model);
+    board_intersection_set(model)
+        .into_iter()
+        .filter(|intersection| !deadzone.contains(intersection))
+        .filter(|intersection| {
+            player_builds(model, actor)
+                .map(|builds| {
+                    builds.roads.iter().any(|road| {
+                        road.pos
+                            .intersections_iter()
+                            .any(|pos| pos == *intersection)
+                    })
+                })
+                .unwrap_or(false)
+        })
+        .map(|pos| {
+            Build::Establishment(Establishment {
+                pos,
+                stage: EstablishmentType::Settlement,
+            })
+        })
+        .collect()
+}
+
+fn legal_regular_roads(model: &UiModel) -> Vec<Build> {
+    if !can_afford(
+        model,
+        ResourceCollection {
+            brick: 1,
+            wood: 1,
+            ..ResourceCollection::ZERO
+        },
+    ) || player_road_count(model, model.actor.unwrap_or_default()) >= 15
+    {
+        return Vec::new();
+    }
+
+    let actor = model.actor.unwrap_or_default();
+    let occupied = occupied_roads(model);
+    let opponent_intersections = opponent_occupied_intersections(model, actor);
+    board_path_set(model)
+        .into_iter()
+        .filter(|path| !occupied.contains(path))
+        .filter(|path| road_connects_to_player(model, actor, *path, &opponent_intersections))
+        .map(|pos| Build::Road(Road { pos }))
+        .collect()
+}
+
+fn legal_regular_cities(model: &UiModel) -> Vec<Build> {
+    if !can_afford(
+        model,
+        ResourceCollection {
+            wheat: 2,
+            ore: 3,
+            ..ResourceCollection::ZERO
+        },
+    ) || player_city_count(model, model.actor.unwrap_or_default()) >= 4
+    {
+        return Vec::new();
+    }
+
+    let actor = model.actor.unwrap_or_default();
+    player_builds(model, actor)
+        .into_iter()
+        .flat_map(|builds| builds.establishments.iter())
+        .filter(|est| est.stage == EstablishmentType::Settlement)
+        .map(|est| {
+            Build::Establishment(Establishment {
+                pos: est.pos,
+                stage: EstablishmentType::City,
+            })
+        })
+        .collect()
+}
+
+fn can_afford(model: &UiModel, cost: ResourceCollection) -> bool {
+    model
+        .private
+        .as_ref()
+        .map(|private| private.resources.has_enough(&cost))
+        .unwrap_or(false)
+}
+
+fn player_builds(
+    model: &UiModel,
+    player_id: PlayerId,
+) -> Option<&catan_agents::remote_agent::UiPlayerBuilds> {
+    model
+        .public
+        .builds
+        .iter()
+        .find(|builds| builds.player_id == player_id)
+}
+
+fn player_settlement_count(model: &UiModel, player_id: PlayerId) -> usize {
+    player_builds(model, player_id)
+        .map(|builds| {
+            builds
+                .establishments
+                .iter()
+                .filter(|est| est.stage == EstablishmentType::Settlement)
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn player_city_count(model: &UiModel, player_id: PlayerId) -> usize {
+    player_builds(model, player_id)
+        .map(|builds| {
+            builds
+                .establishments
+                .iter()
+                .filter(|est| est.stage == EstablishmentType::City)
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn player_road_count(model: &UiModel, player_id: PlayerId) -> usize {
+    player_builds(model, player_id)
+        .map(|builds| builds.roads.len())
+        .unwrap_or_default()
+}
+
+fn opponent_occupied_intersections(model: &UiModel, actor: PlayerId) -> BTreeSet<Intersection> {
+    model
+        .public
+        .builds
+        .iter()
+        .filter(|builds| builds.player_id != actor)
+        .flat_map(|builds| builds.establishments.iter().map(|est| est.pos))
+        .collect()
+}
+
+fn road_connects_to_player(
+    model: &UiModel,
+    actor: PlayerId,
+    path: BoardPath,
+    opponent_intersections: &BTreeSet<Intersection>,
+) -> bool {
+    let Some(builds) = player_builds(model, actor) else {
+        return false;
+    };
+    path.intersections_iter().any(|intersection| {
+        builds
+            .establishments
+            .iter()
+            .any(|est| est.pos == intersection)
+            || (!opponent_intersections.contains(&intersection)
+                && builds.roads.iter().any(|road| {
+                    road.pos
+                        .intersections_iter()
+                        .any(|road_intersection| road_intersection == intersection)
+                }))
+    })
+}
+
+fn build_label(build: Build) -> String {
+    match build {
+        Build::Road(road) => path_label(road.pos),
+        Build::Establishment(establishment) => match establishment.stage {
+            EstablishmentType::Settlement => {
+                format!("settlement {}", intersection_label(establishment.pos))
+            }
+            EstablishmentType::City => format!("city {}", intersection_label(establishment.pos)),
+        },
+    }
+}
+
 fn render_game_view(model: &UiModel) -> RenderGameView {
     RenderGameView {
         board: RenderBoard {
@@ -1459,6 +1866,48 @@ mod tests {
         assert!(rendered_dev[1].contains("│YP│"));
         assert!(rendered_dev[1].contains("│ M│") || rendered_dev[1].contains("│M │"));
         assert!(rendered_dev[1].contains("│VP│"));
+    }
+
+    #[test]
+    fn partial_build_commands_parse_aliases() {
+        assert_eq!(
+            partial_build_command("build settlement"),
+            Some(PartialBuildMode::Settlement)
+        );
+        assert_eq!(
+            partial_build_command("bs"),
+            Some(PartialBuildMode::Settlement)
+        );
+        assert_eq!(
+            partial_build_command("build road"),
+            Some(PartialBuildMode::Road)
+        );
+        assert_eq!(partial_build_command("br"), Some(PartialBuildMode::Road));
+        assert_eq!(
+            partial_build_command("build city"),
+            Some(PartialBuildMode::City)
+        );
+        assert_eq!(partial_build_command("bc"), Some(PartialBuildMode::City));
+        assert_eq!(partial_build_command("build road 0 1"), None);
+    }
+
+    #[test]
+    fn drop_selection_is_bounded_by_available_resources() {
+        let available = ResourceCollection {
+            brick: 2,
+            ..ResourceCollection::ZERO
+        };
+        let mut selected = ResourceCollection::ZERO;
+
+        adjust_drop_selection(&available, &mut selected, Resource::Brick, 1);
+        adjust_drop_selection(&available, &mut selected, Resource::Brick, 1);
+        adjust_drop_selection(&available, &mut selected, Resource::Brick, 1);
+        assert_eq!(selected.brick, 2);
+
+        adjust_drop_selection(&available, &mut selected, Resource::Brick, -1);
+        adjust_drop_selection(&available, &mut selected, Resource::Brick, -1);
+        adjust_drop_selection(&available, &mut selected, Resource::Brick, -1);
+        assert_eq!(selected.brick, 0);
     }
 
     #[test]
