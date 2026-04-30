@@ -6,6 +6,8 @@ use crate::gameplay::primitives::{
     resource::{Resource, ResourceCollection, ResourceMap},
 };
 
+use rand::RngExt;
+
 #[derive(Debug, Clone)]
 pub struct Bank {
     pub resources: ResourceCollection,
@@ -32,6 +34,14 @@ impl Bank {
 
     pub fn draw_dev_card(&mut self) -> Option<DevCardKind> {
         self.dev_cards.pop()
+    }
+
+    pub fn shuffle_dev_cards(&mut self) {
+        let mut rng = rand::rng();
+        for i in (1..self.dev_cards.len()).rev() {
+            let j = rng.random_range(0..=i);
+            self.dev_cards.swap(i, j);
+        }
     }
 
     pub fn public_view(&self) -> BankViewOwned {

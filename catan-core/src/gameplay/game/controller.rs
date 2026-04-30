@@ -15,6 +15,7 @@ use crate::gameplay::primitives::bank::BankResourceExchangeError;
 use crate::gameplay::primitives::build::{BuildingError, Establishment, EstablishmentType};
 use crate::gameplay::primitives::dev_card::DevCardUsage;
 use crate::gameplay::primitives::player::PlayerId;
+use crate::gameplay::primitives::resource::ResourceCollection;
 use crate::gameplay::primitives::trade::{BankTrade, BankTradeKind};
 use crate::gameplay::primitives::turn::GameTurn;
 use crate::gameplay::primitives::{PortKind, Tile};
@@ -115,14 +116,15 @@ impl GameController {
                     action.establishment_position
                 );
 
-                match game_init.builds.try_init_place(
-                    player_id,
-                    action.road,
-                    Establishment {
-                        pos: action.establishment_position,
-                        stage: EstablishmentType::Settlement,
-                    },
-                ) {
+                let establishment = Establishment {
+                    pos: action.establishment_position,
+                    stage: EstablishmentType::Settlement,
+                };
+
+                match game_init
+                    .builds
+                    .try_init_place(player_id, action.road, establishment)
+                {
                     Err(err) => {
                         match err {
                             BuildingError::InitRoad(_) => {
@@ -149,6 +151,13 @@ impl GameController {
                             "Player {} successfully placed initial settlement and road",
                             player_id
                         );
+                        if game_init.turn.get_rounds_played() == 1 {
+                            Self::grant_second_initial_resources(
+                                &mut game_init,
+                                player_id,
+                                establishment,
+                            );
+                        }
                         break;
                     }
                 }
@@ -168,6 +177,31 @@ impl GameController {
             players: game_init.players,
             builds: game_init.builds,
         }
+    }
+
+    fn grant_second_initial_resources(
+        game_init: &mut GameInitializationState,
+        player_id: PlayerId,
+        settlement: Establishment,
+    ) {
+        let mut resources = ResourceCollection::ZERO;
+        for hex in settlement
+            .pos
+            .as_set()
+            .into_iter()
+            .filter(|hex| hex.norm() <= game_init.board.arrangement.radius() as usize)
+        {
+            if let Tile::Resource { resource, .. } = game_init.board.arrangement[hex] {
+                resources += &resource.into();
+            }
+        }
+
+        let mut player = game_init.players.get_mut(player_id);
+        let _ = ResourceCollection::transfer(
+            &mut game_init.bank.resources,
+            player.resources(),
+            resources,
+        );
     }
 
     fn notify_observers(&mut self, event: &GameEvent) {
@@ -824,7 +858,7 @@ mod tests {
     use crate::gameplay::{
         game::init::GameInitializationState,
         game::state::GameState,
-        primitives::{Tile, build::EstablishmentType},
+        primitives::{Tile, build::EstablishmentType, resource::ResourceCollection},
     };
     use crate::topology::Hex;
 
@@ -874,5 +908,38 @@ mod tests {
         GameController::execute_harvesting(&mut game, 0, target_num);
 
         assert_eq!(game.players.get(0).resources().total(), 0);
+    }
+
+    #[test]
+    fn second_initial_settlement_grants_adjacent_resources() {
+        let mut init = GameInitializationState::default();
+        let (settlement, _) = init
+            .builds
+            .query()
+            .possible_initial_placements(&init.board, 0)
+            .into_iter()
+            .find(|(settlement, _)| {
+                settlement.pos.as_set().into_iter().any(|hex| {
+                    hex.norm() <= init.board.arrangement.radius() as usize
+                        && matches!(init.board.arrangement[hex], Tile::Resource { .. })
+                })
+            })
+            .expect("default board should have a resource-adjacent initial placement");
+
+        let expected = settlement.pos.as_set().into_iter().fold(
+            ResourceCollection::ZERO,
+            |mut resources, hex| {
+                if hex.norm() <= init.board.arrangement.radius() as usize
+                    && let Tile::Resource { resource, .. } = init.board.arrangement[hex]
+                {
+                    resources += &resource.into();
+                }
+                resources
+            },
+        );
+
+        GameController::grant_second_initial_resources(&mut init, 0, settlement);
+
+        assert_eq!(*init.players.get(0).resources(), expected);
     }
 }
