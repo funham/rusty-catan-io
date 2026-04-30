@@ -679,6 +679,7 @@ impl CliUi {
         let mut selected = 0;
         self.message = "select bank trade with up/down; enter confirms; esc cancels".to_owned();
         loop {
+            self.personal_override = Some(bank_trade_menu_lines(&options, selected));
             self.draw(
                 Some(model),
                 "bank-trade: ",
@@ -688,8 +689,12 @@ impl CliUi {
                 && key.kind == KeyEventKind::Press
             {
                 match key.code {
-                    KeyCode::Enter => return Ok(Some(options[selected])),
+                    KeyCode::Enter => {
+                        self.personal_override = None;
+                        return Ok(Some(options[selected]));
+                    }
                     KeyCode::Esc => {
+                        self.personal_override = None;
                         self.set_message("bank trade cancelled".to_owned())?;
                         return Ok(None);
                     }
@@ -736,7 +741,7 @@ impl CliUi {
 
                     let info_chunks = Layout::default()
                         .direction(Direction::Vertical)
-                        .constraints([Constraint::Min(8), Constraint::Length(7)])
+                        .constraints([Constraint::Min(6), Constraint::Length(15)])
                         .split(body_chunks[1]);
 
                     let public = Paragraph::new(public_model_lines(model))
@@ -811,7 +816,7 @@ fn public_model_lines(model: &UiModel) -> Vec<Line<'static>> {
     lines.push(Line::from(""));
     lines.push(Line::from("commands: roll | end | buy dev | build road [h1] [h2] | build settlement [h1] [h2] [h3] | build city [h1] [h2] [h3]"));
     lines.push(Line::from(
-        "trades: bank-trade [give] [take] [G4 | G3 | S2]",
+        "trades: bank-trade for menu | bank-trade [give] [take] [G4 | G3 | S2]",
     ));
     lines.push(Line::from("dev cards: use knight hex [player|none] | use yop res1 res2 | use monopoly res | use roadbuild h1 h2 h3 h4"));
     lines
@@ -995,27 +1000,61 @@ fn drop_personal_lines(
         Line::from(format!("you: p{player_id}")),
         Line::from(format!("drop {} / {} cards", selected.total(), required)),
     ];
-    lines.extend(resource_card_lines(resources, Some(selected)));
-    lines.push(selected_resource_line(selected_resource));
+    lines.extend(drop_resource_card_lines(
+        resources,
+        selected,
+        selected_resource,
+    ));
     lines.push(Line::from(""));
     lines.extend(dev_card_lines(dev_cards));
     lines
 }
 
-fn selected_resource_line(selected_resource: usize) -> Line<'static> {
-    let mut spans = Vec::new();
+fn drop_resource_card_lines(
+    resources: &ResourceCollection,
+    selected: &ResourceCollection,
+    selected_resource: usize,
+) -> Vec<Line<'static>> {
+    let mut lines = resource_card_lines(resources, None);
+    let mut selector = Vec::new();
+    let mut selected_counts = Vec::new();
     for (idx, resource) in Resource::list().into_iter().enumerate() {
         if idx > 0 {
-            spans.push(Span::raw(" "));
+            selector.push(Span::raw(" "));
+            selected_counts.push(Span::raw(" "));
         }
+        let style = resource_style(resource);
         let marker = if idx == selected_resource {
-            " ^^ "
+            "^^^^"
         } else {
             "    "
         };
-        spans.push(Span::styled(marker, resource_style(resource)));
+        selector.push(Span::styled(marker, style));
+        selected_counts.push(Span::styled(
+            format!("{:^4}", selected[resource].min(99)),
+            style,
+        ));
     }
-    Line::from(spans)
+    lines.push(Line::from(selector));
+    lines.push(Line::from(selected_counts));
+    lines
+}
+
+fn bank_trade_menu_lines(options: &[BankTrade], selected: usize) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        Line::from("bank trade"),
+        Line::from("up/down select; enter confirms; esc cancels"),
+    ];
+    let visible_rows = 11;
+    let half_window = visible_rows / 2;
+    let start = selected.saturating_sub(half_window);
+    let end = (start + visible_rows).min(options.len());
+
+    for (idx, trade) in options.iter().enumerate().skip(start).take(end - start) {
+        let marker = if idx == selected { "> " } else { "  " };
+        lines.push(Line::from(format!("{marker}{}", bank_trade_label(*trade))));
+    }
+    lines
 }
 
 fn adjust_drop_selection(
@@ -2019,6 +2058,52 @@ mod tests {
         adjust_drop_selection(&available, &mut selected, Resource::Brick, -1);
         adjust_drop_selection(&available, &mut selected, Resource::Brick, -1);
         assert_eq!(selected.brick, 0);
+    }
+
+    #[test]
+    fn drop_lines_show_selector_counts_and_total() {
+        let resources = ResourceCollection {
+            brick: 2,
+            wood: 1,
+            ..ResourceCollection::ZERO
+        };
+        let selected = ResourceCollection {
+            brick: 1,
+            ..ResourceCollection::ZERO
+        };
+        let dev_cards = DevCardData::default();
+        let lines = drop_personal_lines(0, &resources, &dev_cards, &selected, 2, 0)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+
+        assert!(lines.iter().any(|line| line.contains("drop 1 / 2 cards")));
+        assert!(lines.iter().any(|line| line.contains("^^^^")));
+        assert!(lines.iter().any(|line| line.contains(" 1  ")));
+        assert!(lines.iter().any(|line| line.contains(" 0  ")));
+    }
+
+    #[test]
+    fn bank_trade_menu_shows_instructions_and_selected_trade() {
+        let options = vec![
+            BankTrade {
+                give: Resource::Brick,
+                take: Resource::Wood,
+                kind: BankTradeKind::BankGeneric,
+            },
+            BankTrade {
+                give: Resource::Wheat,
+                take: Resource::Ore,
+                kind: BankTradeKind::PortGeneric,
+            },
+        ];
+        let lines = bank_trade_menu_lines(&options, 1)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+
+        assert!(lines.iter().any(|line| line.contains("up/down select")));
+        assert!(lines.iter().any(|line| line.contains("> 3:1 Wheat -> Ore")));
     }
 
     fn model_with_port_and_resources(
