@@ -234,12 +234,14 @@ fn handle_decision(
         DecisionRequestFrame::MoveRobbers(model) => {
             log::trace!("Processing MoveRobbers decision");
             let hex = read_hex(ui, &model, "robber hex: ")?;
+            ui.pending_robber_hex = Some(hex);
             log::trace!("Selected robber hex: {:?}", hex);
             Ok(DecisionResponseFrame::MoveRobbers(MoveRobbersAction(hex)))
         }
         DecisionRequestFrame::ChoosePlayerToRob(model) => {
             log::trace!("Processing ChoosePlayerToRob decision");
-            let player_id = read_player_id(ui, &model, "robbed player id: ")?;
+            let player_id = read_robbed_player(ui, &model, "robbed player: ")?;
+            ui.pending_robber_hex = None;
             log::trace!("Selected player to rob: {}", player_id);
             Ok(DecisionResponseFrame::ChoosePlayerToRob(
                 ChoosePlayerToRobAction(player_id),
@@ -275,6 +277,7 @@ struct CliUi {
     message: String,
     overlay: FieldOverlay,
     personal_override: Option<Vec<Line<'static>>>,
+    pending_robber_hex: Option<Hex>,
 }
 
 impl CliUi {
@@ -290,6 +293,7 @@ impl CliUi {
             message: "waiting for host".to_owned(),
             overlay: FieldOverlay::default(),
             personal_override: None,
+            pending_robber_hex: None,
         })
     }
 
@@ -1121,9 +1125,24 @@ fn bank_trade_menu_lines(options: &[BankTrade], selected: usize) -> Vec<Line<'st
 
     for (idx, trade) in options.iter().enumerate().skip(start).take(end - start) {
         let marker = if idx == selected { "> " } else { "  " };
-        lines.push(Line::from(format!("{marker}{}", bank_trade_label(*trade))));
+        lines.push(bank_trade_menu_line(marker, *trade));
     }
     lines
+}
+
+fn bank_trade_menu_line(marker: &str, trade: BankTrade) -> Line<'static> {
+    let rate = match trade.kind {
+        BankTradeKind::BankGeneric => "4:1",
+        BankTradeKind::PortGeneric => "3:1",
+        BankTradeKind::PortSpecific => "2:1",
+    };
+    Line::from(vec![
+        Span::raw(marker.to_owned()),
+        Span::raw(format!("{rate} ")),
+        Span::styled(format!("{:?}", trade.give), resource_style(trade.give)),
+        Span::raw(" -> "),
+        Span::styled(format!("{:?}", trade.take), resource_style(trade.take)),
+    ])
 }
 
 fn resource_picker_lines(selected_resource: usize) -> Vec<Line<'static>> {
@@ -1283,7 +1302,7 @@ fn read_init_action(ui: &mut CliUi, model: &UiModel) -> io::Result<InitAction> {
     loop {
         let line = ui.prompt(model, "action [roll]: ")?;
         let line = line.trim();
-        if line.is_empty() || line == "roll" {
+        if line.is_empty() || matches!(line, "roll" | "r") {
             log::trace!("Init action: RollDice");
             return Ok(InitAction::RollDice);
         }
@@ -1482,10 +1501,10 @@ fn partial_build_command(line: &str) -> Option<PartialBuildMode> {
 
 fn parse_regular_action(line: &str) -> Option<RegularAction> {
     let line = line.trim();
-    if line == "end" || line.is_empty() {
+    if matches!(line, "end" | "e") || line.is_empty() {
         return Some(RegularAction::EndMove);
     }
-    if line == "buy dev" || line == "buy-dev" {
+    if matches!(line, "buy dev" | "buy-dev" | "bd") {
         return Some(RegularAction::BuyDevCard);
     }
     if let Some(build) = parse_build(line) {
@@ -1665,6 +1684,18 @@ fn read_player_id(ui: &mut CliUi, model: &UiModel, prompt: &str) -> io::Result<P
         log::warn!("Invalid player ID input: {}", line);
         ui.set_message("expected unsigned integer".to_owned())?;
     }
+}
+
+fn read_robbed_player(ui: &mut CliUi, model: &UiModel, prompt: &str) -> io::Result<PlayerId> {
+    if let Some(hex) = ui.pending_robber_hex {
+        let candidates = robbable_players_on_hex(model, hex);
+        if let Some(player_id) = ui.select_player(model, &candidates, prompt)? {
+            return Ok(player_id);
+        }
+        ui.message = "rob target selection cancelled".to_owned();
+    }
+
+    read_player_id(ui, model, prompt)
 }
 
 fn hex_label(hex: Hex) -> String {
@@ -2333,6 +2364,14 @@ mod tests {
     #[test]
     fn interactive_shortcuts_parse() {
         assert_eq!(partial_regular_command("bt"), true);
+        assert!(matches!(
+            parse_regular_action("bd"),
+            Some(RegularAction::BuyDevCard)
+        ));
+        assert!(matches!(
+            parse_regular_action("e"),
+            Some(RegularAction::EndMove)
+        ));
         assert_eq!(
             partial_dev_card_command("kn"),
             Some(PartialDevCardMode::Knight)
