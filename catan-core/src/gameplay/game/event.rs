@@ -17,6 +17,21 @@ use crate::{
     topology::{Hex, Intersection},
 };
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GameEndPlayerStats {
+    pub player_id: PlayerId,
+    pub total_vp: u16,
+    pub build_and_dev_card_vp: u16,
+    pub award_vp: u16,
+    pub settlements: u16,
+    pub cities: u16,
+    pub roads: u16,
+    pub longest_road_length: u16,
+    pub knights_used: u16,
+    pub has_longest_road: bool,
+    pub has_largest_army: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ObserverKind {
     Spectator,
@@ -100,6 +115,8 @@ pub enum GameEvent {
     },
     GameEnded {
         winner_id: PlayerId,
+        turn_no: u64,
+        stats: Vec<GameEndPlayerStats>,
     },
     GameInterrupted {
         reason: String,

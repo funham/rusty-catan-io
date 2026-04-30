@@ -15,14 +15,17 @@ use catan_core::{
         ChoosePlayerToRobAction, DropHalfAction, InitAction, InitStageAction, MoveRobbersAction,
         PostDevCardAction, PostDiceAction, RegularAction, TradeAnswer,
     },
-    gameplay::primitives::{
-        PortKind,
-        bank::DeckFullnessLevel,
-        build::{Build, Establishment, EstablishmentType, Road},
-        dev_card::{DevCardData, DevCardUsage, UsableDevCard},
-        player::PlayerId,
-        resource::{Resource, ResourceCollection},
-        trade::{BankTrade, BankTradeKind},
+    gameplay::{
+        game::event::GameEndPlayerStats,
+        primitives::{
+            PortKind,
+            bank::DeckFullnessLevel,
+            build::{Build, Establishment, EstablishmentType, Road},
+            dev_card::{DevCardData, DevCardUsage, UsableDevCard},
+            player::PlayerId,
+            resource::{Resource, ResourceCollection},
+            trade::{BankTrade, BankTradeKind},
+        },
     },
     topology::{Hex, HexIndex, Intersection, Path as BoardPath, repr::Dual},
 };
@@ -174,6 +177,16 @@ pub fn run(socket: &FsPath, _role: &str) -> Result<(), String> {
             }
             HostToCli::Event { event, view } => {
                 log::trace!("Processing event: {:?}", event);
+                if let catan_core::gameplay::game::event::GameEvent::GameEnded {
+                    winner_id,
+                    turn_no,
+                    stats,
+                } = event
+                {
+                    ui.show_game_ended(&view, winner_id, turn_no, &stats)
+                        .map_err(|err| format!("failed to draw game ended screen: {err}"))?;
+                    return Ok(());
+                }
                 ui.show_model(&view, format!("event: {event:?}"))
                     .map_err(|err| format!("failed to draw TUI: {err}"))?;
             }
@@ -315,6 +328,28 @@ impl CliUi {
         self.overlay.preview.clear();
         self.personal_override = None;
         self.draw(Some(model), "", "")
+    }
+
+    fn show_game_ended(
+        &mut self,
+        model: &UiModel,
+        winner_id: PlayerId,
+        turn_no: u64,
+        stats: &[GameEndPlayerStats],
+    ) -> io::Result<()> {
+        self.message = "game ended".to_owned();
+        self.overlay.selected = None;
+        self.overlay.status = SelectionStatus::Neutral;
+        self.overlay.preview.clear();
+        loop {
+            self.draw_game_ended(model, winner_id, turn_no, stats)?;
+            if let CrosstermEvent::Key(key) = event::read()?
+                && key.kind == KeyEventKind::Press
+                && key.code == KeyCode::Esc
+            {
+                return Ok(());
+            }
+        }
     }
 
     fn prompt(&mut self, model: &UiModel, prompt: &str) -> io::Result<String> {
@@ -863,6 +898,23 @@ impl CliUi {
         })?;
         Ok(())
     }
+
+    fn draw_game_ended(
+        &mut self,
+        model: &UiModel,
+        winner_id: PlayerId,
+        turn_no: u64,
+        stats: &[GameEndPlayerStats],
+    ) -> io::Result<()> {
+        self.terminal.draw(|frame| {
+            let lines = game_ended_lines(model, winner_id, turn_no, stats);
+            let screen = Paragraph::new(lines)
+                .wrap(Wrap { trim: false })
+                .block(Block::default().borders(Borders::ALL).title("Game Ended"));
+            frame.render_widget(screen, frame.area());
+        })?;
+        Ok(())
+    }
 }
 
 impl Drop for CliUi {
@@ -905,6 +957,75 @@ fn public_model_lines(model: &UiModel) -> Vec<Line<'static>> {
     lines.push(Line::from(
         "dev cards: kn | yp | m | rb, or typed: use knight/yop/monopoly/roadbuild ...",
     ));
+    lines
+}
+
+fn game_ended_lines(
+    model: &UiModel,
+    winner_id: PlayerId,
+    turn_no: u64,
+    stats: &[GameEndPlayerStats],
+) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "Game ended",
+            Style::default().fg(Color::Green),
+        )),
+        Line::from(format!("winner: p{winner_id}")),
+        Line::from(format!("turns played: {turn_no}")),
+        Line::from(format!(
+            "robber: {} | longest road: {:?} | largest army: {:?}",
+            model.public.board_state.robber_pos.index().to_spiral(),
+            model.public.longest_road_owner,
+            model.public.largest_army_owner
+        )),
+        Line::from(""),
+        Line::from("player  vp  base  award  settlements  cities  roads  road-len  knights"),
+    ];
+
+    let mut sorted = stats.to_vec();
+    sorted.sort_by_key(|stats| (std::cmp::Reverse(stats.total_vp), stats.player_id));
+    for stats in sorted {
+        let mut spans = vec![Span::raw(format!(
+            "p{:<5} {:<3} {:<5} {:<6} {:<11} {:<7} {:<6} {:<9} {:<7}",
+            stats.player_id,
+            stats.total_vp,
+            stats.build_and_dev_card_vp,
+            stats.award_vp,
+            stats.settlements,
+            stats.cities,
+            stats.roads,
+            stats.longest_road_length,
+            stats.knights_used,
+        ))];
+        if stats.player_id == winner_id {
+            spans.push(Span::styled(" winner", Style::default().fg(Color::Green)));
+        }
+        if stats.has_longest_road {
+            spans.push(Span::styled(
+                " longest-road",
+                Style::default().fg(Color::Yellow),
+            ));
+        }
+        if stats.has_largest_army {
+            spans.push(Span::styled(
+                " largest-army",
+                Style::default().fg(Color::Magenta),
+            ));
+        }
+        lines.push(Line::from(spans));
+    }
+
+    lines.extend([
+        Line::from(""),
+        Line::from("base = settlements + cities + victory point cards"),
+        Line::from("award = longest road + largest army points"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "[press esc to quit]",
+            Style::default().fg(Color::Yellow),
+        )),
+    ]);
     lines
 }
 
@@ -2461,6 +2582,55 @@ mod tests {
 
         assert!(lines.iter().any(|line| line.contains("up/down select")));
         assert!(lines.iter().any(|line| line.contains("> 3:1 Wheat -> Ore")));
+    }
+
+    #[test]
+    fn game_ended_lines_include_winner_stats_and_quit_hint() {
+        let init = GameInitializationState::default();
+        let model = model_from_state(&init.finish());
+        let stats = vec![
+            GameEndPlayerStats {
+                player_id: 0,
+                total_vp: 10,
+                build_and_dev_card_vp: 8,
+                award_vp: 2,
+                settlements: 4,
+                cities: 2,
+                roads: 7,
+                longest_road_length: 5,
+                knights_used: 1,
+                has_longest_road: true,
+                has_largest_army: false,
+            },
+            GameEndPlayerStats {
+                player_id: 1,
+                total_vp: 6,
+                build_and_dev_card_vp: 6,
+                award_vp: 0,
+                settlements: 2,
+                cities: 2,
+                roads: 4,
+                longest_road_length: 4,
+                knights_used: 0,
+                has_longest_road: false,
+                has_largest_army: false,
+            },
+        ];
+
+        let lines = game_ended_lines(&model, 0, 42, &stats)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+
+        assert!(lines.iter().any(|line| line.contains("winner: p0")));
+        assert!(lines.iter().any(|line| line.contains("turns played: 42")));
+        assert!(lines.iter().any(|line| line.contains("p0")));
+        assert!(lines.iter().any(|line| line.contains("winner")));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("[press esc to quit]"))
+        );
     }
 
     fn model_with_port_and_resources(

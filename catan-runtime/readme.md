@@ -98,3 +98,7 @@ Interactive drop mode shows your resource cards, the required total, and a selec
 ## Robber
 
 When a 7 is rolled, the CLI asks for a robber hex. Choose it with arrow keys and Enter. If there are multiple legal players to rob on that hex, a player menu appears; use Up/Down and Enter. Knight cards use the same robber and player selection flow.
+
+## Game Ended Screen
+
+When the game ends, the CLI switches to a final scoreboard. It shows the winner, turns played, each player's total VP, base VP, award VP, piece counts, longest-road length, and knights used. Press Esc to close the CLI window and terminate the child process.

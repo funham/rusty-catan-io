@@ -5,7 +5,7 @@ use crate::agent::action::{
 };
 use crate::gameplay::agent::agent::Agent;
 use crate::gameplay::game::event::{
-    GameEvent, GameObserver, ObserverKind, ObserverNotificationContext,
+    GameEndPlayerStats, GameEvent, GameObserver, ObserverKind, ObserverNotificationContext,
 };
 use crate::gameplay::game::index::GameIndex;
 use crate::gameplay::game::init::GameInitializationState;
@@ -13,7 +13,7 @@ use crate::gameplay::game::query::GameQuery;
 use crate::gameplay::game::view::{ContextFactory, SearchFactory, VisibilityConfig};
 use crate::gameplay::primitives::bank::BankResourceExchangeError;
 use crate::gameplay::primitives::build::{BuildingError, Establishment, EstablishmentType};
-use crate::gameplay::primitives::dev_card::DevCardUsage;
+use crate::gameplay::primitives::dev_card::{DevCardUsage, UsableDevCard};
 use crate::gameplay::primitives::player::PlayerId;
 use crate::gameplay::primitives::resource::ResourceCollection;
 use crate::gameplay::primitives::trade::{BankTrade, BankTradeKind};
@@ -333,7 +333,11 @@ impl GameController {
 
             if let Some(winner) = GameQuery::new(&self.game, &self.index).check_win_condition() {
                 log::trace!("Game ended with winner: {}", winner);
-                self.notify_observers(&GameEvent::GameEnded { winner_id: winner });
+                self.notify_observers(&GameEvent::GameEnded {
+                    winner_id: winner,
+                    turn_no,
+                    stats: self.game_end_stats(),
+                });
                 return GameResult::Win(winner);
             }
 
@@ -849,6 +853,33 @@ impl GameController {
 
     fn query(&self) -> GameQuery<'_> {
         GameQuery::new(&self.game, &self.index)
+    }
+
+    fn game_end_stats(&self) -> Vec<GameEndPlayerStats> {
+        let query = self.query();
+        (0..self.game.players.count())
+            .map(|player_id| {
+                let build_and_dev_card_vp = query.count_dev_card_build_vp(player_id);
+                let has_longest_road = query.longest_road_owner() == Some(player_id);
+                let has_largest_army = query.largest_army_owner() == Some(player_id);
+                let award_vp = u16::from(has_longest_road) * 2 + u16::from(has_largest_army) * 3;
+                let builds = self.game.builds.by_player(player_id);
+                GameEndPlayerStats {
+                    player_id,
+                    total_vp: build_and_dev_card_vp + award_vp,
+                    build_and_dev_card_vp,
+                    award_vp,
+                    settlements: builds.settlements_count() as u16,
+                    cities: builds.cities_count() as u16,
+                    roads: builds.roads_count() as u16,
+                    longest_road_length: query.count_max_tract_length(player_id),
+                    knights_used: self.game.players.get(player_id).dev_cards().used
+                        [UsableDevCard::Knight],
+                    has_longest_road,
+                    has_largest_army,
+                }
+            })
+            .collect()
     }
 }
 
