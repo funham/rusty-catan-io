@@ -566,10 +566,20 @@ impl CliUi {
                         .block(Block::default().borders(Borders::ALL).title("Field"));
                     frame.render_widget(field, body_chunks[0]);
 
-                    let details = Paragraph::new(model_lines(model))
+                    let info_chunks = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([Constraint::Min(8), Constraint::Length(7)])
+                        .split(body_chunks[1]);
+
+                    let public = Paragraph::new(public_model_lines(model))
                         .wrap(Wrap { trim: false })
-                        .block(Block::default().borders(Borders::ALL).title("Game"));
-                    frame.render_widget(details, body_chunks[1]);
+                        .block(Block::default().borders(Borders::ALL).title("Public"));
+                    frame.render_widget(public, info_chunks[0]);
+
+                    let personal = Paragraph::new(personal_model_lines(model))
+                        .wrap(Wrap { trim: false })
+                        .block(Block::default().borders(Borders::ALL).title("Personal"));
+                    frame.render_widget(personal, info_chunks[1]);
                 }
                 None => {
                     let body = Paragraph::new(vec![Line::from("waiting for game state")])
@@ -605,7 +615,7 @@ impl Drop for CliUi {
     }
 }
 
-fn model_lines(model: &UiModel) -> Vec<Line<'static>> {
+fn public_model_lines(model: &UiModel) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     lines.push(Line::from(format!(
         "actor#: {:?} | robber: {:?} | longest road: {:?} | largest army: {:?}",
@@ -623,13 +633,6 @@ fn model_lines(model: &UiModel) -> Vec<Line<'static>> {
         model.public.board.tiles.len()
     )));
     lines.push(bank_resources_line(model));
-    if let Some(private) = &model.private {
-        lines.push(resource_collection_line(
-            format!("you: p{} resources ", private.player_id),
-            &private.resources,
-        ));
-        lines.push(Line::from(format!("your dev cards: {}", private.dev_cards)));
-    }
     lines.push(Line::from(""));
     lines.push(Line::from("players:"));
     for player in &model.public.players {
@@ -641,6 +644,20 @@ fn model_lines(model: &UiModel) -> Vec<Line<'static>> {
         "trades: bank-trade [give] [take] [G4 | G3 | S2]",
     ));
     lines.push(Line::from("dev cards: use knight hex [player|none] | use yop res1 res2 | use monopoly res | use roadbuild h1 h2 h3 h4"));
+    lines
+}
+
+fn personal_model_lines(model: &UiModel) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    if let Some(private) = &model.private {
+        lines.push(resource_collection_line(
+            format!("you: p{} resources ", private.player_id),
+            &private.resources,
+        ));
+        lines.push(Line::from(format!("your dev cards: {}", private.dev_cards)));
+    } else {
+        lines.push(Line::from("no private player data"));
+    }
     lines
 }
 
@@ -1239,6 +1256,30 @@ mod tests {
                 .intersections_iter()
                 .any(|intersection| intersection == settlement)
         }));
+    }
+
+    #[test]
+    fn public_and_personal_lines_are_separate() {
+        let init = GameInitializationState::default();
+        let model = model_from_state(&init.finish());
+        let public_lines = public_model_lines(&model);
+        let personal_lines = personal_model_lines(&model);
+
+        assert!(
+            public_lines
+                .iter()
+                .any(|line| line.to_string().contains("players:"))
+        );
+        assert!(
+            !public_lines
+                .iter()
+                .any(|line| line.to_string().contains("your dev cards"))
+        );
+        assert!(
+            personal_lines
+                .iter()
+                .any(|line| line.to_string().contains("your dev cards"))
+        );
     }
 
     #[test]
