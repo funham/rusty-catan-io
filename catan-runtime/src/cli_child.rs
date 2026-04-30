@@ -249,11 +249,11 @@ fn handle_decision(
             let answer = match answer.as_str() {
                 "y" | "yes" => {
                     log::trace!("Trade accepted");
-                    TradeAnswer::Accepted
+                    TradeAnswer::Accept
                 }
                 _ => {
                     log::trace!("Trade declined");
-                    TradeAnswer::Declined
+                    TradeAnswer::Decline
                 }
             };
             Ok(DecisionResponseFrame::AnswerTrade(answer))

@@ -105,7 +105,7 @@ impl PlayerRuntime for GreedyAgent {
     }
 
     fn answer_trade(&mut self, _context: PlayerDecisionContext<'_>) -> TradeAnswer {
-        TradeAnswer::Declined
+        TradeAnswer::Decline
     }
 
     fn drop_half(&mut self, context: PlayerDecisionContext<'_>) -> DropHalfAction {

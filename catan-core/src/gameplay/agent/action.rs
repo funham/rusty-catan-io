@@ -32,8 +32,8 @@ pub struct MoveRobbersAction(pub Hex);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TradeAnswer {
-    Accepted,
-    Declined,
+    Accept,
+    Decline,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
