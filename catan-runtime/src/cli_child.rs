@@ -706,6 +706,86 @@ impl CliUi {
         }
     }
 
+    fn select_resource(
+        &mut self,
+        model: &UiModel,
+        prompt: &str,
+        message: &str,
+    ) -> io::Result<Option<Resource>> {
+        let mut selected = 0;
+        self.message = message.to_owned();
+        loop {
+            self.personal_override = Some(resource_picker_lines(selected));
+            let resource = Resource::list()[selected];
+            self.draw(Some(model), prompt, &format!("{resource:?}"))?;
+            if let CrosstermEvent::Key(key) = event::read()?
+                && key.kind == KeyEventKind::Press
+            {
+                match key.code {
+                    KeyCode::Enter => {
+                        self.personal_override = None;
+                        return Ok(Some(resource));
+                    }
+                    KeyCode::Esc => {
+                        self.personal_override = None;
+                        self.message = "resource selection cancelled".to_owned();
+                        return Ok(None);
+                    }
+                    KeyCode::Left => {
+                        selected = selected
+                            .checked_sub(1)
+                            .unwrap_or(Resource::list().len() - 1);
+                    }
+                    KeyCode::Right => {
+                        selected = (selected + 1) % Resource::list().len();
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    fn select_player(
+        &mut self,
+        model: &UiModel,
+        candidates: &[PlayerId],
+        prompt: &str,
+    ) -> io::Result<Option<PlayerId>> {
+        if candidates.is_empty() {
+            return Ok(None);
+        }
+        if candidates.len() == 1 {
+            return Ok(Some(candidates[0]));
+        }
+
+        let mut selected = 0;
+        self.message = "select player with up/down; enter confirms; esc cancels".to_owned();
+        loop {
+            self.personal_override = Some(player_menu_lines(candidates, selected));
+            self.draw(Some(model), prompt, &format!("p{}", candidates[selected]))?;
+            if let CrosstermEvent::Key(key) = event::read()?
+                && key.kind == KeyEventKind::Press
+            {
+                match key.code {
+                    KeyCode::Enter => {
+                        self.personal_override = None;
+                        return Ok(Some(candidates[selected]));
+                    }
+                    KeyCode::Esc => {
+                        self.personal_override = None;
+                        self.message = "player selection cancelled".to_owned();
+                        return Ok(None);
+                    }
+                    KeyCode::Up => {
+                        selected = selected.checked_sub(1).unwrap_or(candidates.len() - 1)
+                    }
+                    KeyCode::Down => selected = (selected + 1) % candidates.len(),
+                    _ => {}
+                }
+            }
+        }
+    }
+
     fn draw(&mut self, model: Option<&UiModel>, prompt: &str, input: &str) -> io::Result<()> {
         let message = self.message.clone();
         let overlay = self.overlay.clone();
@@ -816,9 +896,11 @@ fn public_model_lines(model: &UiModel) -> Vec<Line<'static>> {
     lines.push(Line::from(""));
     lines.push(Line::from("commands: roll | end | buy dev | build road [h1] [h2] | build settlement [h1] [h2] [h3] | build city [h1] [h2] [h3]"));
     lines.push(Line::from(
-        "trades: bank-trade for menu | bank-trade [give] [take] [G4 | G3 | S2]",
+        "trades: bank-trade/bt for menu | bank-trade [give] [take] [G4 | G3 | S2]",
     ));
-    lines.push(Line::from("dev cards: use knight hex [player|none] | use yop res1 res2 | use monopoly res | use roadbuild h1 h2 h3 h4"));
+    lines.push(Line::from(
+        "dev cards: kn | yp | m | rb, or typed: use knight/yop/monopoly/roadbuild ...",
+    ));
     lines
 }
 
@@ -1044,6 +1126,48 @@ fn bank_trade_menu_lines(options: &[BankTrade], selected: usize) -> Vec<Line<'st
     lines
 }
 
+fn resource_picker_lines(selected_resource: usize) -> Vec<Line<'static>> {
+    let resources = ResourceCollection {
+        brick: 1,
+        wood: 1,
+        wheat: 1,
+        sheep: 1,
+        ore: 1,
+    };
+    let mut lines = vec![Line::from("left/right select; enter confirms; esc cancels")];
+    lines.extend(resource_card_lines(&resources, None));
+    lines.push(resource_selector_line(selected_resource));
+    lines
+}
+
+fn resource_selector_line(selected_resource: usize) -> Line<'static> {
+    let mut selector = Vec::new();
+    for (idx, resource) in Resource::list().into_iter().enumerate() {
+        if idx > 0 {
+            selector.push(Span::raw(" "));
+        }
+        let marker = if idx == selected_resource {
+            "^^^^"
+        } else {
+            "    "
+        };
+        selector.push(Span::styled(marker, resource_style(resource)));
+    }
+    Line::from(selector)
+}
+
+fn player_menu_lines(candidates: &[PlayerId], selected: usize) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        Line::from("rob player"),
+        Line::from("up/down select; enter confirms; esc cancels"),
+    ];
+    for (idx, player_id) in candidates.iter().enumerate() {
+        let marker = if idx == selected { "> " } else { "  " };
+        lines.push(Line::from(format!("{marker}p{player_id}")));
+    }
+    lines
+}
+
 fn adjust_drop_selection(
     available: &ResourceCollection,
     selected: &mut ResourceCollection,
@@ -1163,6 +1287,13 @@ fn read_init_action(ui: &mut CliUi, model: &UiModel) -> io::Result<InitAction> {
             log::trace!("Init action: RollDice");
             return Ok(InitAction::RollDice);
         }
+        if let Some(usage) = handle_interactive_dev_card_action(ui, model, line)? {
+            log::trace!("Init interactive action: UseDevCard({:?})", usage);
+            return Ok(InitAction::UseDevCard(usage));
+        }
+        if partial_dev_card_command(line).is_some() {
+            continue;
+        }
         if let Some(usage) = parse_dev_card_usage(line) {
             log::trace!("Init action: UseDevCard({:?})", usage);
             return Ok(InitAction::UseDevCard(usage));
@@ -1179,6 +1310,13 @@ fn read_post_dice_action(ui: &mut CliUi, model: &UiModel) -> io::Result<PostDice
         if let Some(usage) = parse_dev_card_usage(&line) {
             log::trace!("Post-dice action: UseDevCard({:?})", usage);
             return Ok(PostDiceAction::UseDevCard(usage));
+        }
+        if let Some(usage) = handle_interactive_dev_card_action(ui, model, &line)? {
+            log::trace!("Post-dice interactive action: UseDevCard({:?})", usage);
+            return Ok(PostDiceAction::UseDevCard(usage));
+        }
+        if partial_dev_card_command(&line).is_some() {
+            continue;
         }
         if let Some(action) = handle_interactive_regular_action(ui, model, &line)? {
             log::trace!("Post-dice interactive action: RegularAction({:?})", action);
@@ -1224,7 +1362,7 @@ fn handle_interactive_regular_action(
             .select_build(model, builds, "build: ")?
             .map(RegularAction::Build));
     }
-    if line == "bank-trade" {
+    if matches!(line, "bank-trade" | "bt") {
         return Ok(ui
             .select_bank_trade(model)?
             .map(RegularAction::TradeWithBank));
@@ -1233,7 +1371,97 @@ fn handle_interactive_regular_action(
 }
 
 fn partial_regular_command(line: &str) -> bool {
-    partial_build_command(line).is_some() || line == "bank-trade"
+    partial_build_command(line).is_some() || matches!(line, "bank-trade" | "bt")
+}
+
+fn handle_interactive_dev_card_action(
+    ui: &mut CliUi,
+    model: &UiModel,
+    line: &str,
+) -> io::Result<Option<DevCardUsage>> {
+    match partial_dev_card_command(line) {
+        Some(PartialDevCardMode::Knight) => select_knight_usage(ui, model),
+        Some(PartialDevCardMode::RoadBuild) => select_roadbuild_usage(ui, model),
+        Some(PartialDevCardMode::Monopoly) => Ok(ui
+            .select_resource(
+                model,
+                "monopoly: ",
+                "select monopoly resource with left/right",
+            )?
+            .map(DevCardUsage::Monopoly)),
+        Some(PartialDevCardMode::YearOfPlenty) => {
+            let Some(first) = ui.select_resource(
+                model,
+                "year-of-plenty 1: ",
+                "select first year-of-plenty resource",
+            )?
+            else {
+                return Ok(None);
+            };
+            let Some(second) = ui.select_resource(
+                model,
+                "year-of-plenty 2: ",
+                "select second year-of-plenty resource",
+            )?
+            else {
+                return Ok(None);
+            };
+            Ok(Some(DevCardUsage::YearOfPlenty([first, second])))
+        }
+        None => Ok(None),
+    }
+}
+
+fn select_knight_usage(ui: &mut CliUi, model: &UiModel) -> io::Result<Option<DevCardUsage>> {
+    let rob_hex = ui.select_hex_where(model, "knight hex: ", |hex| {
+        hex != model.public.board_state.robber_pos
+    })?;
+    let candidates = robbable_players_on_hex(model, rob_hex);
+    let robbed_id = ui.select_player(model, &candidates, "robbed player: ")?;
+    if robbed_id.is_none() && !candidates.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(DevCardUsage::Knight { rob_hex, robbed_id }))
+}
+
+fn select_roadbuild_usage(ui: &mut CliUi, model: &UiModel) -> io::Result<Option<DevCardUsage>> {
+    let first_options = legal_roadbuild_roads(model);
+    let Some(Build::Road(first)) = ui.select_build(model, first_options, "roadbuild 1: ")? else {
+        return Ok(None);
+    };
+
+    let mut second_model = model.clone();
+    add_road_to_model(&mut second_model, model.actor.unwrap_or_default(), first);
+    let second_options = legal_roadbuild_roads(&second_model);
+    let Some(Build::Road(second)) =
+        ui.select_build(&second_model, second_options, "roadbuild 2: ")?
+    else {
+        return Ok(None);
+    };
+
+    Ok(Some(DevCardUsage::RoadBuild([first.pos, second.pos])))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PartialDevCardMode {
+    Knight,
+    RoadBuild,
+    Monopoly,
+    YearOfPlenty,
+}
+
+fn partial_dev_card_command(line: &str) -> Option<PartialDevCardMode> {
+    match line.split_whitespace().collect::<Vec<_>>().as_slice() {
+        ["use", "knight"] | ["kn"] => Some(PartialDevCardMode::Knight),
+        ["use", "roadbuild"] | ["use", "road-build"] | ["rb"] => {
+            Some(PartialDevCardMode::RoadBuild)
+        }
+        ["use", "monopoly"] | ["m"] => Some(PartialDevCardMode::Monopoly),
+        ["use", "yop"] | ["use", "year-of-plenty"] | ["yp"] => {
+            Some(PartialDevCardMode::YearOfPlenty)
+        }
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1629,6 +1857,14 @@ fn legal_regular_roads(model: &UiModel) -> Vec<Build> {
         return Vec::new();
     }
 
+    legal_roadbuild_roads(model)
+}
+
+fn legal_roadbuild_roads(model: &UiModel) -> Vec<Build> {
+    if player_road_count(model, model.actor.unwrap_or_default()) >= 15 {
+        return Vec::new();
+    }
+
     let actor = model.actor.unwrap_or_default();
     let occupied = occupied_roads(model);
     let opponent_intersections = opponent_occupied_intersections(model, actor);
@@ -1831,6 +2067,61 @@ fn bank_trade_label(trade: BankTrade) -> String {
         BankTradeKind::PortSpecific => "2:1",
     };
     format!("{rate} {:?} -> {:?}", trade.give, trade.take)
+}
+
+fn robbable_players_on_hex(model: &UiModel, hex: Hex) -> Vec<PlayerId> {
+    let actor = model.actor.unwrap_or_default();
+    model
+        .public
+        .builds
+        .iter()
+        .filter(|builds| builds.player_id != actor)
+        .filter(|builds| {
+            builds
+                .establishments
+                .iter()
+                .any(|est| est.pos.as_set().contains(&hex))
+        })
+        .filter(|builds| public_player_resource_total(model, builds.player_id) > 0)
+        .map(|builds| builds.player_id)
+        .collect()
+}
+
+fn public_player_resource_total(model: &UiModel, player_id: PlayerId) -> u16 {
+    if model
+        .private
+        .as_ref()
+        .map(|private| private.player_id == player_id)
+        .unwrap_or(false)
+    {
+        return model
+            .private
+            .as_ref()
+            .map(|private| private.resources.total())
+            .unwrap_or_default();
+    }
+
+    model
+        .public
+        .players
+        .iter()
+        .find(|player| player.player_id == player_id)
+        .map(|player| match &player.resources {
+            UiPublicPlayerResources::Exact(resources) => resources.total(),
+            UiPublicPlayerResources::Total(total) => *total,
+        })
+        .unwrap_or_default()
+}
+
+fn add_road_to_model(model: &mut UiModel, player_id: PlayerId, road: Road) {
+    if let Some(builds) = model
+        .public
+        .builds
+        .iter_mut()
+        .find(|builds| builds.player_id == player_id)
+    {
+        builds.roads.push(road);
+    }
 }
 
 fn render_game_view(model: &UiModel) -> RenderGameView {
@@ -2037,6 +2328,35 @@ mod tests {
         );
         assert_eq!(partial_build_command("bc"), Some(PartialBuildMode::City));
         assert_eq!(partial_build_command("build road 0 1"), None);
+    }
+
+    #[test]
+    fn interactive_shortcuts_parse() {
+        assert_eq!(partial_regular_command("bt"), true);
+        assert_eq!(
+            partial_dev_card_command("kn"),
+            Some(PartialDevCardMode::Knight)
+        );
+        assert_eq!(
+            partial_dev_card_command("use knight"),
+            Some(PartialDevCardMode::Knight)
+        );
+        assert_eq!(
+            partial_dev_card_command("rb"),
+            Some(PartialDevCardMode::RoadBuild)
+        );
+        assert_eq!(
+            partial_dev_card_command("use roadbuild"),
+            Some(PartialDevCardMode::RoadBuild)
+        );
+        assert_eq!(
+            partial_dev_card_command("m"),
+            Some(PartialDevCardMode::Monopoly)
+        );
+        assert_eq!(
+            partial_dev_card_command("yp"),
+            Some(PartialDevCardMode::YearOfPlenty)
+        );
     }
 
     #[test]
