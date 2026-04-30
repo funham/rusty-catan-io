@@ -8,7 +8,7 @@ use std::{
 
 use catan_agents::remote_agent::{
     CliToHost, DecisionRequestFrame, DecisionResponseFrame, HostToCli, RemoteLogLevel, UiModel,
-    read_frame, write_frame,
+    UiPublicBankResources, UiPublicPlayerResources, read_frame, write_frame,
 };
 use catan_core::{
     agent::action::{
@@ -16,6 +16,7 @@ use catan_core::{
         PostDevCardAction, PostDiceAction, RegularAction, TradeAnswer,
     },
     gameplay::primitives::{
+        bank::DeckFullnessLevel,
         build::{Build, Establishment, EstablishmentType, Road},
         dev_card::DevCardUsage,
         player::PlayerId,
@@ -25,7 +26,7 @@ use catan_core::{
     topology::{Hex, HexIndex, Intersection, Path as BoardPath, repr::Dual},
 };
 use catan_render::{
-    adapters::ratatui::canvas_lines,
+    adapters::ratatui::{canvas_lines, color as ratatui_color},
     field::{FieldOverlay, FieldPreview, FieldRenderer, FieldSelection, SelectionStatus},
     model::{RenderBoard, RenderGameView, RenderPlayerBuilds},
 };
@@ -617,29 +618,22 @@ fn model_lines(model: &UiModel) -> Vec<Line<'static>> {
         model.public.largest_army_owner
     )));
     lines.push(Line::from(format!(
-        "board: radius {} | tiles {} | dev cards in bank {}",
+        "board: radius {} | tiles {}",
         model.public.board.field_radius,
-        model.public.board.tiles.len(),
-        model.public.bank.dev_card_count
+        model.public.board.tiles.len()
     )));
+    lines.push(bank_resources_line(model));
     if let Some(private) = &model.private {
-        lines.push(Line::from(format!(
-            "you: p{} resources {}",
-            private.player_id, private.resources
-        )));
+        lines.push(resource_collection_line(
+            format!("you: p{} resources ", private.player_id),
+            &private.resources,
+        ));
         lines.push(Line::from(format!("your dev cards: {}", private.dev_cards)));
     }
     lines.push(Line::from(""));
     lines.push(Line::from("players:"));
     for player in &model.public.players {
-        lines.push(Line::from(format!(
-            "  p{} resources {:?} active_dev={} queued_dev={} vp={:?}",
-            player.player_id,
-            player.resources,
-            player.active_dev_cards,
-            player.queued_dev_cards,
-            player.victory_points
-        )));
+        lines.push(public_player_line(player));
     }
     lines.push(Line::from(""));
     lines.push(Line::from("commands: roll | end | buy dev | build road [h1] [h2] | build settlement [h1] [h2] [h3] | build city [h1] [h2] [h3]"));
@@ -648,6 +642,109 @@ fn model_lines(model: &UiModel) -> Vec<Line<'static>> {
     ));
     lines.push(Line::from("dev cards: use knight hex [player|none] | use yop res1 res2 | use monopoly res | use roadbuild h1 h2 h3 h4"));
     lines
+}
+
+fn bank_resources_line(model: &UiModel) -> Line<'static> {
+    let mut spans = vec![Span::raw("bank: resources ")];
+    match &model.public.bank.resources {
+        UiPublicBankResources::Exact(resources) => {
+            push_resource_values(&mut spans, resources, |count| count.to_string());
+        }
+        UiPublicBankResources::Approx(resources) => {
+            for (idx, resource) in Resource::list().into_iter().enumerate() {
+                if idx > 0 {
+                    spans.push(Span::raw(" "));
+                }
+                push_resource_value(&mut spans, resource, fullness_symbol(resources[resource]));
+            }
+        }
+    }
+    spans.push(Span::raw(" | dev "));
+    let dev = match &model.public.bank.resources {
+        UiPublicBankResources::Exact(_) => model.public.bank.dev_card_count.to_string(),
+        UiPublicBankResources::Approx(_) => {
+            fullness_symbol(deck_fullness(model.public.bank.dev_card_count)).to_owned()
+        }
+    };
+    spans.push(Span::styled(dev, Style::default().fg(Color::Magenta)));
+    Line::from(spans)
+}
+
+fn public_player_line(player: &catan_agents::remote_agent::UiPublicPlayer) -> Line<'static> {
+    let style = player_style(player.player_id);
+    let mut spans = vec![
+        Span::styled("  ", style),
+        Span::styled(format!("p{}", player.player_id), style),
+        Span::styled(" resources ", style),
+    ];
+    match &player.resources {
+        UiPublicPlayerResources::Exact(resources) => {
+            push_resource_values(&mut spans, resources, |count| count.to_string());
+        }
+        UiPublicPlayerResources::Total(total) => {
+            spans.push(Span::styled(total.to_string(), style));
+        }
+    }
+    spans.push(Span::styled(
+        format!(
+            " active_dev={} queued_dev={} vp={:?}",
+            player.active_dev_cards, player.queued_dev_cards, player.victory_points
+        ),
+        style,
+    ));
+    Line::from(spans)
+}
+
+fn resource_collection_line(prefix: String, resources: &ResourceCollection) -> Line<'static> {
+    let mut spans = vec![Span::raw(prefix)];
+    push_resource_values(&mut spans, resources, |count| count.to_string());
+    Line::from(spans)
+}
+
+fn push_resource_values(
+    spans: &mut Vec<Span<'static>>,
+    resources: &ResourceCollection,
+    format_count: impl Fn(u16) -> String,
+) {
+    for (idx, resource) in Resource::list().into_iter().enumerate() {
+        if idx > 0 {
+            spans.push(Span::raw(" "));
+        }
+        push_resource_value(spans, resource, format_count(resources[resource]));
+    }
+}
+
+fn push_resource_value(
+    spans: &mut Vec<Span<'static>>,
+    resource: Resource,
+    value: impl Into<String>,
+) {
+    let style = resource_style(resource);
+    let name: &'static str = resource.into();
+    spans.push(Span::styled(name, style));
+    spans.push(Span::styled(":", style));
+    spans.push(Span::styled(value.into(), style));
+}
+
+fn fullness_symbol(level: DeckFullnessLevel) -> &'static str {
+    match level {
+        DeckFullnessLevel::High => "???",
+        DeckFullnessLevel::Medium => "??",
+        DeckFullnessLevel::Low => "?",
+        DeckFullnessLevel::Empty => "0",
+    }
+}
+
+fn deck_fullness(count: u16) -> DeckFullnessLevel {
+    DeckFullnessLevel::new(count).unwrap_or(DeckFullnessLevel::High)
+}
+
+fn resource_style(resource: Resource) -> Style {
+    Style::default().fg(ratatui_color(FieldRenderer::resource_color(resource)))
+}
+
+fn player_style(player_id: PlayerId) -> Style {
+    Style::default().fg(ratatui_color(FieldRenderer::player_color(player_id)))
 }
 
 fn field_lines(model: &UiModel, overlay: &FieldOverlay) -> Vec<Line<'static>> {
