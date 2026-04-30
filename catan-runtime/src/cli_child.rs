@@ -16,6 +16,7 @@ use catan_core::{
         PostDevCardAction, PostDiceAction, RegularAction, TradeAnswer,
     },
     gameplay::primitives::{
+        PortKind,
         bank::DeckFullnessLevel,
         build::{Build, Establishment, EstablishmentType, Road},
         dev_card::{DevCardData, DevCardUsage, UsableDevCard},
@@ -668,6 +669,38 @@ impl CliUi {
         }
     }
 
+    fn select_bank_trade(&mut self, model: &UiModel) -> io::Result<Option<BankTrade>> {
+        let options = bank_trade_options(model);
+        if options.is_empty() {
+            self.set_message("no available bank trades".to_owned())?;
+            return Ok(None);
+        }
+
+        let mut selected = 0;
+        self.message = "select bank trade with up/down; enter confirms; esc cancels".to_owned();
+        loop {
+            self.draw(
+                Some(model),
+                "bank-trade: ",
+                &bank_trade_label(options[selected]),
+            )?;
+            if let CrosstermEvent::Key(key) = event::read()?
+                && key.kind == KeyEventKind::Press
+            {
+                match key.code {
+                    KeyCode::Enter => return Ok(Some(options[selected])),
+                    KeyCode::Esc => {
+                        self.set_message("bank trade cancelled".to_owned())?;
+                        return Ok(None);
+                    }
+                    KeyCode::Up => selected = selected.checked_sub(1).unwrap_or(options.len() - 1),
+                    KeyCode::Down => selected = (selected + 1) % options.len(),
+                    _ => {}
+                }
+            }
+        }
+    }
+
     fn draw(&mut self, model: Option<&UiModel>, prompt: &str, input: &str) -> io::Result<()> {
         let message = self.message.clone();
         let overlay = self.overlay.clone();
@@ -1148,6 +1181,12 @@ fn read_regular_action(ui: &mut CliUi, model: &UiModel) -> io::Result<RegularAct
             let builds = legal_builds_for_mode(model, kind);
             if let Some(build) = ui.select_build(model, builds, "build: ")? {
                 return Ok(RegularAction::Build(build));
+            }
+            continue;
+        }
+        if line == "bank-trade" {
+            if let Some(trade) = ui.select_bank_trade(model)? {
+                return Ok(RegularAction::TradeWithBank(trade));
             }
             continue;
         }
@@ -1685,6 +1724,78 @@ fn build_label(build: Build) -> String {
     }
 }
 
+fn bank_trade_options(model: &UiModel) -> Vec<BankTrade> {
+    let Some(private) = &model.private else {
+        return Vec::new();
+    };
+    let ports = acquired_ports(model, private.player_id);
+    let has_universal_port = ports.contains(&PortKind::Universal);
+    let mut trades = Vec::new();
+
+    for give in Resource::list() {
+        for take in Resource::list().into_iter().filter(|take| *take != give) {
+            if private.resources[give] >= 4 {
+                trades.push(BankTrade {
+                    give,
+                    take,
+                    kind: BankTradeKind::BankGeneric,
+                });
+            }
+            if has_universal_port && private.resources[give] >= 3 {
+                trades.push(BankTrade {
+                    give,
+                    take,
+                    kind: BankTradeKind::PortGeneric,
+                });
+            }
+            if ports.contains(&PortKind::Special(give)) && private.resources[give] >= 2 {
+                trades.push(BankTrade {
+                    give,
+                    take,
+                    kind: BankTradeKind::PortSpecific,
+                });
+            }
+        }
+    }
+
+    trades
+}
+
+fn acquired_ports(model: &UiModel, player_id: PlayerId) -> BTreeSet<PortKind> {
+    let establishments = player_builds(model, player_id)
+        .map(|builds| {
+            builds
+                .establishments
+                .iter()
+                .map(|est| est.pos)
+                .collect::<BTreeSet<_>>()
+        })
+        .unwrap_or_default();
+
+    model
+        .public
+        .board
+        .ports
+        .iter()
+        .filter_map(|(port_pos, port)| {
+            port_pos
+                .intersections()
+                .into_iter()
+                .any(|intersection| establishments.contains(&intersection))
+                .then_some(*port)
+        })
+        .collect()
+}
+
+fn bank_trade_label(trade: BankTrade) -> String {
+    let rate = match trade.kind {
+        BankTradeKind::BankGeneric => "4:1",
+        BankTradeKind::PortGeneric => "3:1",
+        BankTradeKind::PortSpecific => "2:1",
+    };
+    format!("{rate} {:?} -> {:?}", trade.give, trade.take)
+}
+
 fn render_game_view(model: &UiModel) -> RenderGameView {
     RenderGameView {
         board: RenderBoard {
@@ -1908,6 +2019,95 @@ mod tests {
         adjust_drop_selection(&available, &mut selected, Resource::Brick, -1);
         adjust_drop_selection(&available, &mut selected, Resource::Brick, -1);
         assert_eq!(selected.brick, 0);
+    }
+
+    fn model_with_port_and_resources(
+        port_kind: PortKind,
+        resources: ResourceCollection,
+    ) -> UiModel {
+        let mut init = GameInitializationState::default();
+        let (port_pos, _) = init
+            .board
+            .arrangement
+            .ports()
+            .iter()
+            .find(|(_, kind)| **kind == port_kind)
+            .or_else(|| init.board.arrangement.ports().iter().next())
+            .expect("default board should have ports");
+        let settlement_pos = port_pos.intersections()[0];
+        let road = init
+            .board
+            .arrangement
+            .path_set()
+            .into_iter()
+            .find(|path| {
+                path.intersections_iter()
+                    .any(|intersection| intersection == settlement_pos)
+            })
+            .map(|pos| Road { pos })
+            .expect("port settlement should have adjacent road");
+        init.builds
+            .try_init_place(
+                0,
+                road,
+                Establishment {
+                    pos: settlement_pos,
+                    stage: EstablishmentType::Settlement,
+                },
+            )
+            .expect("port settlement should be valid on empty board");
+        let mut state = init.finish();
+        state
+            .transfer_from_bank(resources, 0)
+            .expect("bank should fund test resources");
+        model_from_state(&state)
+    }
+
+    #[test]
+    fn bank_trade_options_include_generic_trade_without_ports() {
+        let init = GameInitializationState::default();
+        let mut state = init.finish();
+        state
+            .transfer_from_bank(
+                ResourceCollection {
+                    brick: 4,
+                    ..ResourceCollection::ZERO
+                },
+                0,
+            )
+            .expect("bank should fund test resources");
+        let model = model_from_state(&state);
+
+        let options = bank_trade_options(&model);
+
+        assert!(options.iter().any(|trade| {
+            matches!(trade.kind, BankTradeKind::BankGeneric) && trade.give == Resource::Brick
+        }));
+    }
+
+    #[test]
+    fn bank_trade_options_include_universal_and_specific_ports() {
+        let universal = model_with_port_and_resources(
+            PortKind::Universal,
+            ResourceCollection {
+                brick: 3,
+                ..ResourceCollection::ZERO
+            },
+        );
+        assert!(bank_trade_options(&universal).iter().any(|trade| {
+            matches!(trade.kind, BankTradeKind::PortGeneric) && trade.give == Resource::Brick
+        }));
+
+        let specific = model_with_port_and_resources(
+            PortKind::Special(Resource::Brick),
+            ResourceCollection {
+                brick: 2,
+                ..ResourceCollection::ZERO
+            },
+        );
+        assert!(bank_trade_options(&specific).iter().any(|trade| {
+            matches!(trade.kind, BankTradeKind::PortSpecific) && trade.give == Resource::Brick
+        }));
     }
 
     #[test]
