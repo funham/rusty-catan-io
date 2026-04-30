@@ -101,4 +101,4 @@ When a 7 is rolled, the CLI asks for a robber hex. Choose it with arrow keys and
 
 ## Game Ended Screen
 
-When the game ends, the CLI switches to a final scoreboard. It shows the winner, turns played, each player's total VP, base VP, award VP, piece counts, longest-road length, and knights used. Press Esc to close the CLI window and terminate the child process.
+When the game ends, the Public panel switches to a bordered final scoreboard while the Field, Personal, and Command panels remain visible. It shows the winner, turns played, each player's total VP, base VP, award VP, piece counts, longest-road length, and knights used. Press Esc to close the CLI window and terminate the child process.

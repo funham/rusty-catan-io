@@ -289,6 +289,7 @@ struct CliUi {
     terminal: Terminal<CrosstermBackend<Stdout>>,
     message: String,
     overlay: FieldOverlay,
+    public_override: Option<Vec<Line<'static>>>,
     personal_override: Option<Vec<Line<'static>>>,
     pending_robber_hex: Option<Hex>,
 }
@@ -305,6 +306,7 @@ impl CliUi {
             terminal,
             message: "waiting for host".to_owned(),
             overlay: FieldOverlay::default(),
+            public_override: None,
             personal_override: None,
             pending_robber_hex: None,
         })
@@ -316,6 +318,7 @@ impl CliUi {
         self.overlay.selected = None;
         self.overlay.status = SelectionStatus::Neutral;
         self.overlay.preview.clear();
+        self.public_override = None;
         self.personal_override = None;
         self.draw(None, "", "")
     }
@@ -326,6 +329,7 @@ impl CliUi {
         self.overlay.selected = None;
         self.overlay.status = SelectionStatus::Neutral;
         self.overlay.preview.clear();
+        self.public_override = None;
         self.personal_override = None;
         self.draw(Some(model), "", "")
     }
@@ -341,12 +345,15 @@ impl CliUi {
         self.overlay.selected = None;
         self.overlay.status = SelectionStatus::Neutral;
         self.overlay.preview.clear();
+        self.public_override = Some(game_ended_lines(model, winner_id, turn_no, stats));
+        self.personal_override = None;
         loop {
-            self.draw_game_ended(model, winner_id, turn_no, stats)?;
+            self.draw(Some(model), "[press esc to quit]", "")?;
             if let CrosstermEvent::Key(key) = event::read()?
                 && key.kind == KeyEventKind::Press
                 && key.code == KeyCode::Esc
             {
+                self.public_override = None;
                 return Ok(());
             }
         }
@@ -359,6 +366,7 @@ impl CliUi {
         self.overlay.selected = None;
         self.overlay.status = SelectionStatus::Neutral;
         self.overlay.preview.clear();
+        self.public_override = None;
         self.personal_override = None;
         loop {
             self.draw(Some(model), prompt, &input)?;
@@ -828,6 +836,7 @@ impl CliUi {
     fn draw(&mut self, model: Option<&UiModel>, prompt: &str, input: &str) -> io::Result<()> {
         let message = self.message.clone();
         let overlay = self.overlay.clone();
+        let public_override = self.public_override.clone();
         let personal_override = self.personal_override.clone();
         self.terminal.draw(|frame| {
             let chunks = Layout::default()
@@ -863,9 +872,16 @@ impl CliUi {
                         .constraints([Constraint::Min(6), Constraint::Length(15)])
                         .split(body_chunks[1]);
 
-                    let public = Paragraph::new(public_model_lines(model))
+                    let has_public_override = public_override.is_some();
+                    let public_lines = public_override.unwrap_or_else(|| public_model_lines(model));
+                    let public_title = if has_public_override {
+                        "Game Ended"
+                    } else {
+                        "Public"
+                    };
+                    let public = Paragraph::new(public_lines)
                         .wrap(Wrap { trim: false })
-                        .block(Block::default().borders(Borders::ALL).title("Public"));
+                        .block(Block::default().borders(Borders::ALL).title(public_title));
                     frame.render_widget(public, info_chunks[0]);
 
                     let personal = Paragraph::new(
@@ -895,23 +911,6 @@ impl CliUi {
             ])
             .block(Block::default().borders(Borders::ALL).title("Command"));
             frame.render_widget(input, chunks[2]);
-        })?;
-        Ok(())
-    }
-
-    fn draw_game_ended(
-        &mut self,
-        model: &UiModel,
-        winner_id: PlayerId,
-        turn_no: u64,
-        stats: &[GameEndPlayerStats],
-    ) -> io::Result<()> {
-        self.terminal.draw(|frame| {
-            let lines = game_ended_lines(model, winner_id, turn_no, stats);
-            let screen = Paragraph::new(lines)
-                .wrap(Wrap { trim: false })
-                .block(Block::default().borders(Borders::ALL).title("Game Ended"));
-            frame.render_widget(screen, frame.area());
         })?;
         Ok(())
     }
@@ -971,23 +970,35 @@ fn game_ended_lines(
             "Game ended",
             Style::default().fg(Color::Green),
         )),
-        Line::from(format!("winner: p{winner_id}")),
-        Line::from(format!("turns played: {turn_no}")),
+        Line::from(format!("winner: p{winner_id} | turns: {turn_no}")),
         Line::from(format!(
-            "robber: {} | longest road: {:?} | largest army: {:?}",
+            "robber {} | LR {:?} | LA {:?}",
             model.public.board_state.robber_pos.index().to_spiral(),
             model.public.longest_road_owner,
             model.public.largest_army_owner
         )),
         Line::from(""),
-        Line::from("player  vp  base  award  settlements  cities  roads  road-len  knights"),
+        Line::from("final stats"),
+        Line::from("┌───┬──┬──┬──┬──┬──┬──┬──┬──┬─────────┐"),
+        Line::from("│P  │VP│B │A │S │C │R │L │K │Tags     │"),
+        Line::from("├───┼──┼──┼──┼──┼──┼──┼──┼──┼─────────┤"),
     ];
 
     let mut sorted = stats.to_vec();
     sorted.sort_by_key(|stats| (std::cmp::Reverse(stats.total_vp), stats.player_id));
     for stats in sorted {
-        let mut spans = vec![Span::raw(format!(
-            "p{:<5} {:<3} {:<5} {:<6} {:<11} {:<7} {:<6} {:<9} {:<7}",
+        let mut tags = Vec::new();
+        if stats.player_id == winner_id {
+            tags.push("WIN");
+        }
+        if stats.has_longest_road {
+            tags.push("LR");
+        }
+        if stats.has_largest_army {
+            tags.push("LA");
+        }
+        lines.push(Line::from(format!(
+            "│p{:<2}│{:>2}│{:>2}│{:>2}│{:>2}│{:>2}│{:>2}│{:>2}│{:>2}│{:<9}│",
             stats.player_id,
             stats.total_vp,
             stats.build_and_dev_card_vp,
@@ -997,30 +1008,16 @@ fn game_ended_lines(
             stats.roads,
             stats.longest_road_length,
             stats.knights_used,
-        ))];
-        if stats.player_id == winner_id {
-            spans.push(Span::styled(" winner", Style::default().fg(Color::Green)));
-        }
-        if stats.has_longest_road {
-            spans.push(Span::styled(
-                " longest-road",
-                Style::default().fg(Color::Yellow),
-            ));
-        }
-        if stats.has_largest_army {
-            spans.push(Span::styled(
-                " largest-army",
-                Style::default().fg(Color::Magenta),
-            ));
-        }
-        lines.push(Line::from(spans));
+            tags.join(" "),
+        )));
     }
 
     lines.extend([
+        Line::from("└───┴──┴──┴──┴──┴──┴──┴──┴──┴─────────┘"),
         Line::from(""),
-        Line::from("base = settlements + cities + victory point cards"),
-        Line::from("award = longest road + largest army points"),
-        Line::from(""),
+        Line::from("B=base VP  A=award VP"),
+        Line::from("S=set C=city R=road"),
+        Line::from("L=longest K=knights"),
         Line::from(Span::styled(
             "[press esc to quit]",
             Style::default().fg(Color::Yellow),
@@ -2623,14 +2620,18 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert!(lines.iter().any(|line| line.contains("winner: p0")));
-        assert!(lines.iter().any(|line| line.contains("turns played: 42")));
+        assert!(lines.iter().any(|line| line.contains("turns: 42")));
+        assert!(lines.iter().any(|line| line.contains("┌───┬")));
+        assert!(lines.iter().any(|line| line.contains("│P  │VP│")));
+        assert!(lines.iter().any(|line| line.contains("└───┴")));
         assert!(lines.iter().any(|line| line.contains("p0")));
-        assert!(lines.iter().any(|line| line.contains("winner")));
+        assert!(lines.iter().any(|line| line.contains("WIN LR")));
         assert!(
             lines
                 .iter()
                 .any(|line| line.contains("[press esc to quit]"))
         );
+        assert!(lines.iter().all(|line| line.chars().count() <= 40));
     }
 
     fn model_with_port_and_resources(
