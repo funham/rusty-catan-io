@@ -559,7 +559,7 @@ impl CliUi {
                 Some(model) => {
                     let body_chunks = Layout::default()
                         .direction(Direction::Horizontal)
-                        .constraints([Constraint::Length(68), Constraint::Min(30)])
+                        .constraints([Constraint::Min(68), Constraint::Length(42)])
                         .split(chunks[1]);
 
                     let field = Paragraph::new(field_lines(model, &overlay))
