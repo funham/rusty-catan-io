@@ -547,7 +547,7 @@ impl CliUi {
         prompt: &str,
     ) -> io::Result<Option<Build>> {
         if builds.is_empty() {
-            self.set_message("no legal placements".to_owned())?;
+            self.message = "no legal placements".to_owned();
             return Ok(None);
         }
 
@@ -589,7 +589,7 @@ impl CliUi {
                         self.overlay.selected = None;
                         self.overlay.status = SelectionStatus::Neutral;
                         self.overlay.preview.clear();
-                        self.set_message("selection cancelled".to_owned())?;
+                        self.message = "selection cancelled".to_owned();
                         return Ok(None);
                     }
                     KeyCode::Left | KeyCode::Down | KeyCode::Tab => {
@@ -606,7 +606,7 @@ impl CliUi {
 
     fn select_drop_cards(&mut self, model: &UiModel) -> io::Result<Option<ResourceCollection>> {
         let Some(private) = &model.private else {
-            self.set_message("no private resources".to_owned())?;
+            self.message = "no private resources".to_owned();
             return Ok(None);
         };
 
@@ -646,7 +646,7 @@ impl CliUi {
                     }
                     KeyCode::Esc => {
                         self.personal_override = None;
-                        self.set_message("drop cancelled".to_owned())?;
+                        self.message = "drop cancelled".to_owned();
                         return Ok(None);
                     }
                     KeyCode::Left => {
@@ -672,7 +672,7 @@ impl CliUi {
     fn select_bank_trade(&mut self, model: &UiModel) -> io::Result<Option<BankTrade>> {
         let options = bank_trade_options(model);
         if options.is_empty() {
-            self.set_message("no available bank trades".to_owned())?;
+            self.message = "no available bank trades".to_owned();
             return Ok(None);
         }
 
@@ -695,7 +695,7 @@ impl CliUi {
                     }
                     KeyCode::Esc => {
                         self.personal_override = None;
-                        self.set_message("bank trade cancelled".to_owned())?;
+                        self.message = "bank trade cancelled".to_owned();
                         return Ok(None);
                     }
                     KeyCode::Up => selected = selected.checked_sub(1).unwrap_or(options.len() - 1),
@@ -895,18 +895,11 @@ fn resource_card_lines(
     let mut top = Vec::new();
     let mut middle = Vec::new();
     let mut bottom = Vec::new();
-    let mut labels = Vec::new();
     let mut selected = Vec::new();
 
     for (idx, resource) in Resource::list().into_iter().enumerate() {
         if idx > 0 {
-            for spans in [
-                &mut top,
-                &mut middle,
-                &mut bottom,
-                &mut labels,
-                &mut selected,
-            ] {
+            for spans in [&mut top, &mut middle, &mut bottom, &mut selected] {
                 spans.push(Span::raw(" "));
             }
         }
@@ -917,7 +910,6 @@ fn resource_card_lines(
             style,
         ));
         bottom.push(Span::styled("└──┘", style));
-        labels.push(Span::styled(resource_abbrev(resource), style));
         if let Some(drop) = selected_drop {
             selected.push(Span::styled(
                 format!(" {:02} ", drop[resource].min(99)),
@@ -926,12 +918,7 @@ fn resource_card_lines(
         }
     }
 
-    let mut lines = vec![
-        Line::from(top),
-        Line::from(middle),
-        Line::from(bottom),
-        Line::from(labels),
-    ];
+    let mut lines = vec![Line::from(top), Line::from(middle), Line::from(bottom)];
     if selected_drop.is_some() {
         lines.push(Line::from(selected));
     }
@@ -1105,16 +1092,6 @@ fn count_label(count: Option<u16>) -> String {
         .unwrap_or_else(|| " ".to_owned())
 }
 
-fn resource_abbrev(resource: Resource) -> &'static str {
-    match resource {
-        Resource::Brick => "BRK ",
-        Resource::Wood => "WOD ",
-        Resource::Wheat => "WHT ",
-        Resource::Sheep => "SHP ",
-        Resource::Ore => "ORE ",
-    }
-}
-
 fn dev_card_abbrev(card: UsableDevCard) -> &'static str {
     match card {
         UsableDevCard::Knight => "KN",
@@ -1203,6 +1180,10 @@ fn read_post_dice_action(ui: &mut CliUi, model: &UiModel) -> io::Result<PostDice
             log::trace!("Post-dice action: UseDevCard({:?})", usage);
             return Ok(PostDiceAction::UseDevCard(usage));
         }
+        if let Some(action) = handle_interactive_regular_action(ui, model, &line)? {
+            log::trace!("Post-dice interactive action: RegularAction({:?})", action);
+            return Ok(PostDiceAction::RegularAction(action));
+        }
         if let Some(action) = parse_regular_action(&line) {
             log::trace!("Post-dice action: RegularAction({:?})", action);
             return Ok(PostDiceAction::RegularAction(action));
@@ -1216,17 +1197,11 @@ fn read_regular_action(ui: &mut CliUi, model: &UiModel) -> io::Result<RegularAct
     log::trace!("Reading regular action");
     loop {
         let line = ui.prompt(model, "action: ")?;
-        if let Some(kind) = partial_build_command(&line) {
-            let builds = legal_builds_for_mode(model, kind);
-            if let Some(build) = ui.select_build(model, builds, "build: ")? {
-                return Ok(RegularAction::Build(build));
-            }
-            continue;
+        if let Some(action) = handle_interactive_regular_action(ui, model, &line)? {
+            log::trace!("Regular interactive action: {:?}", action);
+            return Ok(action);
         }
-        if line == "bank-trade" {
-            if let Some(trade) = ui.select_bank_trade(model)? {
-                return Ok(RegularAction::TradeWithBank(trade));
-            }
+        if partial_regular_command(&line) {
             continue;
         }
         if let Some(action) = parse_regular_action(&line) {
@@ -1236,6 +1211,29 @@ fn read_regular_action(ui: &mut CliUi, model: &UiModel) -> io::Result<RegularAct
         log::warn!("Could not parse regular action: {}", line);
         ui.set_message("could not parse action".to_owned())?;
     }
+}
+
+fn handle_interactive_regular_action(
+    ui: &mut CliUi,
+    model: &UiModel,
+    line: &str,
+) -> io::Result<Option<RegularAction>> {
+    if let Some(kind) = partial_build_command(line) {
+        let builds = legal_builds_for_mode(model, kind);
+        return Ok(ui
+            .select_build(model, builds, "build: ")?
+            .map(RegularAction::Build));
+    }
+    if line == "bank-trade" {
+        return Ok(ui
+            .select_bank_trade(model)?
+            .map(RegularAction::TradeWithBank));
+    }
+    Ok(None)
+}
+
+fn partial_regular_command(line: &str) -> bool {
+    partial_build_command(line).is_some() || line == "bank-trade"
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
