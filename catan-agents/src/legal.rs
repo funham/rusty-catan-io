@@ -165,6 +165,17 @@ pub fn legal_dev_card_usages(
         .collect()
 }
 
+pub fn legal_rob_targets(
+    context: &PlayerDecisionContext<'_>,
+    player_id: PlayerId,
+) -> impl Iterator<Item = PlayerId> {
+    context
+        .public
+        .players_on_hex(context.public.board_state.robber_pos)
+        .into_iter()
+        .filter(move |id| id != &player_id)
+}
+
 fn public_resource_total(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> u16 {
     if player_id == context.actor {
         return context.private.resources.total();

@@ -92,16 +92,10 @@ impl PlayerRuntime for GreedyAgent {
         &mut self,
         context: PlayerDecisionContext<'_>,
     ) -> ChoosePlayerToRobAction {
-        for id in context
-            .public
-            .players_on_hex(context.public.board_state.robber_pos)
-        {
-            if id != self.id {
-                return ChoosePlayerToRobAction(id);
-            }
-        }
-
-        ChoosePlayerToRobAction(self.id)
+        let id = legal::legal_rob_targets(&context, self.id)
+            .next()
+            .expect("GameController must forbid this case");
+        ChoosePlayerToRobAction(id)
     }
 
     fn answer_trade(&mut self, _context: PlayerDecisionContext<'_>) -> TradeAnswer {
