@@ -1,9 +1,12 @@
 use std::collections::BTreeSet;
 
-use crate::gameplay::{
-    field::state::BuildCollection,
-    game::state::GameState,
-    primitives::{PortKind, player::PlayerId},
+use crate::{
+    algorithm,
+    gameplay::{
+        field::state::BuildCollection,
+        game::state::GameState,
+        primitives::{PortKind, player::PlayerId},
+    },
 };
 
 #[derive(Debug, Clone)]
@@ -29,18 +32,6 @@ impl GameIndex {
     }
 
     fn get_ports_aquired(state: &GameState) -> Vec<BTreeSet<PortKind>> {
-        let ports = state.board.index().ports_intersection;
-        let mut result = Vec::new();
-        for id in 0..state.board.n_players {
-            let mut set = BTreeSet::new();
-            for est in state.builds.by_player(id).establishments.iter() {
-                if let Some(port) = ports.get(&est.pos) {
-                    set.insert(*port);
-                }
-            }
-            result.push(set);
-        }
-
-        result
+        algorithm::get_ports_aquired(state.board.index().ports_intersection, &state.builds)
     }
 }

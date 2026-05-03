@@ -1,3 +1,4 @@
+use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 
 use crate::gameplay::primitives::{
@@ -5,8 +6,6 @@ use crate::gameplay::primitives::{
     player::PlayerId,
     resource::{Resource, ResourceCollection, ResourceMap},
 };
-
-use rand::RngExt;
 
 #[derive(Debug, Clone)]
 pub struct Bank {
@@ -38,10 +37,7 @@ impl Bank {
 
     pub fn shuffle_dev_cards(&mut self) {
         let mut rng = rand::rng();
-        for i in (1..self.dev_cards.len()).rev() {
-            let j = rng.random_range(0..=i);
-            self.dev_cards.swap(i, j);
-        }
+        self.dev_cards.shuffle(&mut rng);
     }
 
     pub fn public_view(&self) -> BankViewOwned {
@@ -52,7 +48,7 @@ impl Bank {
             sheep: DeckFullnessLevel::Empty,
             ore: DeckFullnessLevel::Empty,
         };
-        for resource in Resource::list() {
+        for resource in Resource::iter() {
             resources[resource] = DeckFullnessLevel::new_or_panic(self.resources[resource]);
         }
 

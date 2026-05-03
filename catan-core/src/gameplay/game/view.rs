@@ -1,9 +1,12 @@
+use std::collections::BTreeSet;
+
 use crate::{
     algorithm,
     gameplay::{
         field::state::{BoardLayout, BoardState},
         game::{index::GameIndex, query::GameQuery, state::GameState},
         primitives::{
+            PortKind,
             bank::{Bank, DeckFullnessLevel},
             build::BoardBuildData,
             dev_card::{DevCardData, UsableDevCardCollection},
@@ -155,6 +158,15 @@ pub struct PlayerDecisionContext<'a> {
     pub search: Option<SearchFactory<'a>>,
 }
 
+impl PlayerDecisionContext<'_> {
+    pub fn counting(&self) -> CountingMode {
+        match &self.public.players[0].resources {
+            PublicPlayerResources::Exact(_) => CountingMode::Counting,
+            PublicPlayerResources::Total(_) => CountingMode::Human,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PlayerNotificationContext<'a> {
     pub self_id: PlayerId,
@@ -177,6 +189,10 @@ impl<'a> PublicGameView<'a> {
         algorithm::players_on_hex(hex, self.builds.players().iter())
             .into_iter()
             .collect()
+    }
+
+    pub fn get_ports_aquired(&self) -> Vec<BTreeSet<PortKind>> {
+        algorithm::get_ports_aquired(self.board.index().ports_intersection, self.builds)
     }
 }
 

@@ -4,9 +4,15 @@
 // that are used repeatedly across the codebase,
 // using minimal abstraction level.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use crate::{
-    gameplay::primitives::{build::PlayerBuildData, player::PlayerId},
-    topology::Hex,
+    gameplay::primitives::{
+        PortKind,
+        build::{BoardBuildData, PlayerBuildData},
+        player::PlayerId,
+    },
+    topology::{Hex, Intersection},
 };
 
 pub fn is_player_on_hex(hex: Hex, builds: &PlayerBuildData) -> bool {
@@ -28,4 +34,23 @@ pub fn players_on_hex<'a>(
         .enumerate()
         .filter_map(|(id, builds)| is_player_on_hex(hex, &builds).then_some(id))
         .collect::<Vec<_>>()
+}
+
+pub fn get_ports_aquired(
+    ports: BTreeMap<Intersection, PortKind>,
+    builds: &BoardBuildData,
+) -> Vec<BTreeSet<PortKind>> {
+    let mut result = Vec::new();
+    for id in 0..builds.players().len() {
+        let mut set = BTreeSet::new();
+
+        for est in builds.by_player(id).establishments.iter() {
+            if let Some(port) = ports.get(&est.pos) {
+                set.insert(*port);
+            }
+        }
+        result.push(set);
+    }
+
+    result
 }

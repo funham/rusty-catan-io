@@ -12,6 +12,8 @@ use catan_core::{
     },
 };
 
+use crate::legal;
+
 #[derive(Debug, Default)]
 pub struct LazyAgent {
     id: PlayerId,
@@ -31,19 +33,7 @@ impl PlayerRuntime for LazyAgent {
     }
 
     fn init_stage_action(&mut self, context: PlayerDecisionContext<'_>) -> InitStageAction {
-        let (establishment, road) = context
-            .public
-            .builds
-            .query()
-            .possible_initial_placements(context.public.board, self.id)
-            .into_iter()
-            .next()
-            .expect("there must be an initial placement");
-
-        InitStageAction {
-            establishment_position: establishment.pos,
-            road,
-        }
+        lazy_init_stage_action(context, self.id)
     }
 
     fn init_action(&mut self, _context: PlayerDecisionContext<'_>) -> InitAction {
@@ -63,29 +53,14 @@ impl PlayerRuntime for LazyAgent {
     }
 
     fn move_robbers(&mut self, context: PlayerDecisionContext<'_>) -> MoveRobbersAction {
-        for hex in context.public.board.arrangement.hex_iter() {
-            if hex != context.public.board_state.robber_pos {
-                return MoveRobbersAction(hex);
-            }
-        }
-
-        unreachable!("there must be a hex without the robber on it")
+        lazy_move_robbers(context)
     }
 
     fn choose_player_to_rob(
         &mut self,
         context: PlayerDecisionContext<'_>,
     ) -> ChoosePlayerToRobAction {
-        for id in context
-            .public
-            .players_on_hex(context.public.board_state.robber_pos)
-        {
-            if id != self.id {
-                return ChoosePlayerToRobAction(id);
-            }
-        }
-
-        ChoosePlayerToRobAction(self.id)
+        lazy_choose_player_to_rob(context, self.id)
     }
 
     fn answer_trade(&mut self, _context: PlayerDecisionContext<'_>) -> TradeAnswer {
@@ -93,18 +68,61 @@ impl PlayerRuntime for LazyAgent {
     }
 
     fn drop_half(&mut self, context: PlayerDecisionContext<'_>) -> DropHalfAction {
-        let number_to_drop = context.private.resources.total() / 2;
-        let mut to_drop = ResourceCollection::default();
-        for (resource, number) in context.private.resources.unroll() {
-            let remaining = number_to_drop - to_drop.total();
+        lazy_drop_half(context)
+    }
+}
 
-            if remaining == 0 {
-                break;
-            }
+pub fn lazy_drop_half(context: PlayerDecisionContext<'_>) -> DropHalfAction {
+    let number_to_drop = context.private.resources.total() / 2;
+    let mut to_drop = ResourceCollection::default();
+    for (resource, number) in context.private.resources.unroll() {
+        let remaining = number_to_drop - to_drop.total();
 
-            to_drop[resource] = remaining.min(number);
+        if remaining == 0 {
+            break;
         }
 
-        DropHalfAction(to_drop)
+        to_drop[resource] = remaining.min(number);
+    }
+
+    DropHalfAction(to_drop)
+}
+
+pub fn lazy_choose_player_to_rob(
+    context: PlayerDecisionContext<'_>,
+    player_id: PlayerId,
+) -> ChoosePlayerToRobAction {
+    let id = legal::legal_rob_targets(&context, player_id)
+        .next()
+        .expect("GameController must forbid this case");
+    ChoosePlayerToRobAction(id)
+}
+
+pub fn lazy_move_robbers(context: PlayerDecisionContext<'_>) -> MoveRobbersAction {
+    for hex in context.public.board.arrangement.hex_iter() {
+        if hex != context.public.board_state.robber_pos {
+            return MoveRobbersAction(hex);
+        }
+    }
+
+    unreachable!("there must be a hex without the robber on it")
+}
+
+pub fn lazy_init_stage_action(
+    context: PlayerDecisionContext<'_>,
+    player_id: PlayerId,
+) -> InitStageAction {
+    let (establishment, road) = context
+        .public
+        .builds
+        .query()
+        .possible_initial_placements(context.public.board, player_id)
+        .into_iter()
+        .next()
+        .expect("there must be an initial placement");
+
+    InitStageAction {
+        establishment_position: establishment.pos,
+        road,
     }
 }

@@ -29,9 +29,16 @@ pub enum Resource {
 }
 
 impl Resource {
-    pub fn list() -> [Resource; 5] {
-        use Resource::*;
-        [Brick, Wood, Wheat, Sheep, Ore]
+    pub const LIST: [Resource; 5] = [
+        Resource::Brick,
+        Resource::Wood,
+        Resource::Wheat,
+        Resource::Sheep,
+        Resource::Ore,
+    ];
+
+    pub fn iter() -> impl Iterator<Item = Resource> {
+        Self::LIST.iter().cloned()
     }
 }
 
@@ -134,7 +141,7 @@ impl ResourceCollection {
     }
 
     pub fn has_enough(&self, set: &ResourceCollection) -> bool {
-        Resource::list().into_iter().all(|r| self[r] >= set[r])
+        Resource::iter().into_iter().all(|r| self[r] >= set[r])
     }
 
     pub fn missing(&self, target: &ResourceCollection) -> ResourceCollection {
@@ -152,7 +159,7 @@ impl ResourceCollection {
     }
 
     pub fn total(&self) -> u16 {
-        Resource::list().into_iter().map(|r| self[r] as u16).sum()
+        Resource::iter().into_iter().map(|r| self[r] as u16).sum()
     }
 
     pub fn checked_sub(&self, rhs: &ResourceCollection) -> Option<ResourceCollection> {
@@ -225,7 +232,7 @@ impl ResourceCollection {
     }
 
     pub fn unroll(&self) -> impl Iterator<Item = (Resource, u16)> {
-        Resource::list().into_iter().map(|r| (r, self[r]))
+        Resource::iter().into_iter().map(|r| (r, self[r]))
     }
 }
 

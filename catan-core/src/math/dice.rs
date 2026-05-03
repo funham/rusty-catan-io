@@ -78,14 +78,15 @@ impl DiceVal {
     pub fn list() -> impl Iterator<Item = DiceVal> {
         (2..=12).map(|x| DiceVal::new(x).unwrap())
     }
+
+    pub fn prob_pts(&self) -> u8 {
+        6 - i32::abs(Into::<u8>::into(*self) as i32 - 7) as u8
+    }
 }
 
 impl Probable for DiceVal {
     fn prob(&self) -> Probability {
-        let val = Into::<u8>::into(*self) as i32;
-        let ncomb = 6 - i32::abs(val - 7);
-        let prob = ncomb as f32 / 36.0;
-
+        let prob = self.prob_pts() as f32 / 36.0;
         prob.try_into().expect("check math")
     }
 }

@@ -7,8 +7,8 @@ use std::{
 };
 
 use catan_agents::{
-    greedy_agent::GreedyAgent,
-    lazy_agent::LazyAgent,
+    greedy::GreedyAgent,
+    lazy::LazyAgent,
     remote_agent::{RemoteCliAgent, RemoteCliObserver},
 };
 use catan_core::{

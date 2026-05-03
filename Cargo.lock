@@ -203,7 +203,9 @@ version = "0.1.0"
 dependencies = [
  "catan-core",
  "catan-render",
+ "itertools 0.14.0",
  "log",
+ "rand 0.10.1",
  "serde",
  "serde_json",
  "strum 0.28.0",

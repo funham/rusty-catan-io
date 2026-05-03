@@ -15,45 +15,45 @@ use crate::{
     topology::{Hex, Intersection},
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct InitStageAction {
     pub establishment_position: Intersection,
     pub road: Road,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct ChoosePlayerToRobAction(pub PlayerId);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct DropHalfAction(pub ResourceCollection);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct MoveRobbersAction(pub Hex);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum TradeAnswer {
     Accept,
     Decline,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum InitAction {
     RollDice,
     UseDevCard(DevCardUsage),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum PostDevCardAction {
     RollDice,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum PostDiceAction {
     UseDevCard(DevCardUsage),
     RegularAction(RegularAction),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum RegularAction {
     OfferPublicTrade(PublicTradeOffer),
     OfferPersonalTrade(PersonalTradeOffer),

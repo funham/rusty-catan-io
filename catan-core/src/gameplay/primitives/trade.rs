@@ -3,20 +3,20 @@ use serde::{Deserialize, Serialize};
 use super::player::PlayerId;
 use super::resource::{Resource, ResourceCollection};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct PublicTradeOffer {
     pub give: ResourceCollection,
     pub take: ResourceCollection,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct PersonalTradeOffer {
     pub give: ResourceCollection,
     pub take: ResourceCollection,
     pub peer_id: PlayerId,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum BankTradeKind {
     BankGeneric,
     PortGeneric,

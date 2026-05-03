@@ -5,6 +5,7 @@ pub mod math;
 pub mod topology;
 
 pub use gameplay::agent;
+pub use gameplay::constants;
 
 use crate::{
     gameplay::{

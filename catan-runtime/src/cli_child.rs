@@ -681,7 +681,7 @@ impl CliUi {
             if let CrosstermEvent::Key(key) = event::read()?
                 && key.kind == KeyEventKind::Press
             {
-                let resource = Resource::list()[selected_resource];
+                let resource = Resource::LIST[selected_resource];
                 match key.code {
                     KeyCode::Enter => {
                         if selected.total() == required {
@@ -699,10 +699,10 @@ impl CliUi {
                     KeyCode::Left => {
                         selected_resource = selected_resource
                             .checked_sub(1)
-                            .unwrap_or(Resource::list().len() - 1);
+                            .unwrap_or(Resource::LIST.len() - 1);
                     }
                     KeyCode::Right => {
-                        selected_resource = (selected_resource + 1) % Resource::list().len();
+                        selected_resource = (selected_resource + 1) % Resource::LIST.len();
                     }
                     KeyCode::Up => {
                         adjust_drop_selection(&private.resources, &mut selected, resource, 1);
@@ -763,7 +763,7 @@ impl CliUi {
         self.message = message.to_owned();
         loop {
             self.personal_override = Some(resource_picker_lines(selected));
-            let resource = Resource::list()[selected];
+            let resource = Resource::LIST[selected];
             self.draw(Some(model), prompt, &format!("{resource:?}"))?;
             if let CrosstermEvent::Key(key) = event::read()?
                 && key.kind == KeyEventKind::Press
@@ -779,12 +779,10 @@ impl CliUi {
                         return Ok(None);
                     }
                     KeyCode::Left => {
-                        selected = selected
-                            .checked_sub(1)
-                            .unwrap_or(Resource::list().len() - 1);
+                        selected = selected.checked_sub(1).unwrap_or(Resource::LIST.len() - 1);
                     }
                     KeyCode::Right => {
-                        selected = (selected + 1) % Resource::list().len();
+                        selected = (selected + 1) % Resource::LIST.len();
                     }
                     _ => {}
                 }
@@ -1048,7 +1046,7 @@ fn bank_resources_line(model: &UiModel) -> Line<'static> {
             push_resource_values(&mut spans, resources, |count| count.to_string());
         }
         UiPublicBankResources::Approx(resources) => {
-            for (idx, resource) in Resource::list().into_iter().enumerate() {
+            for (idx, resource) in Resource::iter().into_iter().enumerate() {
                 if idx > 0 {
                     spans.push(Span::raw(" "));
                 }
@@ -1101,7 +1099,7 @@ fn resource_card_lines(
     let mut bottom = Vec::new();
     let mut selected = Vec::new();
 
-    for (idx, resource) in Resource::list().into_iter().enumerate() {
+    for (idx, resource) in Resource::iter().into_iter().enumerate() {
         if idx > 0 {
             for spans in [&mut top, &mut middle, &mut bottom, &mut selected] {
                 spans.push(Span::raw(" "));
@@ -1209,7 +1207,7 @@ fn drop_resource_card_lines(
     let mut lines = resource_card_lines(resources, None);
     let mut selector = Vec::new();
     let mut selected_counts = Vec::new();
-    for (idx, resource) in Resource::list().into_iter().enumerate() {
+    for (idx, resource) in Resource::iter().into_iter().enumerate() {
         if idx > 0 {
             selector.push(Span::raw(" "));
             selected_counts.push(Span::raw(" "));
@@ -1279,7 +1277,7 @@ fn resource_picker_lines(selected_resource: usize) -> Vec<Line<'static>> {
 
 fn resource_selector_line(selected_resource: usize) -> Line<'static> {
     let mut selector = Vec::new();
-    for (idx, resource) in Resource::list().into_iter().enumerate() {
+    for (idx, resource) in Resource::iter().into_iter().enumerate() {
         if idx > 0 {
             selector.push(Span::raw(" "));
         }
@@ -1367,7 +1365,7 @@ fn push_resource_values(
     resources: &ResourceCollection,
     format_count: impl Fn(u16) -> String,
 ) {
-    for (idx, resource) in Resource::list().into_iter().enumerate() {
+    for (idx, resource) in Resource::iter().into_iter().enumerate() {
         if idx > 0 {
             spans.push(Span::raw(" "));
         }
@@ -2154,8 +2152,8 @@ fn bank_trade_options(model: &UiModel) -> Vec<BankTrade> {
     let has_universal_port = ports.contains(&PortKind::Universal);
     let mut trades = Vec::new();
 
-    for give in Resource::list() {
-        for take in Resource::list().into_iter().filter(|take| *take != give) {
+    for give in Resource::iter() {
+        for take in Resource::iter().into_iter().filter(|take| *take != give) {
             if private.resources[give] >= 4 {
                 trades.push(BankTrade {
                     give,

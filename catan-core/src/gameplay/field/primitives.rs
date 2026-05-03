@@ -37,7 +37,7 @@ pub struct BoardArrangement {
 }
 
 #[derive(Debug)]
-pub enum HexArrangementError {
+pub enum BoardArrangementError {
     InconsistentSizes(String),
 }
 
@@ -46,9 +46,9 @@ impl BoardArrangement {
         field_radius: u8,
         tiles: Vec<Tile>,
         ports_info: PortMap,
-    ) -> Result<Self, HexArrangementError> {
+    ) -> Result<Self, BoardArrangementError> {
         if HexIndex::spiral_start_of_ring(field_radius as usize + 1) != tiles.len() {
-            return Err(HexArrangementError::InconsistentSizes("".to_string()));
+            return Err(BoardArrangementError::InconsistentSizes("".to_string()));
         }
 
         Ok(Self {

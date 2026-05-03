@@ -1,17 +1,22 @@
+use std::collections::BTreeSet;
+
 use catan_core::{
     agent::action::RegularAction,
+    constants::costs,
     gameplay::{
         game::view::{PlayerDecisionContext, PublicPlayerResources},
         primitives::{
+            PortKind,
             build::{Build, Establishment, EstablishmentType, Road},
             dev_card::{DevCardUsage, UsableDevCard},
             player::PlayerId,
             resource::Resource,
+            trade::{BankTrade, BankTradeKind},
         },
     },
 };
 
-pub fn legal_cities(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> Vec<Build> {
+pub fn legal_city_spots(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> Vec<Build> {
     let Some(search) = &context.search else {
         return Vec::new();
     };
@@ -35,7 +40,10 @@ pub fn legal_cities(context: &PlayerDecisionContext<'_>, player_id: PlayerId) ->
         .collect()
 }
 
-pub fn legal_settlements(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> Vec<Build> {
+pub fn legal_settlement_spots(
+    context: &PlayerDecisionContext<'_>,
+    player_id: PlayerId,
+) -> Vec<Build> {
     let Some(search) = &context.search else {
         return Vec::new();
     };
@@ -60,7 +68,7 @@ pub fn legal_settlements(context: &PlayerDecisionContext<'_>, player_id: PlayerI
         .collect()
 }
 
-pub fn legal_roads(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> Vec<Build> {
+pub fn legal_road_spots(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> Vec<Build> {
     let Some(search) = &context.search else {
         return Vec::new();
     };
@@ -80,12 +88,26 @@ pub fn legal_roads(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> 
         .collect()
 }
 
-pub fn can_buy_dev_card(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> bool {
-    let Some(search) = &context.search else {
-        return false;
-    };
-    let mut state = search.make_owned().state;
-    state.buy_dev_card(player_id).is_ok()
+pub fn can_buy_dev_card(context: &PlayerDecisionContext<'_>) -> bool {
+    // let Some(search) = &context.search else {
+    //     return false;
+    // };
+    // let mut state = search.make_owned().state;
+    // state.buy_dev_card(player_id).is_ok()
+
+    context.private.resources.has_enough(&costs::DEV_CARD)
+}
+
+pub fn can_buy_road(context: &PlayerDecisionContext<'_>) -> bool {
+    context.private.resources.has_enough(&costs::ROAD)
+}
+
+pub fn can_buy_settlement(context: &PlayerDecisionContext<'_>) -> bool {
+    context.private.resources.has_enough(&costs::SETTLEMENT)
+}
+
+pub fn can_buy_city(context: &PlayerDecisionContext<'_>) -> bool {
+    context.private.resources.has_enough(&costs::CITY)
 }
 
 pub fn legal_dev_card_usages(
@@ -128,15 +150,15 @@ pub fn legal_dev_card_usages(
     }
 
     if active.contains(UsableDevCard::YearOfPlenty) {
-        for first in Resource::list() {
-            for second in Resource::list() {
+        for first in Resource::iter() {
+            for second in Resource::iter() {
                 candidates.push(DevCardUsage::YearOfPlenty([first, second]));
             }
         }
     }
 
     if active.contains(UsableDevCard::Monopoly) {
-        candidates.extend(Resource::list().into_iter().map(DevCardUsage::Monopoly));
+        candidates.extend(Resource::iter().into_iter().map(DevCardUsage::Monopoly));
     }
 
     if active.contains(UsableDevCard::RoadBuild) {
@@ -193,28 +215,165 @@ fn public_resource_total(context: &PlayerDecisionContext<'_>, player_id: PlayerI
         .unwrap_or_default()
 }
 
-pub fn greedy_regular_action(
-    context: &PlayerDecisionContext<'_>,
-    player_id: PlayerId,
-) -> RegularAction {
-    if let Some(build) = legal_cities(context, player_id).into_iter().next() {
-        return RegularAction::Build(build);
+pub fn legal_trades(context: &PlayerDecisionContext<'_>) -> impl IntoIterator<Item = BankTrade> {
+    let mut result = Vec::new();
+
+    /* bank-trade regular */
+    {
+        let give = Resource::iter()
+            .filter(|resource| context.private.resources.has_enough(&(*resource, 4).into()))
+            .collect();
+
+        let trades = list_trades(
+            Some(TradeFilter {
+                give,
+                kind: [BankTradeKind::BankGeneric].into(),
+                ..Default::default()
+            }),
+            None,
+        )
+        .into_iter();
+
+        result.extend(trades);
     }
-    if let Some(build) = legal_settlements(context, player_id).into_iter().next() {
-        return RegularAction::Build(build);
+
+    /* bank-trade ports */
+
+    for port in &context.public.get_ports_aquired()[context.actor] {
+        let trades = match port {
+            PortKind::Special(resource) => {
+                let give = match context.private.resources.has_enough(&(*resource, 2).into()) {
+                    true => [*resource].into(),
+                    false => [].into(),
+                };
+
+                list_trades(
+                    Some(TradeFilter {
+                        give,
+                        kind: [BankTradeKind::PortSpecific].into(),
+                        ..Default::default()
+                    }),
+                    None,
+                )
+            }
+            PortKind::Universal => {
+                let give = Resource::iter()
+                    .filter(|resource| context.private.resources.has_enough(&(*resource, 2).into()))
+                    .collect();
+
+                list_trades(
+                    Some(TradeFilter {
+                        give,
+                        kind: [BankTradeKind::PortGeneric].into(),
+                        ..Default::default()
+                    }),
+                    None,
+                )
+            }
+        }
+        .into_iter();
+
+        result.extend(trades);
     }
-    if can_buy_dev_card(context, player_id) {
-        return RegularAction::BuyDevCard;
+    result
+}
+
+pub fn legal_regular_action(context: &PlayerDecisionContext<'_>) -> Vec<RegularAction> {
+    let mut result = Vec::new();
+
+    /* end move */
+
+    result.push(RegularAction::EndMove);
+
+    /* buy dev card */
+
+    if can_buy_dev_card(context) {
+        result.push(RegularAction::BuyDevCard);
     }
-    if let Some(build) = legal_roads(context, player_id).into_iter().next() {
-        return RegularAction::Build(build);
+
+    /* builds  */
+
+    if can_buy_road(context) {
+        result.extend(
+            legal_road_spots(context, context.actor)
+                .into_iter()
+                .map(|road| RegularAction::Build(road)),
+        );
     }
-    RegularAction::EndMove
+
+    if can_buy_settlement(context) {
+        result.extend(
+            legal_settlement_spots(context, context.actor)
+                .into_iter()
+                .map(|settlement| RegularAction::Build(settlement)),
+        );
+    }
+
+    if can_buy_city(context) {
+        result.extend(
+            legal_city_spots(context, context.actor)
+                .into_iter()
+                .map(|city| RegularAction::Build(city)),
+        );
+    }
+
+    /* bank trades */
+
+    result.extend(
+        legal_trades(context)
+            .into_iter()
+            .map(|trade| RegularAction::TradeWithBank(trade)),
+    );
+
+    // RegularAction::OfferPublicTrade(public_trade_offer) => todo!(),
+    // RegularAction::OfferPersonalTrade(personal_trade_offer) => todo!(),
+
+    result
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct TradeFilter {
+    pub give: BTreeSet<Resource>,
+    pub take: BTreeSet<Resource>,
+    pub kind: BTreeSet<BankTradeKind>,
+}
+
+pub fn list_trades(
+    white: Option<TradeFilter>,
+    black: Option<TradeFilter>,
+) -> impl IntoIterator<Item = BankTrade> {
+    let mut result = vec![];
+    for give in Resource::iter()
+        // whitelist
+        .filter(|give| !matches!(white.clone(), Some(white) if !white.give.contains(give)))
+        // blacklist
+        .filter(|give| !matches!(black.clone(), Some(black) if black.give.contains(give)))
+    {
+        for take in Resource::iter()
+            .filter(|take| *take != give)
+            // whitelist
+            .filter(|take| !matches!(white.clone(), Some(white) if !white.take.contains(take)))
+            // blacklist
+            .filter(|take| !matches!(black.clone(), Some(black) if black.take.contains(take)))
+        {
+            use BankTradeKind::*;
+            for kind in [BankGeneric, PortGeneric, PortSpecific]
+                .into_iter()
+                // whitelist
+                .filter(|k| !matches!(white.clone(), Some(white) if !white.kind.contains(k)))
+                // blacklist
+                .filter(|k| !matches!(black.clone(), Some(black) if black.kind.contains(k)))
+            {
+                result.push(BankTrade { give, take, kind });
+            }
+        }
+    }
+
+    result
 }
 
 #[cfg(test)]
 mod tests {
-    use super::greedy_regular_action;
     use catan_core::{
         agent::action::RegularAction,
         gameplay::{
@@ -231,6 +390,8 @@ mod tests {
             },
         },
     };
+
+    use crate::greedy;
 
     fn initialized_state() -> GameState {
         let mut init = GameInitializationState::default();
@@ -315,7 +476,7 @@ mod tests {
             player_id,
         ));
         let context = factory.player_decision_context(player_id, search);
-        greedy_regular_action(&context, player_id)
+        greedy::greedy_regular_action(&context, player_id)
     }
 
     #[test]
