@@ -609,19 +609,28 @@ impl GameController {
                 log::trace!("Build successful");
                 Ok(())
             }
-            Err(BuildActionError::AccountIsShort { id }) => {
-                log::warn!(
-                    "Can't build {}: Player#{} has {}",
-                    Into::<&str>::into(build),
-                    id,
-                    self.game.players.get(id).resources(),
-                );
-                Err(())
-            }
-            Err(BuildActionError::InvalidPlacement(err)) => {
-                log::warn!("Couldn't build {}: {:?}", Into::<&str>::into(build), err);
-                Err(())
-            }
+            Err(err) => match err {
+                BuildActionError::AccountIsShort { id } => {
+                    log::warn!(
+                        "Can't build {}: Player#{} has {}",
+                        Into::<&str>::into(build),
+                        id,
+                        self.game.players.get(id).resources(),
+                    );
+                    Err(())
+                }
+                BuildActionError::InvalidPlacement(err) => {
+                    log::warn!("Couldn't build {}: {:?}", Into::<&str>::into(build), err);
+                    Err(())
+                }
+                BuildActionError::OutOfPieces => {
+                    log::warn!(
+                        "couldn't build another {}: {player} ran out of these",
+                        Into::<&str>::into(build)
+                    );
+                    Err(())
+                }
+            },
         }
     }
 

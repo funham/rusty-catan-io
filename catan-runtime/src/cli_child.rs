@@ -15,6 +15,7 @@ use catan_core::{
         ChoosePlayerToRobAction, DropHalfAction, InitAction, InitStageAction, MoveRobbersAction,
         PostDevCardAction, PostDiceAction, RegularAction, TradeAnswer,
     },
+    constants,
     gameplay::{
         game::event::GameEndPlayerStats,
         primitives::{
@@ -1028,7 +1029,10 @@ fn personal_model_lines(model: &UiModel) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     if let Some(private) = &model.private {
         lines.push(Line::from(format!("you: p{}", private.player_id)));
-        lines.push(Line::from("resources"));
+        lines.push(Line::from(format!(
+            "resources: ({})",
+            private.resources.total()
+        )));
         lines.extend(resource_card_lines(&private.resources, None));
         lines.push(Line::from(""));
         lines.push(Line::from("development"));
@@ -1952,17 +1956,21 @@ fn legal_builds_for_mode(model: &UiModel, mode: PartialBuildMode) -> Vec<Build> 
 }
 
 fn legal_regular_settlements(model: &UiModel) -> Vec<Build> {
-    if !can_afford(
-        model,
-        ResourceCollection {
-            brick: 1,
-            wood: 1,
-            wheat: 1,
-            sheep: 1,
-            ore: 0,
-        },
-    ) || player_settlement_count(model, model.actor.unwrap_or_default()) >= 5
-    {
+    let actor = model.actor.unwrap_or_else(|| {
+        log::error!("actor is abscent, substituting `0` {}{}", file!(), line!());
+        0
+    });
+
+    let affordable = can_afford(model, constants::costs::SETTLEMENT);
+    let settlement_count = player_settlement_count(model, actor);
+
+    if !affordable || settlement_count >= 5 {
+        if !affordable {
+            log::trace!("Player #{} can't afford to buy a settlement", actor);
+        }
+        if settlement_count >= 5 {
+            log::trace!("Player #{} Ran out of settlements", actor);
+        }
         return Vec::new();
     }
 

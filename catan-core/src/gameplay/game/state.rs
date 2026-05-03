@@ -5,7 +5,7 @@ use crate::{
         field::state::{BoardLayout, BoardState},
         primitives::{
             bank::{Bank, BankResourceExchangeError, PlayerResourceExchangeError},
-            build::{BoardBuildData, Build, BuildingError, Road},
+            build::{BoardBuildData, Build, BuildingError, EstablishmentType, Road},
             dev_card::DevCardUsage,
             player::{PlayerDataContainer, PlayerId},
             resource::{HasCost, Resource, ResourceCollection, ResourceCollectionError},
@@ -40,6 +40,7 @@ pub enum DevCardUsageError {
 #[derive(Debug)]
 pub enum BuildActionError {
     AccountIsShort { id: PlayerId },
+    OutOfPieces,
     InvalidPlacement(BuildingError),
 }
 
@@ -95,6 +96,21 @@ impl GameState {
     }
 
     pub fn build(&mut self, player_id: PlayerId, build: Build) -> Result<(), BuildActionError> {
+        use Build::*;
+        use EstablishmentType::*;
+
+        let out_of_pieces = match build {
+            Establishment(establishment) => match establishment.stage {
+                Settlement => self.builds.by_player(player_id).settlements_count() >= 5,
+                City => self.builds.by_player(player_id).cities_count() >= 5,
+            },
+            Road(_) => self.builds.by_player(player_id).roads_count() >= 15,
+        };
+
+        if let Some(err) = out_of_pieces.then_some(BuildActionError::OutOfPieces) {
+            return Err(err);
+        }
+
         let cost = build.cost();
         if !self.players.get(player_id).resources().has_enough(&cost) {
             return Err(BuildActionError::AccountIsShort { id: player_id });
