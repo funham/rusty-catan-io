@@ -11,7 +11,7 @@ use catan_core::{
     constants,
     gameplay::primitives::{
         build::{Build, Establishment, EstablishmentType, Road},
-        dev_card::DevCardUsage,
+        dev_card::{DevCardUsage, UsableDevCard},
         player::PlayerId,
         resource::{Resource, ResourceCollection},
         trade::{BankTrade, BankTradeKind},
@@ -175,17 +175,32 @@ fn handle_interactive_dev_card_action(
     line: &str,
 ) -> io::Result<Option<DevCardUsage>> {
     let model = &envelope.view;
-    match partial_dev_card_command(line) {
-        Some(PartialDevCardMode::Knight) => select_knight_usage(ui, envelope),
-        Some(PartialDevCardMode::RoadBuild) => select_roadbuild_usage(ui, envelope),
-        Some(PartialDevCardMode::Monopoly) => Ok(ui
+    let Some(mode) = partial_dev_card_command(line) else {
+        return Ok(None);
+    };
+
+    if !dev_card_mode_has_legal_usage(envelope, mode) {
+        let reason = dev_card_unavailable_reason(model, mode);
+        log::warn!(
+            target: "catan_runtime::cli_child::input",
+            "Dev card command recognized but unavailable: mode={:?}, reason={reason}",
+            mode
+        );
+        ui.set_message(reason)?;
+        return Ok(None);
+    }
+
+    match mode {
+        PartialDevCardMode::Knight => select_knight_usage(ui, envelope),
+        PartialDevCardMode::RoadBuild => select_roadbuild_usage(ui, envelope),
+        PartialDevCardMode::Monopoly => Ok(ui
             .select_resource(
                 model,
                 "monopoly: ",
                 "select monopoly resource with left/right",
             )?
             .map(DevCardUsage::Monopoly)),
-        Some(PartialDevCardMode::YearOfPlenty) => {
+        PartialDevCardMode::YearOfPlenty => {
             let Some(first) = ui.select_resource(
                 model,
                 "year-of-plenty 1: ",
@@ -204,8 +219,47 @@ fn handle_interactive_dev_card_action(
             };
             Ok(Some(DevCardUsage::YearOfPlenty([first, second])))
         }
-        None => Ok(None),
     }
+}
+
+fn dev_card_mode_has_legal_usage(
+    envelope: &DecisionRequestEnvelope,
+    mode: PartialDevCardMode,
+) -> bool {
+    envelope
+        .legal
+        .dev_card_usages
+        .iter()
+        .any(|usage| usage.card_kind() == mode.card_kind())
+}
+
+fn dev_card_unavailable_reason(model: &UiModel, mode: PartialDevCardMode) -> String {
+    let Some(private) = &model.private else {
+        return format!(
+            "invalid dev card action: no legal {} usage and private card data is unavailable",
+            mode.label()
+        );
+    };
+
+    let card = mode.card_kind();
+    if private.dev_cards.active[card] == 0 && private.dev_cards.queued[card] > 0 {
+        return format!(
+            "invalid dev card action: {} is queued until next turn",
+            mode.label()
+        );
+    }
+
+    if private.dev_cards.active[card] == 0 {
+        return format!(
+            "invalid dev card action: no active {} card is available",
+            mode.label()
+        );
+    }
+
+    format!(
+        "invalid dev card action: no legal {} usage is available now",
+        mode.label()
+    )
 }
 
 fn select_knight_usage(
@@ -249,6 +303,26 @@ pub(crate) enum PartialDevCardMode {
     YearOfPlenty,
 }
 
+impl PartialDevCardMode {
+    fn card_kind(self) -> UsableDevCard {
+        match self {
+            Self::Knight => UsableDevCard::Knight,
+            Self::RoadBuild => UsableDevCard::RoadBuild,
+            Self::Monopoly => UsableDevCard::Monopoly,
+            Self::YearOfPlenty => UsableDevCard::YearOfPlenty,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Knight => "knight",
+            Self::RoadBuild => "road building",
+            Self::Monopoly => "monopoly",
+            Self::YearOfPlenty => "year of plenty",
+        }
+    }
+}
+
 pub(crate) fn partial_dev_card_command(line: &str) -> Option<PartialDevCardMode> {
     match line.split_whitespace().collect::<Vec<_>>().as_slice() {
         ["use", "knight"] | ["kn"] => Some(PartialDevCardMode::Knight),
@@ -283,7 +357,7 @@ impl PartialBuildMode {
         match self {
             Self::Settlement => 5,
             Self::Road => 15,
-            Self::City => 4,
+            Self::City => 5,
         }
     }
 

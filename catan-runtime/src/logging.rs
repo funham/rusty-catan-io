@@ -11,13 +11,15 @@ use crate::config::LoggingConfig;
 struct TeeLogWriter {
     stderr: io::Stderr,
     file: Option<File>,
+    file_ansi_state: AnsiStripState,
 }
 
 impl Write for TeeLogWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.stderr.write_all(buf)?;
         if let Some(file) = &mut self.file {
-            file.write_all(buf)?;
+            let stripped = strip_ansi_escape_codes(buf, &mut self.file_ansi_state);
+            file.write_all(&stripped)?;
         }
         Ok(buf.len())
     }
@@ -55,10 +57,12 @@ pub(crate) fn init_host_logger(config: &LoggingConfig) -> Result<Option<PathBuf>
     let writer = TeeLogWriter {
         stderr: io::stderr(),
         file,
+        file_ansi_state: AnsiStripState::default(),
     };
     let mut builder =
         env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"));
     builder.target(env_logger::Target::Pipe(Box::new(writer)));
+    builder.write_style(env_logger::WriteStyle::Always);
     builder
         .try_init()
         .map_err(|err| format!("failed to initialize logger: {err}"))?;
@@ -77,13 +81,39 @@ pub(crate) fn timestamped_log_path(config: &LoggingConfig, timestamp: DateTime<U
         .join(format!("{}-{stamp}.log", config.file_prefix))
 }
 
+#[derive(Debug, Default)]
+struct AnsiStripState {
+    in_escape: bool,
+}
+
+fn strip_ansi_escape_codes(buf: &[u8], state: &mut AnsiStripState) -> Vec<u8> {
+    let mut stripped = Vec::with_capacity(buf.len());
+    for byte in buf {
+        if state.in_escape {
+            if byte.is_ascii_alphabetic() {
+                state.in_escape = false;
+            }
+            continue;
+        }
+
+        if *byte == 0x1b {
+            state.in_escape = true;
+            continue;
+        }
+
+        stripped.push(*byte);
+    }
+
+    stripped
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::{TimeZone, Utc};
 
     use crate::config::LoggingConfig;
 
-    use super::timestamped_log_path;
+    use super::{AnsiStripState, strip_ansi_escape_codes, timestamped_log_path};
 
     #[test]
     fn default_timestamped_log_path_uses_target_logs() {
@@ -113,5 +143,15 @@ mod tests {
             path,
             std::path::PathBuf::from("tmp/logs/match-2026-05-04T12-30-05Z.log")
         );
+    }
+
+    #[test]
+    fn strips_ansi_escape_codes_for_log_files() {
+        let mut state = AnsiStripState::default();
+
+        let stripped =
+            strip_ansi_escape_codes(b"\x1b[31mERROR\x1b[0m catan: message\n", &mut state);
+
+        assert_eq!(stripped, b"ERROR catan: message\n");
     }
 }

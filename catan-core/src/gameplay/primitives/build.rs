@@ -350,7 +350,7 @@ pub mod data {
     impl PlayerBuildData {
         pub const ROAD_LIMIT: usize = 15;
         pub const SETTLEMENT_LIMIT: usize = 5;
-        pub const CITY_LIMIT: usize = 4;
+        pub const CITY_LIMIT: usize = 5;
 
         pub fn generic_occupancy<Builds, BuildItem>(builds: Builds) -> IntersectionOccupancy
         where
@@ -888,15 +888,15 @@ mod tests {
             builds[0].settlements_count(),
             PlayerBuildData::SETTLEMENT_LIMIT - 1
         );
-        assert_eq!(builds[0].cities_count(), PlayerBuildData::CITY_LIMIT);
+        assert_eq!(builds[0].cities_count(), 4);
     }
 
     #[test]
-    fn city_limit_blocks_fifth_city() {
+    fn city_limit_allows_fifth_city() {
         let vertices = h(0, 0).vertices_arr();
         let mut establishments = vertices
             .into_iter()
-            .take(PlayerBuildData::CITY_LIMIT)
+            .take(PlayerBuildData::CITY_LIMIT - 1)
             .map(city)
             .collect::<Vec<_>>();
         establishments.push(settlement(vertices[4]));
@@ -906,11 +906,11 @@ mod tests {
             roads: vec![],
         }]);
 
-        let err = builds
+        builds
             .try_build(0, Build::Establishment(city(vertices[4])))
-            .expect_err("fifth city should exceed player inventory");
+            .expect("fifth city should be legal and win the game at controller level");
 
-        assert!(matches!(err, BuildingError::CityLimit()));
+        assert_eq!(builds[0].cities_count(), PlayerBuildData::CITY_LIMIT);
     }
 
     #[test]

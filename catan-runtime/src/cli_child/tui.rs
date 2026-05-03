@@ -38,7 +38,10 @@ use super::{
         personal_model_lines, player_menu_lines, public_model_lines, resource_picker_lines,
     },
     render::field_lines,
-    selectors::{board_hex_set, initial_roads_for_settlement, move_hex_by_key, selection_status},
+    selectors::{
+        board_hex_set, initial_roads_for_settlement, move_hex_by_key, ordered_bank_trades_for_menu,
+        selection_status,
+    },
 };
 
 pub(crate) struct CliUi {
@@ -479,7 +482,7 @@ impl CliUi {
         model: &UiModel,
         legal: &LegalDecisionOptions,
     ) -> io::Result<Option<BankTrade>> {
-        let options = legal.bank_trades.clone();
+        let options = ordered_bank_trades_for_menu(legal);
         if options.is_empty() {
             self.message = "no available bank trades".to_owned();
             return Ok(None);

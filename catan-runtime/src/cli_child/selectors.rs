@@ -10,6 +10,7 @@ use catan_core::gameplay::primitives::{
     build::{Build, Road},
     dev_card::DevCardUsage,
     player::PlayerId,
+    trade::{BankTrade, BankTradeKind},
 };
 use catan_core::topology::{Hex, HexIndex, Intersection, Path as BoardPath};
 use catan_render::field::SelectionStatus;
@@ -142,13 +143,32 @@ pub(crate) fn roadbuild_second_options(
         .collect()
 }
 
+pub(crate) fn ordered_bank_trades_for_menu(legal: &LegalDecisionOptions) -> Vec<BankTrade> {
+    let mut options = legal.bank_trades.clone();
+    options.sort_by_key(|trade| (bank_trade_menu_priority(trade.kind), trade.give, trade.take));
+    options
+}
+
+fn bank_trade_menu_priority(kind: BankTradeKind) -> u8 {
+    match kind {
+        BankTradeKind::PortSpecific => 0,
+        BankTradeKind::PortGeneric => 1,
+        BankTradeKind::BankGeneric => 2,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
 
     use crossterm::event::KeyCode;
 
-    use super::{Hex, move_hex_by_key};
+    use catan_core::gameplay::primitives::{
+        resource::Resource,
+        trade::{BankTrade, BankTradeKind},
+    };
+
+    use super::{Hex, move_hex_by_key, ordered_bank_trades_for_menu};
 
     fn hex_set(hexes: impl IntoIterator<Item = Hex>) -> BTreeSet<Hex> {
         hexes.into_iter().collect()
@@ -189,6 +209,48 @@ mod tests {
         assert_eq!(
             move_hex_by_key(Hex::new(0, 0), KeyCode::Right, &board),
             Hex::new(0, 0)
+        );
+    }
+
+    #[test]
+    fn bank_trade_menu_orders_ports_before_bank_trades() {
+        let mut legal = catan_agents::remote_agent::LegalDecisionOptions::default();
+        legal.bank_trades = vec![
+            BankTrade {
+                give: Resource::Brick,
+                take: Resource::Wood,
+                kind: BankTradeKind::BankGeneric,
+            },
+            BankTrade {
+                give: Resource::Ore,
+                take: Resource::Wheat,
+                kind: BankTradeKind::PortGeneric,
+            },
+            BankTrade {
+                give: Resource::Wood,
+                take: Resource::Ore,
+                kind: BankTradeKind::PortSpecific,
+            },
+            BankTrade {
+                give: Resource::Brick,
+                take: Resource::Ore,
+                kind: BankTradeKind::PortSpecific,
+            },
+        ];
+
+        let ordered = ordered_bank_trades_for_menu(&legal)
+            .into_iter()
+            .map(|trade| trade.kind)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            ordered,
+            vec![
+                BankTradeKind::PortSpecific,
+                BankTradeKind::PortSpecific,
+                BankTradeKind::PortGeneric,
+                BankTradeKind::BankGeneric,
+            ]
         );
     }
 }
