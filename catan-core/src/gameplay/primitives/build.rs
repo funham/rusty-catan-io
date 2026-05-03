@@ -826,6 +826,46 @@ mod tests {
     }
 
     #[test]
+    fn road_cannot_be_built_on_own_existing_road() {
+        let existing = path(h(0, 0), h(1, 0));
+        let mut builds = BoardBuildData::from_build_collections(vec![BuildCollection {
+            establishments: vec![],
+            roads: vec![Road { pos: existing }],
+        }]);
+
+        let err = builds
+            .try_build(0, Build::Road(Road { pos: existing }))
+            .expect_err("road path should already be occupied");
+
+        assert!(matches!(err, BuildingError::Road(_)));
+        assert_eq!(builds[0].roads_count(), 1);
+    }
+
+    #[test]
+    fn road_cannot_be_built_on_opponent_existing_road() {
+        let existing = path(h(0, 0), h(1, 0));
+        let connecting = path(h(1, 0), h(1, 1));
+        let mut builds = BoardBuildData::from_build_collections(vec![
+            BuildCollection {
+                establishments: vec![],
+                roads: vec![Road { pos: connecting }],
+            },
+            BuildCollection {
+                establishments: vec![],
+                roads: vec![Road { pos: existing }],
+            },
+        ]);
+
+        let err = builds
+            .try_build(0, Build::Road(Road { pos: existing }))
+            .expect_err("opponent road path should already be occupied");
+
+        assert!(matches!(err, BuildingError::Road(_)));
+        assert_eq!(builds[0].roads_count(), 1);
+        assert_eq!(builds[1].roads_count(), 1);
+    }
+
+    #[test]
     fn city_upgrade_returns_settlement_to_inventory() {
         let vertices = h(0, 0).vertices_arr();
         let mut establishments = vertices

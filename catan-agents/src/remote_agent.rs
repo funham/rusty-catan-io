@@ -22,6 +22,7 @@ use catan_core::{
                 GameEvent, GameObserver, ObserverKind, ObserverNotificationContext,
                 PlayerNotification,
             },
+            legal::{self, BuildClass},
             view::{
                 OmniscientGameView, PlayerDecisionContext, PlayerNotificationContext,
                 PrivatePlayerView, PublicBankResources, PublicGameView, PublicPlayerResources,
@@ -31,10 +32,11 @@ use catan_core::{
         primitives::{
             PortKind, Tile,
             bank::DeckFullnessLevel,
-            build::{Establishment, Road},
-            dev_card::{DevCardData, UsableDevCardCollection},
+            build::{Build, Establishment, Road},
+            dev_card::{DevCardData, DevCardUsage, UsableDevCardCollection},
             player::PlayerId,
             resource::{ResourceCollection, ResourceMap},
+            trade::BankTrade,
         },
     },
     topology::Hex,
@@ -84,15 +86,15 @@ pub enum RemoteLogLevel {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DecisionRequestFrame {
-    InitStage(UiModel),
-    InitAction(UiModel),
-    PostDice(UiModel),
-    PostDevCard(UiModel),
-    Regular(UiModel),
-    MoveRobbers(UiModel),
-    ChoosePlayerToRob(UiModel),
-    AnswerTrade(UiModel),
-    DropHalf(UiModel),
+    InitStage(DecisionRequestEnvelope),
+    InitAction(DecisionRequestEnvelope),
+    PostDice(DecisionRequestEnvelope),
+    PostDevCard(DecisionRequestEnvelope),
+    Regular(DecisionRequestEnvelope),
+    MoveRobbers(DecisionRequestEnvelope),
+    ChoosePlayerToRob(DecisionRequestEnvelope),
+    AnswerTrade(DecisionRequestEnvelope),
+    DropHalf(DecisionRequestEnvelope),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -106,6 +108,105 @@ pub enum DecisionResponseFrame {
     ChoosePlayerToRob(ChoosePlayerToRobAction),
     AnswerTrade(TradeAnswer),
     DropHalf(DropHalfAction),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DecisionRequestEnvelope {
+    pub request_id: u64,
+    pub view: UiModel,
+    pub legal: LegalDecisionOptions,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LegalDecisionOptions {
+    pub initial_placements: Vec<InitStageAction>,
+    pub builds: LegalBuildOptions,
+    pub regular_actions: Vec<RegularAction>,
+    pub bank_trades: Vec<BankTrade>,
+    pub dev_card_usages: Vec<DevCardUsage>,
+    pub robber_hexes: Vec<Hex>,
+    pub robber_pos: Option<Hex>,
+    pub rob_targets: Vec<PlayerId>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LegalBuildOptions {
+    pub roads: Vec<Build>,
+    pub settlements: Vec<Build>,
+    pub cities: Vec<Build>,
+}
+
+impl DecisionRequestFrame {
+    pub fn request_id(&self) -> u64 {
+        self.envelope().request_id
+    }
+
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::InitStage(_) => "init_stage",
+            Self::InitAction(_) => "init_action",
+            Self::PostDice(_) => "post_dice",
+            Self::PostDevCard(_) => "post_dev_card",
+            Self::Regular(_) => "regular",
+            Self::MoveRobbers(_) => "move_robbers",
+            Self::ChoosePlayerToRob(_) => "choose_player_to_rob",
+            Self::AnswerTrade(_) => "answer_trade",
+            Self::DropHalf(_) => "drop_half",
+        }
+    }
+
+    pub fn envelope(&self) -> &DecisionRequestEnvelope {
+        match self {
+            Self::InitStage(envelope)
+            | Self::InitAction(envelope)
+            | Self::PostDice(envelope)
+            | Self::PostDevCard(envelope)
+            | Self::Regular(envelope)
+            | Self::MoveRobbers(envelope)
+            | Self::ChoosePlayerToRob(envelope)
+            | Self::AnswerTrade(envelope)
+            | Self::DropHalf(envelope) => envelope,
+        }
+    }
+}
+
+impl LegalDecisionOptions {
+    pub fn from_context(context: &PlayerDecisionContext<'_>, robber_pos: Option<Hex>) -> Self {
+        let initial_placements = legal::legal_initial_placements(context)
+            .into_iter()
+            .map(|(establishment, road)| InitStageAction {
+                establishment_position: establishment.pos,
+                road,
+            })
+            .collect();
+
+        let robber_hexes = context
+            .public
+            .board
+            .arrangement
+            .hex_iter()
+            .filter(|hex| *hex != context.public.board_state.robber_pos)
+            .collect();
+
+        let rob_targets = robber_pos
+            .map(|pos| legal::legal_rob_targets(context, pos))
+            .unwrap_or_default();
+
+        Self {
+            initial_placements,
+            builds: LegalBuildOptions {
+                roads: legal::legal_builds(context, BuildClass::Road),
+                settlements: legal::legal_builds(context, BuildClass::Settlement),
+                cities: legal::legal_builds(context, BuildClass::City),
+            },
+            regular_actions: legal::legal_regular_actions(context),
+            bank_trades: legal::legal_bank_trades(context),
+            dev_card_usages: legal::legal_dev_card_usages(context),
+            robber_hexes,
+            robber_pos,
+            rob_targets,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -213,6 +314,7 @@ pub fn read_frame<T: DeserializeOwned>(reader: &mut impl Read) -> io::Result<T> 
 pub struct RemoteCliAgent {
     player_id: PlayerId,
     stream: UnixStream,
+    next_request_id: u64,
 }
 
 impl RemoteCliAgent {
@@ -224,15 +326,31 @@ impl RemoteCliAgent {
             },
         )?;
         expect_ready(&mut stream)?;
-        Ok(Self { player_id, stream })
+        Ok(Self {
+            player_id,
+            stream,
+            next_request_id: 0,
+        })
     }
 
     fn request(&mut self, request: DecisionRequestFrame) -> DecisionResponseFrame {
+        let request_id = request.request_id();
+        let kind = request.kind();
+        log::trace!(
+            target: "catan_agents::remote_agent",
+            "sending CLI decision request id={request_id} kind={kind}"
+        );
         write_frame(&mut self.stream, &HostToCli::DecisionRequest(request))
             .expect("failed to write CLI decision request");
         loop {
             match read_frame::<CliToHost>(&mut self.stream).expect("failed to read CLI response") {
-                CliToHost::DecisionResponse(response) => return response,
+                CliToHost::DecisionResponse(response) => {
+                    log::trace!(
+                        target: "catan_agents::remote_agent",
+                        "received CLI decision response id={request_id} kind={kind}"
+                    );
+                    return response;
+                }
                 CliToHost::Log {
                     level,
                     target,
@@ -241,6 +359,20 @@ impl RemoteCliAgent {
                 CliToHost::Error { message } => panic!("remote CLI error: {message}"),
                 CliToHost::Ready => panic!("unexpected ready from remote CLI"),
             }
+        }
+    }
+
+    fn envelope(
+        &mut self,
+        context: &PlayerDecisionContext<'_>,
+        robber_pos: Option<Hex>,
+    ) -> DecisionRequestEnvelope {
+        let request_id = self.next_request_id;
+        self.next_request_id += 1;
+        DecisionRequestEnvelope {
+            request_id,
+            view: UiModel::from_decision(context),
+            legal: LegalDecisionOptions::from_context(context, robber_pos),
         }
     }
 }
@@ -264,54 +396,48 @@ impl PlayerRuntime for RemoteCliAgent {
     }
 
     fn init_stage_action(&mut self, context: PlayerDecisionContext<'_>) -> InitStageAction {
-        match self.request(DecisionRequestFrame::InitStage(UiModel::from_decision(
-            &context,
-        ))) {
+        let envelope = self.envelope(&context, None);
+        match self.request(DecisionRequestFrame::InitStage(envelope)) {
             DecisionResponseFrame::InitStage(action) => action,
             other => panic!("unexpected CLI response: {other:?}"),
         }
     }
 
     fn init_action(&mut self, context: PlayerDecisionContext<'_>) -> InitAction {
-        match self.request(DecisionRequestFrame::InitAction(UiModel::from_decision(
-            &context,
-        ))) {
+        let envelope = self.envelope(&context, None);
+        match self.request(DecisionRequestFrame::InitAction(envelope)) {
             DecisionResponseFrame::InitAction(action) => action,
             other => panic!("unexpected CLI response: {other:?}"),
         }
     }
 
     fn after_dice_action(&mut self, context: PlayerDecisionContext<'_>) -> PostDiceAction {
-        match self.request(DecisionRequestFrame::PostDice(UiModel::from_decision(
-            &context,
-        ))) {
+        let envelope = self.envelope(&context, None);
+        match self.request(DecisionRequestFrame::PostDice(envelope)) {
             DecisionResponseFrame::PostDice(action) => action,
             other => panic!("unexpected CLI response: {other:?}"),
         }
     }
 
     fn after_dev_card_action(&mut self, context: PlayerDecisionContext<'_>) -> PostDevCardAction {
-        match self.request(DecisionRequestFrame::PostDevCard(UiModel::from_decision(
-            &context,
-        ))) {
+        let envelope = self.envelope(&context, None);
+        match self.request(DecisionRequestFrame::PostDevCard(envelope)) {
             DecisionResponseFrame::PostDevCard(action) => action,
             other => panic!("unexpected CLI response: {other:?}"),
         }
     }
 
     fn regular_action(&mut self, context: PlayerDecisionContext<'_>) -> RegularAction {
-        match self.request(DecisionRequestFrame::Regular(UiModel::from_decision(
-            &context,
-        ))) {
+        let envelope = self.envelope(&context, None);
+        match self.request(DecisionRequestFrame::Regular(envelope)) {
             DecisionResponseFrame::Regular(action) => action,
             other => panic!("unexpected CLI response: {other:?}"),
         }
     }
 
     fn move_robbers(&mut self, context: PlayerDecisionContext<'_>) -> MoveRobbersAction {
-        match self.request(DecisionRequestFrame::MoveRobbers(UiModel::from_decision(
-            &context,
-        ))) {
+        let envelope = self.envelope(&context, None);
+        match self.request(DecisionRequestFrame::MoveRobbers(envelope)) {
             DecisionResponseFrame::MoveRobbers(action) => action,
             other => panic!("unexpected CLI response: {other:?}"),
         }
@@ -320,29 +446,26 @@ impl PlayerRuntime for RemoteCliAgent {
     fn choose_player_to_rob(
         &mut self,
         context: PlayerDecisionContext<'_>,
-        _robber_pos: Hex,
+        robber_pos: Hex,
     ) -> ChoosePlayerToRobAction {
-        match self.request(DecisionRequestFrame::ChoosePlayerToRob(
-            UiModel::from_decision(&context),
-        )) {
+        let envelope = self.envelope(&context, Some(robber_pos));
+        match self.request(DecisionRequestFrame::ChoosePlayerToRob(envelope)) {
             DecisionResponseFrame::ChoosePlayerToRob(action) => action,
             other => panic!("unexpected CLI response: {other:?}"),
         }
     }
 
     fn answer_trade(&mut self, context: PlayerDecisionContext<'_>) -> TradeAnswer {
-        match self.request(DecisionRequestFrame::AnswerTrade(UiModel::from_decision(
-            &context,
-        ))) {
+        let envelope = self.envelope(&context, None);
+        match self.request(DecisionRequestFrame::AnswerTrade(envelope)) {
             DecisionResponseFrame::AnswerTrade(action) => action,
             other => panic!("unexpected CLI response: {other:?}"),
         }
     }
 
     fn drop_half(&mut self, context: PlayerDecisionContext<'_>) -> DropHalfAction {
-        match self.request(DecisionRequestFrame::DropHalf(UiModel::from_decision(
-            &context,
-        ))) {
+        let envelope = self.envelope(&context, None);
+        match self.request(DecisionRequestFrame::DropHalf(envelope)) {
             DecisionResponseFrame::DropHalf(action) => action,
             other => panic!("unexpected CLI response: {other:?}"),
         }
@@ -615,8 +738,20 @@ impl From<RemoteLogLevel> for log::Level {
 
 #[cfg(test)]
 mod tests {
-    use super::{CliRole, HostToCli, UiBoard, UiModel, read_frame, write_frame};
-    use catan_core::gameplay::game::init::GameInitializationState;
+    use super::{
+        CliRole, HostToCli, LegalDecisionOptions, UiBoard, UiModel, read_frame, write_frame,
+    };
+    use catan_core::gameplay::{
+        game::{
+            index::GameIndex,
+            init::GameInitializationState,
+            view::{ContextFactory, SearchFactory, VisibilityConfig},
+        },
+        primitives::{
+            dev_card::{DevCardKind, DevCardUsage, UsableDevCard},
+            resource::{Resource, ResourceCollection},
+        },
+    };
 
     #[test]
     fn frame_round_trip() {
@@ -675,5 +810,98 @@ mod tests {
         serde_json::to_vec(&board).unwrap();
         serde_json::to_vec(&model).unwrap();
         serde_json::to_vec(&msg).unwrap();
+    }
+
+    #[test]
+    fn legal_options_attach_regular_trades_and_dev_card_usages() {
+        let mut state = GameInitializationState::default().finish();
+        state
+            .transfer_from_bank(
+                ResourceCollection {
+                    brick: 4,
+                    wheat: 1,
+                    sheep: 1,
+                    ore: 1,
+                    ..ResourceCollection::ZERO
+                },
+                0,
+            )
+            .expect("bank should fund test player");
+        state
+            .players
+            .get_mut(0)
+            .dev_cards_add(DevCardKind::Usable(UsableDevCard::YearOfPlenty));
+        state.players.get_mut(0).dev_cards_reset_queue();
+
+        let index = GameIndex::rebuild(&state);
+        let visibility = VisibilityConfig::default();
+        let factory = ContextFactory {
+            state: &state,
+            index: &index,
+            visibility: &visibility,
+        };
+        let search = Some(SearchFactory::new(&state, visibility.player_policy(0), 0));
+        let context = factory.player_decision_context(0, search);
+        let legal = LegalDecisionOptions::from_context(&context, None);
+
+        assert!(!legal.initial_placements.is_empty());
+        assert!(!legal.regular_actions.is_empty());
+        assert!(
+            legal
+                .bank_trades
+                .iter()
+                .any(|trade| trade.give == Resource::Brick)
+        );
+        assert!(
+            legal
+                .dev_card_usages
+                .iter()
+                .any(|usage| { matches!(usage, DevCardUsage::YearOfPlenty([_, _])) })
+        );
+    }
+
+    #[test]
+    fn legal_options_attach_explicit_robber_context() {
+        let mut init = GameInitializationState::default();
+        let mut victim_hex = None;
+        for player_id in 0..2 {
+            let (settlement, road) = init
+                .builds
+                .query()
+                .possible_initial_placements(&init.board, player_id)
+                .into_iter()
+                .next()
+                .expect("default board should have initial placements");
+            if player_id == 1 {
+                let board_hexes = init.board.arrangement.hex_iter().collect::<Vec<_>>();
+                victim_hex =
+                    settlement.pos.as_set().into_iter().find(|hex| {
+                        *hex != init.board_state.robber_pos && board_hexes.contains(hex)
+                    });
+            }
+            init.builds
+                .try_init_place(player_id, road, settlement)
+                .expect("generated initial placement should be valid");
+        }
+        let mut state = init.finish();
+        state
+            .transfer_from_bank(Resource::Brick.into(), 1)
+            .expect("bank should fund victim");
+        let victim_hex = victim_hex.expect("victim should touch a non-robber hex");
+
+        let index = GameIndex::rebuild(&state);
+        let visibility = VisibilityConfig::default();
+        let factory = ContextFactory {
+            state: &state,
+            index: &index,
+            visibility: &visibility,
+        };
+        let search = Some(SearchFactory::new(&state, visibility.player_policy(0), 0));
+        let context = factory.player_decision_context(0, search);
+        let legal = LegalDecisionOptions::from_context(&context, Some(victim_hex));
+
+        assert_eq!(legal.robber_pos, Some(victim_hex));
+        assert!(legal.rob_targets.contains(&1));
+        assert!(!legal.robber_hexes.contains(&state.board_state.robber_pos));
     }
 }

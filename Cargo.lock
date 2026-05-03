@@ -248,6 +248,7 @@ dependencies = [
  "catan-agents",
  "catan-core",
  "catan-render",
+ "chrono",
  "crossterm 0.29.0",
  "env_logger",
  "log",

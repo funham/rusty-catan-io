@@ -102,7 +102,7 @@ pub fn rand_init_stage_action(
 }
 
 pub fn rand_init_action(context: PlayerDecisionContext<'_>, rng: &mut ThreadRng) -> InitAction {
-    if let usages = legal::legal_dev_card_usages(&context, context.actor)
+    if let usages = legal::legal_dev_card_usages(&context)
         && !usages.is_empty()
         && rng.random_bool(0.8)
     {
@@ -116,7 +116,7 @@ pub fn rand_after_dice_action(
     context: PlayerDecisionContext<'_>,
     rng: &mut ThreadRng,
 ) -> PostDiceAction {
-    if let usages = legal::legal_dev_card_usages(&context, context.actor)
+    if let usages = legal::legal_dev_card_usages(&context)
         && !usages.is_empty()
         && rng.random_bool(0.8)
     {

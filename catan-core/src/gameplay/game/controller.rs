@@ -1,4 +1,4 @@
-use super::state::{BuildActionError, BuyDevCardError, GameState};
+use super::state::{BuildActionError, BuyDevCardError, DevCardUsageError, GameState};
 use crate::agent::action::{
     self, ChoosePlayerToRobAction, DecisionRequest, DropHalfAction, InitAction, InitStageAction,
     MoveRobbersAction, PostDevCardAction, PostDiceAction, RegularAction,
@@ -32,12 +32,14 @@ pub enum GameResult {
 #[derive(Debug, Clone, Copy)]
 pub struct RunOptions {
     pub max_turns: Option<u64>,
+    pub max_invalid_actions: Option<u64>,
 }
 
 impl Default for RunOptions {
     fn default() -> Self {
         Self {
             max_turns: Some(500),
+            max_invalid_actions: Some(10),
         }
     }
 }
@@ -45,6 +47,23 @@ impl Default for RunOptions {
 enum TurnFlow {
     Continue,
     EndTurn,
+    GameEnded(PlayerId),
+    Interrupted { reason: String },
+}
+
+#[derive(Debug)]
+enum BankTradeExecutionError {
+    MissingPort(PortKind),
+    Exchange(BankResourceExchangeError),
+}
+
+impl std::fmt::Display for BankTradeExecutionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingPort(port) => write!(f, "missing port {port:?}"),
+            Self::Exchange(err) => write!(f, "{err:?}"),
+        }
+    }
 }
 
 pub struct GameController {
@@ -53,6 +72,8 @@ pub struct GameController {
     index: GameIndex,
     players: Vec<Box<dyn Agent>>,
     visibility: VisibilityConfig,
+    invalid_actions: u64,
+    max_invalid_actions: Option<u64>,
 }
 
 impl GameController {
@@ -75,6 +96,8 @@ impl GameController {
             index,
             players,
             visibility,
+            invalid_actions: 0,
+            max_invalid_actions: RunOptions::default().max_invalid_actions,
         }
     }
 
@@ -323,7 +346,13 @@ impl GameController {
 
     pub fn run(&mut self, dice: &mut dyn DiceRoller) -> GameResult {
         log::trace!("Starting game run with default options");
-        self.run_with_options(dice, RunOptions { max_turns: None })
+        self.run_with_options(
+            dice,
+            RunOptions {
+                max_turns: None,
+                ..RunOptions::default()
+            },
+        )
     }
 
     pub fn run_with_options(
@@ -332,6 +361,8 @@ impl GameController {
         options: RunOptions,
     ) -> GameResult {
         log::trace!("Starting game run with options: {:?}", options);
+        self.invalid_actions = 0;
+        self.max_invalid_actions = options.max_invalid_actions;
         self.notify_observers(&GameEvent::GameStarted);
         loop {
             let turn_no = self.game.turn.get_turns_played();
@@ -359,6 +390,22 @@ impl GameController {
 
             match self.handle_turn(dice) {
                 TurnFlow::Continue => unreachable!("turn handler should not yield Continue"),
+                TurnFlow::GameEnded(winner) => {
+                    log::trace!("Game ended during turn with winner: {}", winner);
+                    self.notify_observers(&GameEvent::GameEnded {
+                        winner_id: winner,
+                        turn_no,
+                        stats: self.game_end_stats(),
+                    });
+                    return GameResult::Win(winner);
+                }
+                TurnFlow::Interrupted { reason } => {
+                    log::error!("Game interrupted: {reason}");
+                    self.notify_observers(&GameEvent::GameInterrupted {
+                        reason: reason.clone(),
+                    });
+                    return GameResult::Interrupted { reason };
+                }
                 TurnFlow::EndTurn => {
                     let player_id = self.curr_player();
                     log::trace!(
@@ -397,7 +444,9 @@ impl GameController {
         match answer {
             InitAction::RollDice => {
                 log::trace!("Player chose to roll dice");
-                self.execute_dice_roll(dice);
+                if let TurnFlow::Interrupted { reason } = self.execute_dice_roll(dice) {
+                    return TurnFlow::Interrupted { reason };
+                }
                 self.handle_dice_rolled()
             }
             InitAction::UseDevCard(usage) => {
@@ -414,9 +463,21 @@ impl GameController {
         match answer {
             PostDiceAction::UseDevCard(usage) => {
                 log::trace!("Player chose to use dev card after rolling: {:?}", usage);
-                if !self.execute_dev_card(usage) {
+                if let Err(err) = self.execute_dev_card(usage) {
+                    log::error!(
+                        "Invalid post-dice dev card action by Player#{}: usage={:?}, error={:?}",
+                        self.curr_player(),
+                        usage,
+                        err
+                    );
+                    if let Some(flow) = self.record_invalid_action("post_dice_dev_card") {
+                        return flow;
+                    }
                     log::warn!("Dev card usage failed, retrying post-dice handling");
                     return self.handle_dice_rolled();
+                }
+                if let Some(flow) = self.win_flow_if_satisfied() {
+                    return flow;
                 }
                 self.handle_rest()
             }
@@ -431,6 +492,8 @@ impl GameController {
                         log::trace!("Regular action returned EndTurn");
                         TurnFlow::EndTurn
                     }
+                    TurnFlow::GameEnded(winner) => TurnFlow::GameEnded(winner),
+                    TurnFlow::Interrupted { reason } => TurnFlow::Interrupted { reason },
                 }
             }
         }
@@ -438,15 +501,29 @@ impl GameController {
 
     fn handle_dev_card_used(&mut self, usage: DevCardUsage, dice: &mut dyn DiceRoller) -> TurnFlow {
         log::trace!("Handling dev card usage: {:?}", usage);
-        if !self.execute_dev_card(usage) {
+        if let Err(err) = self.execute_dev_card(usage) {
+            log::error!(
+                "Invalid dev card action by Player#{}: usage={:?}, error={:?}",
+                self.curr_player(),
+                usage,
+                err
+            );
+            if let Some(flow) = self.record_invalid_action("dev_card") {
+                return flow;
+            }
             log::warn!("Dev card usage failed, retrying move init");
             return self.handle_move_init(dice);
+        }
+        if let Some(flow) = self.win_flow_if_satisfied() {
+            return flow;
         }
 
         log::trace!("Dev card used successfully, requesting post-dev-card action");
         let _ = self.request_post_dev_card_action(self.curr_player());
 
-        self.execute_dice_roll(dice);
+        if let TurnFlow::Interrupted { reason } = self.execute_dice_roll(dice) {
+            return TurnFlow::Interrupted { reason };
+        }
         self.handle_rest()
     }
 
@@ -465,11 +542,13 @@ impl GameController {
                     log::trace!("Action returned EndTurn, exiting rest loop");
                     return TurnFlow::EndTurn;
                 }
+                TurnFlow::GameEnded(winner) => return TurnFlow::GameEnded(winner),
+                TurnFlow::Interrupted { reason } => return TurnFlow::Interrupted { reason },
             }
         }
     }
 
-    fn execute_dev_card(&mut self, usage: DevCardUsage) -> bool {
+    fn execute_dev_card(&mut self, usage: DevCardUsage) -> Result<(), DevCardUsageError> {
         let player_id = self.curr_player();
         log::trace!("Executing dev card for player {}: {:?}", player_id, usage);
 
@@ -493,12 +572,9 @@ impl GameController {
                         robbed_id,
                     });
                 }
-                true
+                Ok(())
             }
-            Err(err) => {
-                log::warn!("Invalid dev card use by Player#{}: {:?}", player_id, err);
-                false
-            }
+            Err(err) => Err(err),
         }
     }
 
@@ -513,39 +589,95 @@ impl GameController {
         match action {
             RegularAction::Build(build) => {
                 log::trace!("Player building: {:?}", build);
-                if let Ok(()) = self.execute_build(current_player, build) {
-                    self.index = GameIndex::rebuild(&self.game);
-                    self.notify_observers(&GameEvent::Built {
-                        player_id: current_player,
-                        build,
-                    });
+                match self.execute_build(current_player, build) {
+                    Ok(()) => {
+                        self.index = GameIndex::rebuild(&self.game);
+                        self.notify_observers(&GameEvent::Built {
+                            player_id: current_player,
+                            build,
+                        });
+                        if let Some(flow) = self.win_flow_if_satisfied() {
+                            return flow;
+                        }
+                    }
+                    Err(err) => {
+                        log::error!(
+                            "Invalid build action by Player#{}: build={:?}, error={:?}",
+                            current_player,
+                            build,
+                            err
+                        );
+                        if let Some(flow) = self.record_invalid_action("build") {
+                            return flow;
+                        }
+                    }
                 }
                 TurnFlow::Continue
             }
             RegularAction::TradeWithBank(trade) => {
                 log::trace!("Player trading with bank: {:?}", trade);
-                if let Ok(()) = self.execute_trade_with_bank(current_player, trade) {
-                    self.notify_observers(&GameEvent::Traded {
-                        player_id: current_player,
-                    });
+                match self.execute_trade_with_bank(current_player, trade) {
+                    Ok(()) => {
+                        self.notify_observers(&GameEvent::Traded {
+                            player_id: current_player,
+                        });
+                    }
+                    Err(err) => {
+                        log::error!(
+                            "Invalid bank trade action by Player#{}: trade={:?}, error={}",
+                            current_player,
+                            trade,
+                            err
+                        );
+                        if let Some(flow) = self.record_invalid_action("bank_trade") {
+                            return flow;
+                        }
+                    }
                 }
                 TurnFlow::Continue
             }
             RegularAction::BuyDevCard => {
                 log::trace!("Player buying dev card");
-                if let Ok(()) = self.execute_buy_dev_card(current_player) {
-                    self.notify_observers(&GameEvent::DevCardBought {
-                        player_id: current_player,
-                    });
+                match self.execute_buy_dev_card(current_player) {
+                    Ok(()) => {
+                        self.notify_observers(&GameEvent::DevCardBought {
+                            player_id: current_player,
+                        });
+                        if let Some(flow) = self.win_flow_if_satisfied() {
+                            return flow;
+                        }
+                    }
+                    Err(err) => {
+                        log::error!(
+                            "Invalid buy-dev-card action by Player#{}: error={:?}",
+                            current_player,
+                            err
+                        );
+                        if let Some(flow) = self.record_invalid_action("buy_dev_card") {
+                            return flow;
+                        }
+                    }
                 }
                 TurnFlow::Continue
             }
             RegularAction::OfferPublicTrade(_) => {
-                log::error!("P2P trades not implemented");
+                log::error!(
+                    "Invalid public trade action by Player#{}: P2P trades not implemented",
+                    current_player
+                );
+                if let Some(flow) = self.record_invalid_action("public_trade") {
+                    return flow;
+                }
                 TurnFlow::Continue
             }
             RegularAction::OfferPersonalTrade(_) => {
-                log::error!("P2P trades not implemented");
+                log::error!(
+                    "Invalid personal trade action by Player#{}: P2P trades not implemented",
+                    current_player
+                );
+                if let Some(flow) = self.record_invalid_action("personal_trade") {
+                    return flow;
+                }
                 TurnFlow::Continue
             }
             RegularAction::EndMove => {
@@ -555,7 +687,38 @@ impl GameController {
         }
     }
 
-    fn execute_trade_with_bank(&mut self, player: PlayerId, trade: BankTrade) -> Result<(), ()> {
+    fn win_flow_if_satisfied(&self) -> Option<TurnFlow> {
+        GameQuery::new(&self.game, &self.index)
+            .check_win_condition()
+            .map(TurnFlow::GameEnded)
+    }
+
+    fn record_invalid_action(&mut self, action_kind: &str) -> Option<TurnFlow> {
+        self.invalid_actions += 1;
+        log::warn!(
+            "Invalid action count after {}: {}/{}",
+            action_kind,
+            self.invalid_actions,
+            self.max_invalid_actions
+                .map(|limit| limit.to_string())
+                .unwrap_or_else(|| "unlimited".to_owned())
+        );
+
+        if let Some(limit) = self.max_invalid_actions
+            && self.invalid_actions >= limit
+        {
+            let reason = format!("invalid action limit reached: {limit}");
+            return Some(TurnFlow::Interrupted { reason });
+        }
+
+        None
+    }
+
+    fn execute_trade_with_bank(
+        &mut self,
+        player: PlayerId,
+        trade: BankTrade,
+    ) -> Result<(), BankTradeExecutionError> {
         log::trace!("Executing bank trade for player {}: {:?}", player, trade);
 
         let index = GameIndex::rebuild(&self.game);
@@ -575,7 +738,7 @@ impl GameController {
                     trade.kind,
                     required_port
                 );
-                return Err(());
+                return Err(BankTradeExecutionError::MissingPort(required_port));
             }
         }
 
@@ -593,7 +756,7 @@ impl GameController {
                         log::error!("{account} doesn't posess {short}")
                     }
                 };
-                Err(())
+                Err(BankTradeExecutionError::Exchange(err))
             }
         }
     }
@@ -602,7 +765,7 @@ impl GameController {
         &mut self,
         player: PlayerId,
         build: crate::gameplay::primitives::build::Build,
-    ) -> Result<(), ()> {
+    ) -> Result<(), BuildActionError> {
         log::trace!("Executing build for player {}: {:?}", player, build);
         match self.game.build(player, build) {
             Ok(()) => {
@@ -617,24 +780,24 @@ impl GameController {
                         id,
                         self.game.players.get(id).resources(),
                     );
-                    Err(())
+                    Err(BuildActionError::AccountIsShort { id })
                 }
                 BuildActionError::InvalidPlacement(err) => {
                     log::warn!("Couldn't build {}: {:?}", Into::<&str>::into(build), err);
-                    Err(())
+                    Err(BuildActionError::InvalidPlacement(err))
                 }
                 BuildActionError::OutOfPieces => {
                     log::warn!(
                         "couldn't build another {}: {player} ran out of these",
                         Into::<&str>::into(build)
                     );
-                    Err(())
+                    Err(BuildActionError::OutOfPieces)
                 }
             },
         }
     }
 
-    fn execute_buy_dev_card(&mut self, player: PlayerId) -> Result<(), ()> {
+    fn execute_buy_dev_card(&mut self, player: PlayerId) -> Result<(), BuyDevCardError> {
         log::trace!("Executing buy dev card for player {}", player);
         match self.game.buy_dev_card(player) {
             Ok(()) => {
@@ -643,16 +806,16 @@ impl GameController {
             }
             Err(BuyDevCardError::BankIsShort) => {
                 log::warn!("Bank out of dev cards");
-                Err(())
+                Err(BuyDevCardError::BankIsShort)
             }
             Err(BuyDevCardError::AccountIsShort { id }) => {
                 log::warn!("Player#{} can't afford dev card", id);
-                Err(())
+                Err(BuyDevCardError::AccountIsShort { id })
             }
         }
     }
 
-    fn execute_dice_roll(&mut self, dice: &mut dyn DiceRoller) {
+    fn execute_dice_roll(&mut self, dice: &mut dyn DiceRoller) -> TurnFlow {
         let roll = dice.roll();
         let current_player = self.curr_player();
 
@@ -680,11 +843,9 @@ impl GameController {
             other => {
                 log::trace!("Rolled {}, executing harvesting", Into::<u8>::into(other));
                 Self::execute_harvesting(&mut self.game, current_player, other);
+                self.notify_observers(&GameEvent::ResourcesDistributed);
+                TurnFlow::Continue
             }
-        }
-
-        if roll != DiceVal::seven() {
-            self.notify_observers(&GameEvent::ResourcesDistributed);
         }
     }
 
@@ -735,13 +896,15 @@ impl GameController {
         }
     }
 
-    fn execute_seven(&mut self, player: PlayerId) {
+    fn execute_seven(&mut self, player: PlayerId) -> TurnFlow {
         log::trace!("Executing seven handling for player {}", player);
-        self.execute_seven_discards(player);
-        self.execute_seven_robber(player);
+        if let TurnFlow::Interrupted { reason } = self.execute_seven_discards(player) {
+            return TurnFlow::Interrupted { reason };
+        }
+        self.execute_seven_robber(player)
     }
 
-    fn execute_seven_discards(&mut self, player: PlayerId) {
+    fn execute_seven_discards(&mut self, player: PlayerId) -> TurnFlow {
         log::trace!("Executing seven discards starting from player {}", player);
         for pid in GameQuery::new(&self.game, &self.index).player_ids_starting_from(player) {
             let total_cards = self.game.players.get(pid).resources().total();
@@ -768,12 +931,15 @@ impl GameController {
                 /* validations */
 
                 if dropped.total() != required_drop {
-                    log::warn!(
+                    log::error!(
                         "Player#{} attempted to discard {} cards, but must discard exactly {}",
                         pid,
                         dropped.total(),
                         required_drop
                     );
+                    if let Some(flow) = self.record_invalid_action("discard") {
+                        return flow;
+                    }
                     continue;
                 }
 
@@ -787,11 +953,14 @@ impl GameController {
                         break;
                     }
                     Err(BankResourceExchangeError::AccountIsShort { .. }) => {
-                        log::warn!(
+                        log::error!(
                             "Player#{} attempted to discard resources they do not possess: {}",
                             pid,
                             dropped
                         );
+                        if let Some(flow) = self.record_invalid_action("discard") {
+                            return flow;
+                        }
                     }
 
                     // TODO: refactor whole banking system (don't remove this comment)
@@ -799,9 +968,10 @@ impl GameController {
                 }
             }
         }
+        TurnFlow::Continue
     }
 
-    fn execute_seven_robber(&mut self, player: PlayerId) {
+    fn execute_seven_robber(&mut self, player: PlayerId) -> TurnFlow {
         log::trace!("Executing seven robber movement for player {}", player);
         loop {
             let MoveRobbersAction(target_hex) = self.request_move_robbers(player);
@@ -809,10 +979,13 @@ impl GameController {
             /* validations */
 
             if target_hex == self.game.board_state.robber_pos {
-                log::warn!(
+                log::error!(
                     "Player#{} attempted to keep the robber on the same hex",
                     player
                 );
+                if let Some(flow) = self.record_invalid_action("robber_move") {
+                    return flow;
+                }
                 continue;
             }
 
@@ -847,12 +1020,15 @@ impl GameController {
                         break Some(chosen);
                     }
 
-                    log::warn!(
+                    log::error!(
                         "Player#{} attempted to rob Player#{} who is not a legal target on {:?}",
                         player,
                         chosen,
                         target_hex
                     );
+                    if let Some(flow) = self.record_invalid_action("robber_target") {
+                        return flow;
+                    }
                 },
             };
 
@@ -868,10 +1044,13 @@ impl GameController {
                         hex: target_hex,
                         robbed_id,
                     });
-                    break;
+                    return TurnFlow::Continue;
                 }
                 Err(err) => {
-                    log::warn!("Invalid robber move by Player#{}: {:?}", player, err);
+                    log::error!("Invalid robber move by Player#{}: {:?}", player, err);
+                    if let Some(flow) = self.record_invalid_action("robber_move") {
+                        return flow;
+                    }
                 }
             }
         }
@@ -911,12 +1090,33 @@ impl GameController {
 
 #[cfg(test)]
 mod tests {
-    use super::GameController;
-    use crate::gameplay::{
-        game::init::GameInitializationState,
-        game::state::GameState,
-        primitives::{Tile, build::EstablishmentType, resource::ResourceCollection},
+    use std::{cell::RefCell, rc::Rc};
+
+    use super::{GameController, GameResult, RunOptions, TurnFlow};
+    use crate::agent::action::{
+        ChoosePlayerToRobAction, DropHalfAction, InitAction, InitStageAction, MoveRobbersAction,
+        PostDevCardAction, PostDiceAction, RegularAction, TradeAnswer,
     };
+    use crate::gameplay::agent::agent::PlayerRuntime;
+    use crate::gameplay::{
+        game::{
+            event::{
+                GameEvent, GameObserver, ObserverKind, ObserverNotificationContext,
+                PlayerNotification,
+            },
+            init::GameInitializationState,
+            state::GameState,
+            view::PlayerDecisionContext,
+        },
+        primitives::{
+            Tile,
+            build::{Build, Establishment, EstablishmentType},
+            dev_card::DevCardKind,
+            player::PlayerId,
+            resource::ResourceCollection,
+        },
+    };
+    use crate::math::dice::{DiceRoller, DiceVal};
     use crate::topology::Hex;
 
     fn game_with_settlement_on_numbered_hex() -> (GameState, Hex, crate::math::dice::DiceVal) {
@@ -998,5 +1198,200 @@ mod tests {
         GameController::grant_second_initial_resources(&mut init, 0, settlement);
 
         assert_eq!(*init.players.get(0).resources(), expected);
+    }
+
+    #[test]
+    fn turn_flow_interrupts_immediately_when_build_reaches_ten_vp() {
+        let mut init = GameInitializationState::default();
+        let (settlement, road) = init
+            .builds
+            .query()
+            .possible_initial_placements(&init.board, 0)
+            .into_iter()
+            .next()
+            .expect("default board should have initial placements");
+        init.builds
+            .try_init_place(0, road, settlement)
+            .expect("generated initial placement should be valid");
+        let mut state = init.finish();
+        for _ in 0..8 {
+            state
+                .players
+                .get_mut(0)
+                .dev_cards_add(DevCardKind::VictoryPoint);
+        }
+        state
+            .transfer_from_bank(
+                ResourceCollection {
+                    wheat: 2,
+                    ore: 3,
+                    ..ResourceCollection::ZERO
+                },
+                0,
+            )
+            .expect("bank should fund city build");
+
+        let city = Build::Establishment(Establishment {
+            pos: settlement.pos,
+            stage: EstablishmentType::City,
+        });
+        let mut controller = GameController::new(state, Vec::new());
+
+        let flow = controller.execute_regular_action(RegularAction::Build(city));
+
+        assert!(matches!(flow, TurnFlow::GameEnded(0)));
+    }
+
+    #[derive(Debug)]
+    struct FixedDice(DiceVal);
+
+    impl DiceRoller for FixedDice {
+        fn roll(&mut self) -> DiceVal {
+            self.0
+        }
+    }
+
+    struct InvalidBuyDevCardAgent {
+        id: PlayerId,
+        invalid_actions_before_end: Option<u64>,
+    }
+
+    impl PlayerNotification for InvalidBuyDevCardAgent {}
+
+    impl PlayerRuntime for InvalidBuyDevCardAgent {
+        fn player_id(&self) -> PlayerId {
+            self.id
+        }
+
+        fn init_stage_action(&mut self, _context: PlayerDecisionContext<'_>) -> InitStageAction {
+            unreachable!("initial stage is not used in this controller test")
+        }
+
+        fn init_action(&mut self, _context: PlayerDecisionContext<'_>) -> InitAction {
+            InitAction::RollDice
+        }
+
+        fn after_dice_action(&mut self, _context: PlayerDecisionContext<'_>) -> PostDiceAction {
+            match self.invalid_actions_before_end {
+                Some(0) => PostDiceAction::RegularAction(RegularAction::EndMove),
+                Some(ref mut remaining) => {
+                    *remaining -= 1;
+                    PostDiceAction::RegularAction(RegularAction::BuyDevCard)
+                }
+                None => PostDiceAction::RegularAction(RegularAction::BuyDevCard),
+            }
+        }
+
+        fn after_dev_card_action(
+            &mut self,
+            _context: PlayerDecisionContext<'_>,
+        ) -> PostDevCardAction {
+            PostDevCardAction::RollDice
+        }
+
+        fn regular_action(&mut self, _context: PlayerDecisionContext<'_>) -> RegularAction {
+            RegularAction::EndMove
+        }
+
+        fn move_robbers(&mut self, _context: PlayerDecisionContext<'_>) -> MoveRobbersAction {
+            unreachable!("fixed dice never rolls seven")
+        }
+
+        fn choose_player_to_rob(
+            &mut self,
+            _context: PlayerDecisionContext<'_>,
+            _robber_pos: Hex,
+        ) -> ChoosePlayerToRobAction {
+            unreachable!("fixed dice never rolls seven")
+        }
+
+        fn answer_trade(&mut self, _context: PlayerDecisionContext<'_>) -> TradeAnswer {
+            TradeAnswer::Decline
+        }
+
+        fn drop_half(&mut self, _context: PlayerDecisionContext<'_>) -> DropHalfAction {
+            unreachable!("fixed dice never rolls seven")
+        }
+    }
+
+    struct RecordingObserver {
+        events: Rc<RefCell<Vec<GameEvent>>>,
+    }
+
+    impl GameObserver for RecordingObserver {
+        fn kind(&self) -> ObserverKind {
+            ObserverKind::Spectator
+        }
+
+        fn on_event(&mut self, event: &GameEvent, _context: ObserverNotificationContext<'_>) {
+            self.events.borrow_mut().push(event.clone());
+        }
+    }
+
+    fn invalid_agents(
+        first_invalid_actions_before_end: Option<u64>,
+    ) -> Vec<Box<dyn crate::agent::Agent>> {
+        (0..4)
+            .map(|id| {
+                Box::new(InvalidBuyDevCardAgent {
+                    id,
+                    invalid_actions_before_end: if id == 0 {
+                        first_invalid_actions_before_end
+                    } else {
+                        Some(0)
+                    },
+                }) as Box<dyn crate::agent::Agent>
+            })
+            .collect()
+    }
+
+    #[test]
+    fn invalid_action_limit_interrupts_game() {
+        let state = GameInitializationState::default().finish();
+        let mut controller = GameController::new(state, invalid_agents(None));
+        let events = Rc::new(RefCell::new(Vec::new()));
+        controller.add_observer(Box::new(RecordingObserver {
+            events: events.clone(),
+        }));
+        let mut dice = FixedDice(DiceVal::try_from(8).unwrap());
+
+        let result = controller.run_with_options(
+            &mut dice,
+            RunOptions {
+                max_turns: Some(10),
+                max_invalid_actions: Some(10),
+            },
+        );
+
+        assert_eq!(
+            result,
+            GameResult::Interrupted {
+                reason: "invalid action limit reached: 10".to_owned()
+            }
+        );
+        assert!(events.borrow().iter().any(|event| {
+            matches!(
+                event,
+                GameEvent::GameInterrupted { reason }
+                    if reason == "invalid action limit reached: 10"
+            )
+        }));
+    }
+
+    #[test]
+    fn invalid_actions_below_limit_do_not_interrupt() {
+        let state = GameInitializationState::default().finish();
+        let mut controller = GameController::new(state, invalid_agents(Some(9)));
+        let mut dice = FixedDice(DiceVal::try_from(8).unwrap());
+
+        let result = controller.run_with_options(
+            &mut dice,
+            RunOptions {
+                max_turns: Some(1),
+                max_invalid_actions: Some(10),
+            },
+        );
+
+        assert_eq!(result, GameResult::LimitReached { turns: 1 });
     }
 }

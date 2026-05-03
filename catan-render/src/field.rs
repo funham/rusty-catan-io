@@ -252,6 +252,9 @@ impl FieldRenderer {
                     },
                 );
             }
+        }
+
+        for player in &view.builds {
             for est in &player.establishments {
                 self.draw_intersection_attr(
                     est.pos,
@@ -266,6 +269,17 @@ impl FieldRenderer {
 
     pub fn draw_overlay(&mut self, overlay: &FieldOverlay) {
         for preview in &overlay.preview {
+            if let FieldPreview::Road { player_id, road } = *preview {
+                self.draw_path_attr(
+                    road.pos,
+                    PathAttr::Road {
+                        color: Self::player_color(player_id),
+                    },
+                );
+            }
+        }
+
+        for preview in &overlay.preview {
             match *preview {
                 FieldPreview::Establishment {
                     player_id,
@@ -277,12 +291,7 @@ impl FieldRenderer {
                         Self::player_color(player_id),
                     ),
                 ),
-                FieldPreview::Road { player_id, road } => self.draw_path_attr(
-                    road.pos,
-                    PathAttr::Road {
-                        color: Self::player_color(player_id),
-                    },
-                ),
+                FieldPreview::Road { .. } => {}
             }
         }
 
@@ -508,7 +517,7 @@ mod tests {
     use catan_core::gameplay::game::init::GameInitializationState;
 
     use super::*;
-    use crate::model::RenderBoard;
+    use crate::model::{RenderBoard, RenderPlayerBuilds};
 
     #[test]
     fn renders_default_game_field() {
@@ -545,5 +554,47 @@ mod tests {
         assert!(renderer.canvas().cells().iter().any(|cell| {
             cell.ch == '[' && cell.style.bg == Some(RenderColor::Red) && cell.style.bold
         }));
+    }
+
+    #[test]
+    fn establishments_render_above_roads_from_later_players() {
+        let init = GameInitializationState::default();
+        let (settlement, road) = init
+            .builds
+            .query()
+            .possible_initial_placements(&init.board, 0)
+            .into_iter()
+            .next()
+            .expect("default board should have initial placements");
+        let view = RenderGameView {
+            board: RenderBoard::from_board(&init.board),
+            board_state: init.board_state,
+            builds: vec![
+                RenderPlayerBuilds {
+                    player_id: 0,
+                    establishments: vec![settlement],
+                    roads: Vec::new(),
+                },
+                RenderPlayerBuilds {
+                    player_id: 1,
+                    establishments: Vec::new(),
+                    roads: vec![road],
+                },
+            ],
+        };
+
+        let mut renderer = FieldRenderer::new();
+        renderer.draw_game(&view);
+
+        let pos = utils::centered(utils::intersection_anchor(settlement.pos), "(S)");
+        let chars = [0, 1, 2]
+            .into_iter()
+            .map(|dx| {
+                let pos = pos + CursorPosition::new(dx, 0);
+                renderer.canvas().at(pos.x as usize, pos.y as usize).ch
+            })
+            .collect::<String>();
+
+        assert_eq!(chars, "(S)");
     }
 }

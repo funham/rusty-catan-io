@@ -75,6 +75,15 @@ impl<T: OccupancyGetter + HasPos<Pos = Intersection>> Placeble for T {
 
 impl Placeble for Road {
     fn placeble(&self, checker: &CollisionChecker) -> bool {
+        if checker
+            .full_occupancy()
+            .roads_occupancy
+            .paths
+            .contains(&self.pos)
+        {
+            return false;
+        }
+
         let connected = |v| {
             checker
                 .this_occupancy

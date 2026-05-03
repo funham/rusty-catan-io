@@ -131,10 +131,7 @@ pub fn greedy_after_dice_action(
     context: PlayerDecisionContext<'_>,
     player_id: PlayerId,
 ) -> PostDiceAction {
-    if let Some(usage) = legal::legal_dev_card_usages(&context, player_id)
-        .into_iter()
-        .next()
-    {
+    if let Some(usage) = legal::legal_dev_card_usages(&context).into_iter().next() {
         PostDiceAction::UseDevCard(usage)
     } else {
         PostDiceAction::RegularAction(greedy_regular_action(&context, player_id))
@@ -169,11 +166,8 @@ pub fn greedy_regular_action(
     RegularAction::EndMove
 }
 
-pub fn greedy_init_action(context: PlayerDecisionContext<'_>, player_id: PlayerId) -> InitAction {
-    if let Some(usage) = legal::legal_dev_card_usages(&context, player_id)
-        .into_iter()
-        .next()
-    {
+pub fn greedy_init_action(context: PlayerDecisionContext<'_>, _player_id: PlayerId) -> InitAction {
+    if let Some(usage) = legal::legal_dev_card_usages(&context).into_iter().next() {
         InitAction::UseDevCard(usage)
     } else {
         InitAction::RollDice

@@ -1,6 +1,7 @@
 mod cli_child;
 mod config;
 mod host;
+mod logging;
 
 use std::path::PathBuf;
 
@@ -19,8 +20,6 @@ fn main() {
         return;
     }
 
-    env_logger::init();
-
     let config_path = args
         .get(1)
         .cloned()
@@ -34,6 +33,11 @@ fn main() {
             std::process::exit(1);
         }
     };
+
+    if let Err(err) = logging::init_host_logger(&config.logging) {
+        eprintln!("{err}");
+        std::process::exit(1);
+    }
 
     if let Err(err) = host::run_match(config) {
         eprintln!("{err}");

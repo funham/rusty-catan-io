@@ -53,6 +53,7 @@ pub fn run_match(config: MatchConfig) -> Result<(), String> {
         dice.as_mut(),
         RunOptions {
             max_turns: config.limits.max_turns,
+            max_invalid_actions: config.limits.max_invalid_actions,
         },
     );
     log::info!("match result: {result:?}");

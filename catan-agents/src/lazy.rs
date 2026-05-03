@@ -95,6 +95,7 @@ pub fn lazy_choose_player_to_rob(
     robber_pos: Hex,
 ) -> ChoosePlayerToRobAction {
     let id = legal::legal_rob_targets(&context, robber_pos)
+        .into_iter()
         .next()
         .expect("GameController must forbid this case");
     ChoosePlayerToRobAction(id)

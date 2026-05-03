@@ -417,10 +417,7 @@ impl GameState {
         for pos in poses {
             builds
                 .try_build(user, Build::Road(Road { pos }))
-                .map_err(|err| {
-                    log::info!("invalid placement try: {:?}", err);
-                    DevCardUsageError::InvalidEdge
-                })?;
+                .map_err(|_| DevCardUsageError::InvalidEdge)?;
         }
 
         Ok(builds)

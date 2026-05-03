@@ -13,3 +13,4 @@ crossterm = "0.29"
 log = "0.4.29"
 env_logger = "0.11.10"
 ratatui = "0.29"
+chrono = { version = "0.4.42", default-features = false, features = ["clock"] }
