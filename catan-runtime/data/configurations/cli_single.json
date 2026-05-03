@@ -3,7 +3,7 @@
     { "kind": "cli" },
     { "kind": "lazy" },
     { "kind": "greedy" },
-    { "kind": "greedy" }
+    { "kind": "random" }
   ],
   "observers": [],
   "field": { "kind": "default" },

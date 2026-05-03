@@ -19,6 +19,7 @@ pub enum PlayerConfig {
     Cli,
     Lazy,
     Greedy,
+    Random,
 }
 
 #[derive(Debug, Clone, Deserialize)]

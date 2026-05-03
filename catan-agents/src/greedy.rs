@@ -64,8 +64,9 @@ impl PlayerRuntime for GreedyAgent {
     fn choose_player_to_rob(
         &mut self,
         context: PlayerDecisionContext<'_>,
+        robber_pos: Hex,
     ) -> ChoosePlayerToRobAction {
-        greedy_choose_player_to_rob(context, self.id)
+        greedy_choose_player_to_rob(context, robber_pos)
     }
 
     fn answer_trade(&mut self, _context: PlayerDecisionContext<'_>) -> TradeAnswer {
@@ -83,9 +84,9 @@ pub fn greedy_drop_half(context: PlayerDecisionContext<'_>) -> DropHalfAction {
 
 pub fn greedy_choose_player_to_rob(
     context: PlayerDecisionContext<'_>,
-    player_id: PlayerId,
+    robber_pos: Hex,
 ) -> ChoosePlayerToRobAction {
-    lazy::lazy_choose_player_to_rob(context, player_id) // TODO: try to peek the most wanted card
+    lazy::lazy_choose_player_to_rob(context, robber_pos) // TODO: try to peek the most wanted card
 }
 
 pub fn greedy_move_robbers(context: PlayerDecisionContext<'_>) -> MoveRobbersAction {
@@ -106,6 +107,7 @@ pub fn most_occupied_producing_tile(context: PlayerDecisionContext<'_>) -> Hex {
         .board
         .arrangement
         .hex_iter()
+        .filter(|&h| h != context.public.board_state.robber_pos)
         .sorted_by_key(|&hex| {
             std::cmp::Reverse((
                 context

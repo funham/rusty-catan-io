@@ -19,6 +19,7 @@ use crate::gameplay::primitives::resource::ResourceCollection;
 use crate::gameplay::primitives::trade::{BankTrade, BankTradeKind};
 use crate::gameplay::primitives::turn::GameTurn;
 use crate::gameplay::primitives::{PortKind, Tile};
+use crate::topology::Hex;
 use crate::{math::dice::DiceRoller, math::dice::DiceVal};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -297,12 +298,27 @@ impl GameController {
         self.request_dispatch::<MoveRobbersAction>(player_id)
     }
 
-    fn request_choose_player_to_rob(&mut self, player_id: PlayerId) -> ChoosePlayerToRobAction {
+    fn request_choose_player_to_rob(
+        &mut self,
+        player_id: PlayerId,
+        robber_pos: Hex,
+    ) -> ChoosePlayerToRobAction {
         log::trace!(
             "Requesting choose-player-to-rob action from player {}",
             player_id
         );
-        self.request_dispatch::<ChoosePlayerToRobAction>(player_id)
+        let policy = self.visibility.player_policy(player_id);
+        let search = Some(SearchFactory::new(&self.game, policy, player_id));
+        let factory = ContextFactory {
+            state: &self.game,
+            index: &self.index,
+            visibility: &self.visibility,
+        };
+        let context = factory.player_decision_context(player_id, search);
+
+        self.players[player_id]
+            .as_mut()
+            .choose_player_to_rob(context, robber_pos)
     }
 
     pub fn run(&mut self, dice: &mut dyn DiceRoller) -> GameResult {
@@ -815,7 +831,8 @@ impl GameController {
                     Some(*only)
                 }
                 _ => loop {
-                    let chosen = self.request_choose_player_to_rob(player).0;
+                    let ChoosePlayerToRobAction(chosen) =
+                        self.request_choose_player_to_rob(player, target_hex);
                     if candidates.contains(&chosen) {
                         log::trace!("Player {} chose to rob player {}", player, chosen);
                         break Some(chosen);

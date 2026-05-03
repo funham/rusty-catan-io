@@ -11,7 +11,7 @@ use catan_core::{
         game::{event::PlayerNotification, view::PlayerDecisionContext},
         primitives::{player::PlayerId, resource::ResourceCollection},
     },
-    topology::HexIndex,
+    topology::{Hex, HexIndex},
 };
 use rand::{
     RngExt,
@@ -68,8 +68,9 @@ impl PlayerRuntime for RandomAgent {
     fn choose_player_to_rob(
         &mut self,
         context: PlayerDecisionContext<'_>,
+        robber_pos: Hex,
     ) -> ChoosePlayerToRobAction {
-        rand_choose_player_to_rob(context, &mut self.rng)
+        rand_choose_player_to_rob(context, robber_pos, &mut self.rng)
     }
 
     fn answer_trade(&mut self, _context: PlayerDecisionContext<'_>) -> TradeAnswer {
@@ -150,11 +151,12 @@ pub fn rand_move_robbers(
 
 pub fn rand_choose_player_to_rob(
     context: PlayerDecisionContext<'_>,
+    robber_pos: Hex,
     rng: &mut ThreadRng,
 ) -> ChoosePlayerToRobAction {
     let id = context
         .public
-        .players_on_hex(context.public.board_state.robber_pos)
+        .players_on_hex(robber_pos)
         .into_iter()
         .filter(|id| *id != context.actor)
         .choose(rng)

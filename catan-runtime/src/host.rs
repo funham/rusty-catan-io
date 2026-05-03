@@ -9,6 +9,7 @@ use std::{
 use catan_agents::{
     greedy::GreedyAgent,
     lazy::LazyAgent,
+    random::RandomAgent,
     remote_agent::{RemoteCliAgent, RemoteCliObserver},
 };
 use catan_core::{
@@ -71,6 +72,7 @@ fn build_agents(players: &[PlayerConfig], exe: &Path) -> Result<Vec<Box<dyn Agen
                     .map_err(|err| format!("failed to initialize remote CLI player: {err}"))?;
                 Ok(Box::new(agent) as Box<dyn Agent>)
             }
+            PlayerConfig::Random => Ok(Box::new(RandomAgent::new(id)) as Box<dyn Agent>),
         })
         .collect()
 }

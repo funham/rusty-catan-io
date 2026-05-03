@@ -37,6 +37,7 @@ use catan_core::{
             resource::{ResourceCollection, ResourceMap},
         },
     },
+    topology::Hex,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
@@ -319,6 +320,7 @@ impl PlayerRuntime for RemoteCliAgent {
     fn choose_player_to_rob(
         &mut self,
         context: PlayerDecisionContext<'_>,
+        _robber_pos: Hex,
     ) -> ChoosePlayerToRobAction {
         match self.request(DecisionRequestFrame::ChoosePlayerToRob(
             UiModel::from_decision(&context),

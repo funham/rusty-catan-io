@@ -10,6 +10,7 @@ use catan_core::{
         game::{event::PlayerNotification, view::PlayerDecisionContext},
         primitives::{player::PlayerId, resource::ResourceCollection},
     },
+    topology::Hex,
 };
 
 use crate::legal;
@@ -59,8 +60,9 @@ impl PlayerRuntime for LazyAgent {
     fn choose_player_to_rob(
         &mut self,
         context: PlayerDecisionContext<'_>,
+        robber_pos: Hex,
     ) -> ChoosePlayerToRobAction {
-        lazy_choose_player_to_rob(context, self.id)
+        lazy_choose_player_to_rob(context, robber_pos)
     }
 
     fn answer_trade(&mut self, _context: PlayerDecisionContext<'_>) -> TradeAnswer {
@@ -90,9 +92,9 @@ pub fn lazy_drop_half(context: PlayerDecisionContext<'_>) -> DropHalfAction {
 
 pub fn lazy_choose_player_to_rob(
     context: PlayerDecisionContext<'_>,
-    player_id: PlayerId,
+    robber_pos: Hex,
 ) -> ChoosePlayerToRobAction {
-    let id = legal::legal_rob_targets(&context, player_id)
+    let id = legal::legal_rob_targets(&context, robber_pos)
         .next()
         .expect("GameController must forbid this case");
     ChoosePlayerToRobAction(id)

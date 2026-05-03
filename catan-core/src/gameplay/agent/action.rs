@@ -103,12 +103,6 @@ impl DecisionRequest for RegularAction {
     }
 }
 
-impl DecisionRequest for ChoosePlayerToRobAction {
-    fn request(player: &mut dyn PlayerRuntime, context: PlayerDecisionContext<'_>) -> Self {
-        player.choose_player_to_rob(context)
-    }
-}
-
 impl DecisionRequest for MoveRobbersAction {
     fn request(player: &mut dyn PlayerRuntime, context: PlayerDecisionContext<'_>) -> Self {
         player.move_robbers(context)

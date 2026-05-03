@@ -103,6 +103,7 @@ impl PlayerRuntime for CliAgent {
     fn choose_player_to_rob(
         &mut self,
         context: PlayerDecisionContext<'_>,
+        _robber_pos: Hex,
     ) -> ChoosePlayerToRobAction {
         let _guard = self.terminal.inner.lock().expect("terminal mutex poisoned");
         TerminalUi::print_decision_context("Choose player to rob", &context);

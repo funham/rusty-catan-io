@@ -4,6 +4,7 @@ use crate::{
         game::{event::PlayerNotification, view::PlayerDecisionContext},
         primitives::player::PlayerId,
     },
+    topology::Hex,
 };
 
 use super::action::{InitAction, PostDevCardAction, PostDiceAction, RegularAction, TradeAnswer};
@@ -20,6 +21,7 @@ pub trait PlayerRuntime: PlayerNotification {
     fn choose_player_to_rob(
         &mut self,
         context: PlayerDecisionContext<'_>,
+        robber_pos: Hex,
     ) -> ChoosePlayerToRobAction;
     fn answer_trade(&mut self, context: PlayerDecisionContext<'_>) -> TradeAnswer;
     fn drop_half(&mut self, context: PlayerDecisionContext<'_>) -> DropHalfAction;

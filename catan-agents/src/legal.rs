@@ -14,6 +14,7 @@ use catan_core::{
             trade::{BankTrade, BankTradeKind},
         },
     },
+    topology::Hex,
 };
 
 pub fn legal_city_spots(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> Vec<Build> {
@@ -187,15 +188,12 @@ pub fn legal_dev_card_usages(
         .collect()
 }
 
-pub fn legal_rob_targets(
-    context: &PlayerDecisionContext<'_>,
-    player_id: PlayerId,
-) -> impl Iterator<Item = PlayerId> {
+pub fn legal_rob_targets(context: &PlayerDecisionContext<'_>, robber_pos: Hex) -> impl Iterator<Item = PlayerId> {
     context
         .public
-        .players_on_hex(context.public.board_state.robber_pos)
+        .players_on_hex(robber_pos)
         .into_iter()
-        .filter(move |id| id != &player_id)
+        .filter(move |id| id != &context.actor)
 }
 
 fn public_resource_total(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> u16 {
