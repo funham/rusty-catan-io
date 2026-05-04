@@ -143,49 +143,123 @@ pub(crate) fn personal_model_lines(model: &UiModel) -> Vec<Line<'static>> {
     lines
 }
 
-pub(crate) fn snapshot_state_lines(model: &UiModel) -> Vec<Line<'static>> {
+pub(crate) fn snapshot_state_lines(model: &UiModel, width: u16) -> Vec<Line<'static>> {
     let Some(state) = &model.snapshot_state else {
         return vec![Line::from("no exact snapshot state available")];
     };
+    let width = snapshot_box_width(width);
 
     let mut lines = Vec::new();
-    lines.push(section_header("turn"));
-    lines.push(Line::from(format!(
-        "  player p{} | turns {} | rounds {}",
-        state.turn.get_turn_index(),
-        state.turn.get_turns_played(),
-        state.turn.get_rounds_played(),
-    )));
-    lines.push(Line::from(format!(
-        "  robber {:?} | longest road {} | largest army {}",
-        state.board_state.robber_pos.index().to_spiral(),
-        player_option_label(state.builds.longest_road()),
-        player_option_label(state.players.best_army()),
-    )));
-    lines.push(Line::from(""));
+    lines.extend(snapshot_turn_box_lines(model, width));
+    lines.extend(snapshot_bank_box_lines(model, width));
 
-    lines.push(section_header("bank"));
-    lines.push(resource_collection_line(
-        "  resources ",
-        &state.bank.resources,
-    ));
-    lines.push(Line::from(format!(
-        "  dev deck {} [{}]",
-        state.bank.dev_cards.len(),
-        dev_deck_summary(&state.bank.dev_cards),
-    )));
-    lines.push(Line::from(""));
-
-    lines.push(section_header("players"));
-    for (player_id, player) in state.players.iter().enumerate() {
-        lines.push(Line::from(format!("  p{player_id}")));
-        lines.push(resource_collection_line(
-            "    resources ",
-            player.resources(),
-        ));
-        lines.extend(indent_lines(dev_card_lines(player.dev_cards()), "    "));
+    for player_id in 0..state.players.count() {
+        lines.extend(snapshot_player_box_lines(model, player_id, width));
     }
 
+    lines
+}
+
+fn snapshot_turn_box_lines(model: &UiModel, width: usize) -> Vec<Line<'static>> {
+    let state = model
+        .snapshot_state
+        .as_ref()
+        .expect("snapshot_turn_box_lines requires exact snapshot state");
+    vec![
+        box_top("turn", width),
+        box_text_line(
+            format!(
+                "turns {:>3}  rounds {:>2}  LR {}  LA {}",
+                state.turn.get_turns_played(),
+                state.turn.get_rounds_played(),
+                player_option_label(state.builds.longest_road()),
+                player_option_label(state.players.best_army())
+            ),
+            width,
+        ),
+        box_bottom(width),
+    ]
+}
+
+fn snapshot_bank_box_lines(model: &UiModel, width: usize) -> Vec<Line<'static>> {
+    let state = model
+        .snapshot_state
+        .as_ref()
+        .expect("snapshot_bank_box_lines requires exact snapshot state");
+    let mut lines = vec![bank_box_top(
+        state.bank.resources.total(),
+        state.bank.dev_cards.len(),
+        width,
+    )];
+    lines.extend(wrap_box_lines(snapshot_bank_content_lines(state), width));
+    lines.push(box_bottom(width));
+    lines
+}
+
+fn snapshot_bank_content_lines(
+    state: &catan_core::gameplay::game::state::GameState,
+) -> Vec<Line<'static>> {
+    let resources = resource_card_lines(&state.bank.resources, None);
+    let dev_cards = dev_deck_card_lines(&state.bank.dev_cards);
+    let left_width = resources.iter().map(Line::width).max().unwrap_or(0);
+    let left = [
+        resources.first().cloned().unwrap_or_else(|| Line::from("")),
+        resources.get(1).cloned().unwrap_or_else(|| Line::from("")),
+        resources.get(2).cloned().unwrap_or_else(|| Line::from("")),
+        Line::from(format!(
+            "next {}",
+            dev_deck_next_summary(&state.bank.dev_cards)
+        )),
+    ];
+
+    left.into_iter()
+        .zip(dev_cards)
+        .map(|(left, right)| bank_split_line(left, right, left_width))
+        .collect()
+}
+
+fn bank_split_line(left: Line<'static>, right: Line<'static>, left_width: usize) -> Line<'static> {
+    let mut spans = fit_line_to_width(left, left_width).spans;
+    spans.push(Span::raw(" "));
+    spans.push(Span::styled("|", Style::default().fg(Color::Cyan)));
+    spans.push(Span::raw(" "));
+    spans.extend(right.spans);
+    Line::from(spans)
+}
+
+fn snapshot_player_box_lines(
+    model: &UiModel,
+    player_id: PlayerId,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let state = model
+        .snapshot_state
+        .as_ref()
+        .expect("snapshot_player_box_lines requires exact snapshot state");
+    let player = state.players.get(player_id);
+    let is_active = state.turn.get_turn_index() == player_id;
+    let mut title = if is_active {
+        format!("p{player_id} active")
+    } else {
+        format!("p{player_id}")
+    };
+    if state.builds.longest_road() == Some(player_id) {
+        title.push_str(" LR");
+    }
+    if state.players.best_army() == Some(player_id) {
+        title.push_str(" LA");
+    }
+
+    let mut lines = vec![box_top(&title, width)];
+    lines.extend(wrap_box_lines(
+        resource_card_lines(player.resources(), None),
+        width,
+    ));
+    lines.extend(wrap_box_lines(
+        dev_card_compact_lines(player.dev_cards()),
+        width,
+    ));
+    lines.push(box_bottom(width));
     lines
 }
 
@@ -212,12 +286,6 @@ fn bank_resources_line(model: &UiModel) -> Line<'static> {
         }
     };
     spans.push(Span::styled(dev, Style::default().fg(Color::Magenta)));
-    Line::from(spans)
-}
-
-fn resource_collection_line(prefix: &'static str, resources: &ResourceCollection) -> Line<'static> {
-    let mut spans = vec![Span::raw(prefix)];
-    push_resource_values(&mut spans, resources, |count| count.to_string());
     Line::from(spans)
 }
 
@@ -265,33 +333,223 @@ fn victory_points_label(victory_points: Option<u16>) -> String {
         .unwrap_or_else(|| "?".to_owned())
 }
 
-fn indent_lines(lines: Vec<Line<'static>>, indent: &'static str) -> Vec<Line<'static>> {
+fn snapshot_box_width(width: u16) -> usize {
+    usize::from(width.max(12))
+}
+
+fn box_content_width(width: usize) -> usize {
+    width.saturating_sub(4)
+}
+
+fn box_top(title: &str, width: usize) -> Line<'static> {
+    let title = format!(" {} ", title.to_ascii_uppercase());
+    let title = truncate_display(title, width.saturating_sub(2));
+    let fill = width.saturating_sub(2 + title.chars().count());
+    Line::from(Span::styled(
+        format!("╭{title}{}╮", "─".repeat(fill)),
+        Style::default().fg(Color::Cyan),
+    ))
+}
+
+fn bank_box_top(resource_total: u16, dev_total: usize, width: usize) -> Line<'static> {
+    let label = format!(" BANK ({resource_total}, {dev_total}) ");
+    let label = truncate_display(label, width.saturating_sub(2));
+    let fill = width.saturating_sub(2 + label.chars().count());
+    let mut spans = vec![Span::styled("╭", Style::default().fg(Color::Cyan))];
+    push_colored_bank_title(&mut spans, &label, resource_total, dev_total);
+    spans.push(Span::styled(
+        "─".repeat(fill),
+        Style::default().fg(Color::Cyan),
+    ));
+    spans.push(Span::styled("╮", Style::default().fg(Color::Cyan)));
+    Line::from(spans)
+}
+
+fn push_colored_bank_title(
+    spans: &mut Vec<Span<'static>>,
+    label: &str,
+    resource_total: u16,
+    dev_total: usize,
+) {
+    let resource = resource_total.to_string();
+    let dev = dev_total.to_string();
+    let Some((before_resource, after_resource)) = label.split_once(&resource) else {
+        spans.push(Span::styled(
+            label.to_owned(),
+            Style::default().fg(Color::Cyan),
+        ));
+        return;
+    };
+    let Some((between, after_dev)) = after_resource.split_once(&dev) else {
+        spans.push(Span::styled(
+            label.to_owned(),
+            Style::default().fg(Color::Cyan),
+        ));
+        return;
+    };
+    spans.push(Span::styled(
+        before_resource.to_owned(),
+        Style::default().fg(Color::Cyan),
+    ));
+    spans.push(Span::styled(resource, Style::default().fg(Color::Green)));
+    spans.push(Span::styled(
+        between.to_owned(),
+        Style::default().fg(Color::Cyan),
+    ));
+    spans.push(Span::styled(dev, Style::default().fg(Color::Magenta)));
+    spans.push(Span::styled(
+        after_dev.to_owned(),
+        Style::default().fg(Color::Cyan),
+    ));
+}
+
+fn box_bottom(width: usize) -> Line<'static> {
+    Line::from(Span::styled(
+        format!("╰{}╯", "─".repeat(width.saturating_sub(2))),
+        Style::default().fg(Color::Cyan),
+    ))
+}
+
+fn box_text_line(text: impl Into<String>, width: usize) -> Line<'static> {
+    let content_width = box_content_width(width);
+    let text = truncate_display(text.into(), content_width);
+    let padding = content_width.saturating_sub(text.chars().count());
+    Line::from(vec![
+        box_left(),
+        Span::raw(text),
+        Span::raw(" ".repeat(padding)),
+        box_right(),
+    ])
+}
+
+fn wrap_box_lines(lines: Vec<Line<'static>>, width: usize) -> Vec<Line<'static>> {
+    let content_width = box_content_width(width);
     lines
         .into_iter()
         .map(|line| {
-            let mut spans = vec![Span::raw(indent)];
+            if line.width() > content_width {
+                return box_text_line(line.to_string(), width);
+            }
+            let padding = content_width.saturating_sub(line.width());
+            let mut spans = vec![box_left()];
             spans.extend(line.spans);
+            spans.push(Span::raw(" ".repeat(padding)));
+            spans.push(box_right());
             Line::from(spans)
         })
         .collect()
 }
 
-fn dev_deck_summary(dev_cards: &[DevCardKind]) -> String {
-    let mut knight = 0;
-    let mut yop = 0;
-    let mut monopoly = 0;
-    let mut roadbuild = 0;
-    let mut victory = 0;
+fn box_left() -> Span<'static> {
+    Span::styled("│ ", Style::default().fg(Color::Cyan))
+}
+
+fn box_right() -> Span<'static> {
+    Span::styled(" │", Style::default().fg(Color::Cyan))
+}
+
+fn truncate_display(text: impl Into<String>, max_width: usize) -> String {
+    let text = text.into();
+    if text.chars().count() <= max_width {
+        return text;
+    }
+    text.chars().take(max_width).collect()
+}
+
+fn fit_line_to_width(line: Line<'static>, width: usize) -> Line<'static> {
+    if line.width() > width {
+        return Line::from(truncate_display(line.to_string(), width));
+    }
+    let padding = width.saturating_sub(line.width());
+    let mut spans = line.spans;
+    spans.push(Span::raw(" ".repeat(padding)));
+    Line::from(spans)
+}
+
+fn dev_deck_next_summary(dev_cards: &[DevCardKind]) -> String {
+    let preview = dev_cards
+        .iter()
+        .take(7)
+        .map(dev_card_kind_abbrev)
+        .collect::<Vec<_>>();
+    if preview.is_empty() {
+        "-".to_owned()
+    } else {
+        preview.join(" ")
+    }
+}
+
+fn dev_deck_card_lines(dev_cards: &[DevCardKind]) -> Vec<Line<'static>> {
+    let counts = dev_deck_counts(dev_cards);
+    let mut top = Vec::new();
+    let mut middle = Vec::new();
+    let mut bottom = Vec::new();
+    let mut count = Vec::new();
+
+    for (idx, (label, amount)) in [
+        ("KN", counts.knight),
+        ("YP", counts.yop),
+        ("M", counts.monopoly),
+        ("RB", counts.roadbuild),
+        ("VP", counts.victory),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if idx > 0 {
+            top.push(Span::raw(" "));
+            middle.push(Span::raw(" "));
+            bottom.push(Span::raw(" "));
+            count.push(Span::raw(" "));
+        }
+        push_bank_dev_card(&mut top, &mut middle, &mut bottom, label);
+        count.push(Span::styled(
+            format!("{:^4}", amount.min(99)),
+            Style::default().fg(Color::Magenta),
+        ));
+    }
+
+    vec![
+        Line::from(top),
+        Line::from(middle),
+        Line::from(bottom),
+        Line::from(count),
+    ]
+}
+
+fn push_bank_dev_card(
+    top: &mut Vec<Span<'static>>,
+    middle: &mut Vec<Span<'static>>,
+    bottom: &mut Vec<Span<'static>>,
+    label: &'static str,
+) {
+    let style = Style::default().fg(Color::Magenta);
+    top.push(Span::styled("┌──┐", style));
+    middle.push(Span::styled(format!("│{:^2}│", label), style));
+    bottom.push(Span::styled("└──┘", style));
+}
+
+#[derive(Default)]
+struct DevDeckCounts {
+    knight: u16,
+    yop: u16,
+    monopoly: u16,
+    roadbuild: u16,
+    victory: u16,
+}
+
+fn dev_deck_counts(dev_cards: &[DevCardKind]) -> DevDeckCounts {
+    let mut counts = DevDeckCounts::default();
     for card in dev_cards {
         match card {
-            DevCardKind::VictoryPoint => victory += 1,
-            DevCardKind::Usable(UsableDevCard::Knight) => knight += 1,
-            DevCardKind::Usable(UsableDevCard::YearOfPlenty) => yop += 1,
-            DevCardKind::Usable(UsableDevCard::Monopoly) => monopoly += 1,
-            DevCardKind::Usable(UsableDevCard::RoadBuild) => roadbuild += 1,
+            DevCardKind::VictoryPoint => counts.victory += 1,
+            DevCardKind::Usable(UsableDevCard::Knight) => counts.knight += 1,
+            DevCardKind::Usable(UsableDevCard::YearOfPlenty) => counts.yop += 1,
+            DevCardKind::Usable(UsableDevCard::Monopoly) => counts.monopoly += 1,
+            DevCardKind::Usable(UsableDevCard::RoadBuild) => counts.roadbuild += 1,
         }
     }
-    format!("KN:{knight} YP:{yop} M:{monopoly} RB:{roadbuild} VP:{victory}")
+    counts
 }
 
 pub(crate) fn resource_card_lines(
@@ -332,10 +590,15 @@ pub(crate) fn resource_card_lines(
 }
 
 pub(crate) fn dev_card_lines(dev_cards: &DevCardData) -> Vec<Line<'static>> {
+    let mut lines = dev_card_compact_lines(dev_cards);
+    lines.push(dev_card_label_line());
+    lines
+}
+
+fn dev_card_compact_lines(dev_cards: &DevCardData) -> Vec<Line<'static>> {
     let mut top = Vec::new();
     let mut middle = Vec::new();
     let mut bottom = Vec::new();
-    let mut labels = Vec::new();
 
     for (idx, card) in [
         UsableDevCard::Knight,
@@ -347,13 +610,12 @@ pub(crate) fn dev_card_lines(dev_cards: &DevCardData) -> Vec<Line<'static>> {
     .enumerate()
     {
         if idx > 0 {
-            push_dev_card_gap(&mut top, &mut middle, &mut bottom, &mut labels);
+            push_dev_card_gap(&mut top, &mut middle, &mut bottom);
         }
         push_dev_card(
             &mut top,
             &mut middle,
             &mut bottom,
-            &mut labels,
             dev_card_abbrev(card),
             [
                 Some(dev_cards.used[card]),
@@ -363,22 +625,27 @@ pub(crate) fn dev_card_lines(dev_cards: &DevCardData) -> Vec<Line<'static>> {
         );
     }
 
-    push_dev_card_gap(&mut top, &mut middle, &mut bottom, &mut labels);
+    push_dev_card_gap(&mut top, &mut middle, &mut bottom);
     push_dev_card(
         &mut top,
         &mut middle,
         &mut bottom,
-        &mut labels,
         "VP",
         [None, Some(dev_cards.victory_pts), None],
     );
 
-    vec![
-        Line::from(top),
-        Line::from(middle),
-        Line::from(bottom),
-        Line::from(labels),
-    ]
+    vec![Line::from(top), Line::from(middle), Line::from(bottom)]
+}
+
+fn dev_card_label_line() -> Line<'static> {
+    let mut labels = Vec::new();
+    for (idx, label) in ["KN", "YP", "M", "RB", "VP"].into_iter().enumerate() {
+        if idx > 0 {
+            labels.push(Span::raw(" "));
+        }
+        labels.push(Span::raw(format!("{:^6}", label)));
+    }
+    Line::from(labels)
 }
 
 pub(crate) fn drop_personal_lines(
@@ -524,9 +791,8 @@ fn push_dev_card_gap(
     top: &mut Vec<Span<'static>>,
     middle: &mut Vec<Span<'static>>,
     bottom: &mut Vec<Span<'static>>,
-    labels: &mut Vec<Span<'static>>,
 ) {
-    for spans in [top, middle, bottom, labels] {
+    for spans in [top, middle, bottom] {
         spans.push(Span::raw(" "));
     }
 }
@@ -535,7 +801,6 @@ fn push_dev_card(
     top: &mut Vec<Span<'static>>,
     middle: &mut Vec<Span<'static>>,
     bottom: &mut Vec<Span<'static>>,
-    labels: &mut Vec<Span<'static>>,
     label: &'static str,
     counts: [Option<u16>; 3],
 ) {
@@ -546,7 +811,6 @@ fn push_dev_card(
     middle.push(Span::raw(format!("{:>2}", count_label(counts[1]))));
     bottom.push(Span::styled("└──┘", style));
     bottom.push(Span::raw(format!("{:>2}", count_label(counts[2]))));
-    labels.push(Span::raw(format!("{:^6}", label)));
 }
 
 fn count_label(count: Option<u16>) -> String {
@@ -561,6 +825,13 @@ fn dev_card_abbrev(card: UsableDevCard) -> &'static str {
         UsableDevCard::YearOfPlenty => "YP",
         UsableDevCard::Monopoly => "M",
         UsableDevCard::RoadBuild => "RB",
+    }
+}
+
+fn dev_card_kind_abbrev(card: &DevCardKind) -> &'static str {
+    match card {
+        DevCardKind::VictoryPoint => "VP",
+        DevCardKind::Usable(card) => dev_card_abbrev(*card),
     }
 }
 
@@ -612,15 +883,25 @@ fn player_style(player_id: PlayerId) -> Style {
 
 #[cfg(test)]
 mod tests {
+    use catan_agents::remote_agent::UiModel;
     use catan_core::gameplay::primitives::{
         dev_card::DevCardData,
         resource::{Resource, ResourceCollection},
         trade::{BankTrade, BankTradeKind},
     };
+    use catan_core::gameplay::{
+        game::{
+            event::ObserverNotificationContext,
+            index::GameIndex,
+            init::GameInitializationState,
+            view::{ContextFactory, VisibilityConfig},
+        },
+        primitives::{dev_card::DevCardKind, dev_card::UsableDevCard},
+    };
 
     use super::{
         adjust_drop_selection, bank_trade_menu_lines, dev_card_lines, drop_personal_lines,
-        resource_card_lines,
+        resource_card_lines, snapshot_state_lines,
     };
 
     #[test]
@@ -716,5 +997,52 @@ mod tests {
 
         assert!(lines.iter().any(|line| line.contains("up/down select")));
         assert!(lines.iter().any(|line| line.contains("> 3:1 Wheat -> Ore")));
+    }
+
+    #[test]
+    fn snapshot_state_lines_render_dashboard_and_player_boxes() {
+        let mut state = GameInitializationState::default().finish();
+        state.bank.dev_cards = vec![
+            DevCardKind::Usable(UsableDevCard::Knight),
+            DevCardKind::Usable(UsableDevCard::YearOfPlenty),
+            DevCardKind::VictoryPoint,
+        ];
+        state
+            .transfer_from_bank(
+                ResourceCollection {
+                    brick: 2,
+                    wood: 1,
+                    ..ResourceCollection::ZERO
+                },
+                0,
+            )
+            .unwrap();
+        let index = GameIndex::rebuild(&state);
+        let visibility = VisibilityConfig::default();
+        let factory = ContextFactory {
+            state: &state,
+            index: &index,
+            visibility: &visibility,
+        };
+        let model = UiModel::from_observer(
+            ObserverNotificationContext::Omniscient {
+                public: factory.spectator_public_view(),
+                full: factory.omniscient_view(),
+            },
+            true,
+        );
+
+        let lines = snapshot_state_lines(&model, 60)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+
+        assert!(lines.iter().any(|line| line.contains("TURN")));
+        assert!(lines.iter().any(|line| line.contains("BANK (92, 3)")));
+        assert!(lines.iter().any(|line| line.contains("P0")));
+        assert!(lines.iter().any(|line| line.contains("│02│")));
+        assert!(lines.iter().any(|line| line.contains("│KN│")));
+        assert!(lines.iter().any(|line| line.contains("|")));
+        assert!(lines.iter().any(|line| line.contains("next KN YP VP")));
     }
 }

@@ -41,7 +41,7 @@ use super::{
         personal_model_lines, player_menu_lines, public_model_lines, resource_picker_lines,
         snapshot_state_lines,
     },
-    render::{field_lines, field_size},
+    render::{field_lines, field_lines_cropped_left, field_size},
     selectors::{
         board_hex_set, initial_roads_for_settlement, move_hex_by_key, ordered_bank_trades_for_menu,
         selection_status,
@@ -660,40 +660,60 @@ impl CliUi {
         let view_mode = self.view_mode;
         let observer_event_count = self.observer_event_count;
         let observer_summary = self.observer_summary.clone();
-        self.terminal.draw(|frame| {
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(3),
-                    Constraint::Min(8),
-                    Constraint::Length(5),
-                ])
-                .split(frame.area());
+        self.terminal.draw(|frame| match view_mode {
+            CliViewMode::Normal => {
+                let chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([
+                        Constraint::Length(3),
+                        Constraint::Min(8),
+                        Constraint::Length(5),
+                    ])
+                    .split(frame.area());
 
-            render_status(
-                frame,
-                chunks[0],
-                &message,
-                observer_event_count,
-                observer_summary.as_deref(),
-            );
-
-            match (model, view_mode) {
-                (Some(model), CliViewMode::Normal) => render_normal_layout(
+                render_status(
                     frame,
-                    chunks[1],
-                    model,
-                    &overlay,
-                    public_override,
-                    personal_override,
-                ),
-                (Some(model), CliViewMode::Snapshot) => {
-                    render_snapshot_layout(frame, chunks[1], model, &overlay)
-                }
-                (None, _) => render_waiting_layout(frame, chunks[1]),
-            }
+                    chunks[0],
+                    &message,
+                    observer_event_count,
+                    observer_summary.as_deref(),
+                );
 
-            render_command(frame, chunks[2], view_mode, prompt, input);
+                match model {
+                    Some(model) => render_normal_layout(
+                        frame,
+                        chunks[1],
+                        model,
+                        &overlay,
+                        public_override,
+                        personal_override,
+                    ),
+                    None => render_waiting_layout(frame, chunks[1]),
+                }
+
+                render_command(frame, chunks[2], view_mode, prompt, input);
+            }
+            CliViewMode::Snapshot => {
+                let chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([Constraint::Length(3), Constraint::Min(8)])
+                    .split(frame.area());
+
+                render_status(
+                    frame,
+                    chunks[0],
+                    &message,
+                    observer_event_count,
+                    observer_summary.as_deref(),
+                );
+
+                match model {
+                    Some(model) => {
+                        render_snapshot_layout(frame, chunks[1], model, &overlay, prompt, input)
+                    }
+                    None => render_snapshot_waiting_layout(frame, chunks[1], prompt, input),
+                }
+            }
         })?;
         Ok(())
     }
@@ -763,19 +783,61 @@ fn render_snapshot_layout(
     area: Rect,
     model: &UiModel,
     overlay: &FieldOverlay,
+    prompt: &str,
+    input: &str,
 ) {
-    let (field_width, _) = field_size();
-    let field_pane_width = field_width.saturating_add(2);
+    let (field_width, field_height) = field_size();
+    let snapshot_field_crop = 2;
+    let field_pane_width = field_width
+        .saturating_sub(snapshot_field_crop)
+        .saturating_add(2);
+    let field_pane_height = field_height.saturating_add(2);
     let body_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Length(field_pane_width), Constraint::Min(42)])
         .split(area);
+    let left_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(field_pane_height), Constraint::Min(5)])
+        .split(body_chunks[0]);
 
-    let field = Paragraph::new(field_lines(model, overlay))
-        .block(Block::default().borders(Borders::ALL).title("Field"));
-    frame.render_widget(field, body_chunks[0]);
+    let field = Paragraph::new(field_lines_cropped_left(
+        model,
+        overlay,
+        usize::from(snapshot_field_crop),
+    ))
+    .block(Block::default().borders(Borders::ALL).title("Field"));
+    frame.render_widget(field, left_chunks[0]);
 
-    let state = Paragraph::new(snapshot_state_lines(model))
+    render_command(frame, left_chunks[1], CliViewMode::Snapshot, prompt, input);
+
+    let state_inner_width = body_chunks[1].width.saturating_sub(2);
+    let state = Paragraph::new(snapshot_state_lines(model, state_inner_width))
+        .wrap(Wrap { trim: false })
+        .block(Block::default().borders(Borders::ALL).title("State"));
+    frame.render_widget(state, body_chunks[1]);
+}
+
+fn render_snapshot_waiting_layout(frame: &mut Frame<'_>, area: Rect, prompt: &str, input: &str) {
+    let (field_width, field_height) = field_size();
+    let snapshot_field_crop = 2;
+    let field_pane_width = field_width
+        .saturating_sub(snapshot_field_crop)
+        .saturating_add(2);
+    let field_pane_height = field_height.saturating_add(2);
+    let body_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(field_pane_width), Constraint::Min(42)])
+        .split(area);
+    let left_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(field_pane_height), Constraint::Min(5)])
+        .split(body_chunks[0]);
+
+    render_waiting_layout(frame, left_chunks[0]);
+    render_command(frame, left_chunks[1], CliViewMode::Snapshot, prompt, input);
+
+    let state = Paragraph::new(vec![Line::from("waiting for game state")])
         .wrap(Wrap { trim: false })
         .block(Block::default().borders(Borders::ALL).title("State"));
     frame.render_widget(state, body_chunks[1]);
@@ -795,24 +857,44 @@ fn render_command(
     prompt: &str,
     input: &str,
 ) {
+    let inner_width = usize::from(area.width.saturating_sub(2));
     let help = match view_mode {
-        CliViewMode::Normal => {
-            "Text: Esc clears, Enter submits. Select: arrows/tab move, Enter picks."
-        }
-        CliViewMode::Snapshot => {
-            "Snapshot observer: press s after an update to save the latest exact state."
-        }
+        CliViewMode::Normal => "Text: Esc clears, Enter submits. Select: arrows/tab, Enter.",
+        CliViewMode::Snapshot => "s: save latest state",
     };
-    let input = Paragraph::new(vec![
-        Line::from(prompt.to_owned()),
-        Line::from(Span::styled(
-            input.to_owned(),
+
+    let mut lines = Vec::new();
+    if !prompt.is_empty() {
+        lines.push(Line::from(fit_command_text(prompt, inner_width)));
+    }
+    if !input.is_empty() {
+        lines.push(Line::from(Span::styled(
+            fit_command_text(input, inner_width),
             Style::default().fg(Color::Yellow),
-        )),
-        Line::from(help),
-    ])
-    .block(Block::default().borders(Borders::ALL).title("Command"));
+        )));
+    }
+    lines.push(Line::from(fit_command_text(help, inner_width)));
+
+    let input = Paragraph::new(lines)
+        .wrap(Wrap { trim: false })
+        .block(Block::default().borders(Borders::ALL).title("Command"));
     frame.render_widget(input, area);
+}
+
+fn fit_command_text(text: &str, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+    if text.chars().count() <= width {
+        return text.to_owned();
+    }
+    if width <= 3 {
+        return ".".repeat(width);
+    }
+
+    let mut output: String = text.chars().take(width - 3).collect();
+    output.push_str("...");
+    output
 }
 
 impl Drop for CliUi {
