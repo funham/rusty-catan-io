@@ -26,9 +26,9 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{
-    Terminal,
+    Frame, Terminal,
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
@@ -50,7 +50,7 @@ use super::{
 
 pub(crate) struct CliUi {
     terminal: Terminal<CrosstermBackend<Stdout>>,
-    display_mode: CliDisplayMode,
+    view_mode: CliViewMode,
     message: String,
     overlay: FieldOverlay,
     public_override: Option<Vec<Line<'static>>>,
@@ -60,19 +60,19 @@ pub(crate) struct CliUi {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CliDisplayMode {
+pub(crate) enum CliViewMode {
     Normal,
     Snapshot,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SnapshotInput {
-    Snapshot,
+pub(crate) enum ControlInput {
+    SaveSnapshot,
     Redraw,
 }
 
 impl CliUi {
-    pub(crate) fn new(display_mode: CliDisplayMode) -> io::Result<Self> {
+    pub(crate) fn new(view_mode: CliViewMode) -> io::Result<Self> {
         log::trace!("Initializing CLI UI");
         enable_raw_mode()?;
         let mut stdout = io::stdout();
@@ -81,7 +81,7 @@ impl CliUi {
         log::trace!("CLI UI initialized successfully");
         Ok(Self {
             terminal,
-            display_mode,
+            view_mode,
             message: "waiting for host".to_owned(),
             overlay: FieldOverlay::default(),
             public_override: None,
@@ -102,8 +102,8 @@ impl CliUi {
         self.draw(None, "", "")
     }
 
-    pub(crate) fn display_mode(&self) -> CliDisplayMode {
-        self.display_mode
+    pub(crate) fn view_mode(&self) -> CliViewMode {
+        self.view_mode
     }
 
     pub(crate) fn show_model(&mut self, model: &UiModel, message: String) -> io::Result<()> {
@@ -185,21 +185,21 @@ impl CliUi {
         }
     }
 
-    pub(crate) fn poll_snapshot_input(&mut self) -> io::Result<Option<SnapshotInput>> {
+    pub(crate) fn poll_control_input(&mut self) -> io::Result<Option<ControlInput>> {
         if !event::poll(Duration::from_millis(25))? {
             return Ok(None);
         }
         match event::read()? {
             CrosstermEvent::Key(key) if key.kind == KeyEventKind::Press => {
-                if self.display_mode == CliDisplayMode::Snapshot
+                if self.view_mode == CliViewMode::Snapshot
                     && matches!(key.code, KeyCode::Char('s') | KeyCode::Char('S'))
                 {
-                    Ok(Some(SnapshotInput::Snapshot))
+                    Ok(Some(ControlInput::SaveSnapshot))
                 } else {
                     Ok(None)
                 }
             }
-            CrosstermEvent::Resize(_, _) => Ok(Some(SnapshotInput::Redraw)),
+            CrosstermEvent::Resize(_, _) => Ok(Some(ControlInput::Redraw)),
             _ => Ok(None),
         }
     }
@@ -657,6 +657,9 @@ impl CliUi {
         let overlay = self.overlay.clone();
         let public_override = self.public_override.clone();
         let personal_override = self.personal_override.clone();
+        let view_mode = self.view_mode;
+        let observer_event_count = self.observer_event_count;
+        let observer_summary = self.observer_summary.clone();
         self.terminal.draw(|frame| {
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
@@ -667,113 +670,149 @@ impl CliUi {
                 ])
                 .split(frame.area());
 
-            let title = Paragraph::new(Line::from(vec![
-                Span::styled("rusty-catan", Style::default().fg(Color::Green)),
-                Span::raw("  "),
-                Span::raw(message.as_str()),
-                Span::raw(observer_status_suffix(
-                    self.observer_event_count,
-                    self.observer_summary.as_deref(),
-                )),
-            ]))
-            .block(Block::default().borders(Borders::ALL).title("Status"));
-            frame.render_widget(title, chunks[0]);
+            render_status(
+                frame,
+                chunks[0],
+                &message,
+                observer_event_count,
+                observer_summary.as_deref(),
+            );
 
-            match model {
-                Some(model) => match self.display_mode {
-                    CliDisplayMode::Normal => {
-                        let (field_width, field_height) = field_size();
-                        let field_pane_width = field_width.saturating_add(2);
-                        let field_pane_height = field_height.saturating_add(2);
-                        let body_chunks = Layout::default()
-                            .direction(Direction::Horizontal)
-                            .constraints([
-                                Constraint::Length(field_pane_width),
-                                Constraint::Min(36),
-                            ])
-                            .split(chunks[1]);
-
-                        let field_chunks = Layout::default()
-                            .direction(Direction::Vertical)
-                            .constraints([
-                                Constraint::Length(field_pane_height),
-                                Constraint::Min(8),
-                            ])
-                            .split(body_chunks[0]);
-
-                        let field = Paragraph::new(field_lines(model, &overlay))
-                            .block(Block::default().borders(Borders::ALL).title("Field"));
-                        frame.render_widget(field, field_chunks[0]);
-
-                        let has_public_override = public_override.is_some();
-                        let title = if has_public_override {
-                            "Game Ended"
-                        } else {
-                            "Public"
-                        };
-                        let public = Paragraph::new(
-                            public_override.unwrap_or_else(|| public_model_lines(model)),
-                        )
-                        .wrap(Wrap { trim: false })
-                        .block(Block::default().borders(Borders::ALL).title(title));
-                        frame.render_widget(public, body_chunks[1]);
-
-                        let personal = Paragraph::new(
-                            personal_override.unwrap_or_else(|| personal_model_lines(model)),
-                        )
-                        .wrap(Wrap { trim: false })
-                        .block(Block::default().borders(Borders::ALL).title("Personal"));
-                        frame.render_widget(personal, field_chunks[1]);
-                    }
-                    CliDisplayMode::Snapshot => {
-                        let (field_width, _) = field_size();
-                        let field_pane_width = field_width.saturating_add(2);
-                        let body_chunks = Layout::default()
-                            .direction(Direction::Horizontal)
-                            .constraints([
-                                Constraint::Length(field_pane_width),
-                                Constraint::Min(42),
-                            ])
-                            .split(chunks[1]);
-
-                        let field = Paragraph::new(field_lines(model, &overlay))
-                            .block(Block::default().borders(Borders::ALL).title("Field"));
-                        frame.render_widget(field, body_chunks[0]);
-
-                        let state = Paragraph::new(snapshot_state_lines(model))
-                            .wrap(Wrap { trim: false })
-                            .block(Block::default().borders(Borders::ALL).title("State"));
-                        frame.render_widget(state, body_chunks[1]);
-                    }
-                },
-                None => {
-                    let body = Paragraph::new(vec![Line::from("waiting for game state")])
-                        .wrap(Wrap { trim: false })
-                        .block(Block::default().borders(Borders::ALL).title("Game"));
-                    frame.render_widget(body, chunks[1]);
+            match (model, view_mode) {
+                (Some(model), CliViewMode::Normal) => render_normal_layout(
+                    frame,
+                    chunks[1],
+                    model,
+                    &overlay,
+                    public_override,
+                    personal_override,
+                ),
+                (Some(model), CliViewMode::Snapshot) => {
+                    render_snapshot_layout(frame, chunks[1], model, &overlay)
                 }
+                (None, _) => render_waiting_layout(frame, chunks[1]),
             }
 
-            let input = Paragraph::new(vec![
-                Line::from(prompt.to_owned()),
-                Line::from(Span::styled(
-                    input.to_owned(),
-                    Style::default().fg(Color::Yellow),
-                )),
-                Line::from(match self.display_mode {
-                    CliDisplayMode::Normal => {
-                        "Text: Esc clears, Enter submits. Select: arrows/tab move, Enter picks."
-                    }
-                    CliDisplayMode::Snapshot => {
-                        "Snapshot observer: press s after an update to save the latest exact state."
-                    }
-                }),
-            ])
-            .block(Block::default().borders(Borders::ALL).title("Command"));
-            frame.render_widget(input, chunks[2]);
+            render_command(frame, chunks[2], view_mode, prompt, input);
         })?;
         Ok(())
     }
+}
+
+fn render_status(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    message: &str,
+    event_count: u64,
+    summary: Option<&str>,
+) {
+    let title = Paragraph::new(Line::from(vec![
+        Span::styled("rusty-catan", Style::default().fg(Color::Green)),
+        Span::raw("  "),
+        Span::raw(message.to_owned()),
+        Span::raw(observer_status_suffix(event_count, summary)),
+    ]))
+    .block(Block::default().borders(Borders::ALL).title("Status"));
+    frame.render_widget(title, area);
+}
+
+fn render_normal_layout(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    model: &UiModel,
+    overlay: &FieldOverlay,
+    public_override: Option<Vec<Line<'static>>>,
+    personal_override: Option<Vec<Line<'static>>>,
+) {
+    let (field_width, field_height) = field_size();
+    let field_pane_width = field_width.saturating_add(2);
+    let field_pane_height = field_height.saturating_add(2);
+    let body_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(field_pane_width), Constraint::Min(36)])
+        .split(area);
+
+    let field_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(field_pane_height), Constraint::Min(8)])
+        .split(body_chunks[0]);
+
+    let field = Paragraph::new(field_lines(model, overlay))
+        .block(Block::default().borders(Borders::ALL).title("Field"));
+    frame.render_widget(field, field_chunks[0]);
+
+    let has_public_override = public_override.is_some();
+    let title = if has_public_override {
+        "Game Ended"
+    } else {
+        "Public"
+    };
+    let public = Paragraph::new(public_override.unwrap_or_else(|| public_model_lines(model)))
+        .wrap(Wrap { trim: false })
+        .block(Block::default().borders(Borders::ALL).title(title));
+    frame.render_widget(public, body_chunks[1]);
+
+    let personal = Paragraph::new(personal_override.unwrap_or_else(|| personal_model_lines(model)))
+        .wrap(Wrap { trim: false })
+        .block(Block::default().borders(Borders::ALL).title("Personal"));
+    frame.render_widget(personal, field_chunks[1]);
+}
+
+fn render_snapshot_layout(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    model: &UiModel,
+    overlay: &FieldOverlay,
+) {
+    let (field_width, _) = field_size();
+    let field_pane_width = field_width.saturating_add(2);
+    let body_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(field_pane_width), Constraint::Min(42)])
+        .split(area);
+
+    let field = Paragraph::new(field_lines(model, overlay))
+        .block(Block::default().borders(Borders::ALL).title("Field"));
+    frame.render_widget(field, body_chunks[0]);
+
+    let state = Paragraph::new(snapshot_state_lines(model))
+        .wrap(Wrap { trim: false })
+        .block(Block::default().borders(Borders::ALL).title("State"));
+    frame.render_widget(state, body_chunks[1]);
+}
+
+fn render_waiting_layout(frame: &mut Frame<'_>, area: Rect) {
+    let body = Paragraph::new(vec![Line::from("waiting for game state")])
+        .wrap(Wrap { trim: false })
+        .block(Block::default().borders(Borders::ALL).title("Game"));
+    frame.render_widget(body, area);
+}
+
+fn render_command(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    view_mode: CliViewMode,
+    prompt: &str,
+    input: &str,
+) {
+    let help = match view_mode {
+        CliViewMode::Normal => {
+            "Text: Esc clears, Enter submits. Select: arrows/tab move, Enter picks."
+        }
+        CliViewMode::Snapshot => {
+            "Snapshot observer: press s after an update to save the latest exact state."
+        }
+    };
+    let input = Paragraph::new(vec![
+        Line::from(prompt.to_owned()),
+        Line::from(Span::styled(
+            input.to_owned(),
+            Style::default().fg(Color::Yellow),
+        )),
+        Line::from(help),
+    ])
+    .block(Block::default().borders(Borders::ALL).title("Command"));
+    frame.render_widget(input, area);
 }
 
 impl Drop for CliUi {

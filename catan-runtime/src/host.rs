@@ -10,7 +10,7 @@ use catan_agents::{
     greedy::GreedyAgent,
     lazy::LazyAgent,
     random::RandomAgent,
-    remote_agent::{CliToHost, RemoteCliAgent, RemoteCliObserver, read_frame},
+    remote_agent::{CliRole, CliToHost, RemoteCliAgent, RemoteCliObserver, read_frame},
 };
 use catan_core::{
     agent::Agent,
@@ -68,7 +68,7 @@ fn build_agents(players: &[PlayerConfig], exe: &Path) -> Result<Vec<Box<dyn Agen
             PlayerConfig::Lazy => Ok(Box::new(LazyAgent::new(id)) as Box<dyn Agent>),
             PlayerConfig::Greedy => Ok(Box::new(GreedyAgent::new(id)) as Box<dyn Agent>),
             PlayerConfig::Cli => {
-                let stream = spawn_cli_child(exe, "player")?;
+                let stream = spawn_cli_child(exe, &CliChildSpec::player(id))?;
                 let agent = RemoteCliAgent::new(id, stream)
                     .map_err(|err| format!("failed to initialize remote CLI player: {err}"))?;
                 Ok(Box::new(agent) as Box<dyn Agent>)
@@ -85,25 +85,13 @@ fn build_observers(
     observers
         .iter()
         .map(|observer| {
-            let (kind, role_arg) = match observer {
-                ObserverConfig::CliSpectator => (ObserverKind::Spectator, "spectator".to_owned()),
-                ObserverConfig::CliPlayer { player_id } => (
-                    ObserverKind::Player(*player_id),
-                    format!("player-observer:{player_id}"),
-                ),
-                ObserverConfig::CliOmniscient => {
-                    (ObserverKind::Omniscient, "omniscient".to_owned())
-                }
-                ObserverConfig::SnapshotObserver => {
-                    (ObserverKind::Omniscient, "snapshot-observer".to_owned())
-                }
-            };
-            let stream = spawn_cli_child(exe, &role_arg)?;
-            let observer = match observer {
-                ObserverConfig::SnapshotObserver => RemoteCliObserver::new_snapshot(stream),
-                _ => RemoteCliObserver::new(kind, stream),
-            }
-            .map_err(|err| format!("failed to initialize remote CLI observer: {err}"))?;
+            let spec = CliChildSpec::observer(observer);
+            let _kind = spec
+                .observer_kind
+                .ok_or_else(|| format!("{} is not an observer role", spec.label))?;
+            let stream = spawn_cli_child(exe, &spec)?;
+            let observer = RemoteCliObserver::new_with_role(spec.role.clone(), stream)
+                .map_err(|err| format!("failed to initialize remote CLI observer: {err}"))?;
             Ok(Box::new(observer) as Box<dyn GameObserver>)
         })
         .collect()
@@ -121,9 +109,51 @@ fn build_initial_state(config: &FieldConfig) -> GameInitializationState {
     }
 }
 
-fn spawn_cli_child(exe: &Path, role_arg: &str) -> Result<UnixStream, String> {
-    let socket_path = unique_socket_path(role_arg, "game");
-    let log_socket_path = unique_socket_path(role_arg, "log");
+#[derive(Debug, Clone)]
+struct CliChildSpec {
+    role: CliRole,
+    label: String,
+    observer_kind: Option<ObserverKind>,
+}
+
+impl CliChildSpec {
+    fn player(player_id: usize) -> Self {
+        Self {
+            role: CliRole::Player { player_id },
+            label: "player".to_owned(),
+            observer_kind: None,
+        }
+    }
+
+    fn observer(config: &ObserverConfig) -> Self {
+        let role = match config {
+            ObserverConfig::CliSpectator => CliRole::Spectator,
+            ObserverConfig::CliPlayer { player_id } => CliRole::PlayerObserver {
+                player_id: *player_id,
+            },
+            ObserverConfig::CliOmniscient => CliRole::Omniscient,
+            ObserverConfig::SnapshotObserver => CliRole::SnapshotObserver,
+        };
+        let label = match role {
+            CliRole::PlayerObserver { player_id } => format!("player-observer:{player_id}"),
+            _ => role.label().to_owned(),
+        };
+        let observer_kind = role.observer_kind();
+        Self {
+            role,
+            label,
+            observer_kind,
+        }
+    }
+
+    fn socket_abbrev(&self) -> &'static str {
+        self.role.socket_abbrev()
+    }
+}
+
+fn spawn_cli_child(exe: &Path, spec: &CliChildSpec) -> Result<UnixStream, String> {
+    let socket_path = unique_socket_path(spec, "game");
+    let log_socket_path = unique_socket_path(spec, "log");
     for path in [&socket_path, &log_socket_path] {
         if path.exists() {
             fs::remove_file(path).map_err(|err| {
@@ -139,37 +169,30 @@ fn spawn_cli_child(exe: &Path, role_arg: &str) -> Result<UnixStream, String> {
             log_socket_path.display()
         )
     })?;
-    spawn_terminal(exe, &socket_path, &log_socket_path, role_arg)?;
+    spawn_terminal(exe, &socket_path, &log_socket_path, &spec.label)?;
     let (stream, _) = listener
         .accept()
         .map_err(|err| format!("failed to accept CLI child connection: {err}"))?;
     let (log_stream, _) = log_listener
         .accept()
         .map_err(|err| format!("failed to accept CLI child log connection: {err}"))?;
-    spawn_child_log_reader(role_arg.to_owned(), log_stream);
+    spawn_child_log_reader(spec.label.clone(), log_stream);
     Ok(stream)
 }
 
-fn unique_socket_path(role_arg: &str, channel: &str) -> PathBuf {
+fn unique_socket_path(spec: &CliChildSpec, channel: &str) -> PathBuf {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis())
         .unwrap_or_default();
-    let role = match role_arg {
-        "snapshot-observer" => "snap",
-        "player" => "p",
-        "spectator" => "spec",
-        "omniscient" => "omni",
-        other if other.starts_with("player-observer:") => "pobs",
-        other => other,
-    };
     let channel = match channel {
         "game" => "g",
         "log" => "l",
         other => other,
     };
     std::env::temp_dir().join(format!(
-        "rc-{role}-{channel}-{}-{now}.sock",
+        "rc-{}-{channel}-{}-{now}.sock",
+        spec.socket_abbrev(),
         std::process::id()
     ))
 }
@@ -318,4 +341,40 @@ fn shell_quote(value: &str) -> String {
 
 fn apple_quote(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+#[cfg(test)]
+mod tests {
+    use catan_agents::remote_agent::CliRole;
+    use catan_core::gameplay::game::event::ObserverKind;
+
+    use crate::{
+        config::ObserverConfig,
+        host::{CliChildSpec, unique_socket_path},
+    };
+
+    #[test]
+    fn snapshot_observer_config_maps_to_snapshot_role_and_omniscient_kind() {
+        let spec = CliChildSpec::observer(&ObserverConfig::SnapshotObserver);
+
+        assert!(matches!(spec.role, CliRole::SnapshotObserver));
+        assert_eq!(spec.observer_kind, Some(ObserverKind::Omniscient));
+        assert_eq!(spec.label, "snapshot-observer");
+        assert_eq!(spec.socket_abbrev(), "snap");
+    }
+
+    #[test]
+    fn cli_child_socket_names_use_short_role_and_channel_tokens() {
+        let spec = CliChildSpec::observer(&ObserverConfig::SnapshotObserver);
+
+        let game = unique_socket_path(&spec, "game");
+        let log = unique_socket_path(&spec, "log");
+        let game_name = game.file_name().unwrap().to_string_lossy();
+        let log_name = log.file_name().unwrap().to_string_lossy();
+
+        assert!(game_name.starts_with("rc-snap-g-"));
+        assert!(log_name.starts_with("rc-snap-l-"));
+        assert!(game_name.len() < 104);
+        assert!(log_name.len() < 104);
+    }
 }
