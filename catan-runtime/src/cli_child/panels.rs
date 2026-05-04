@@ -22,35 +22,39 @@ use ratatui::{
 
 pub(crate) fn public_model_lines(model: &UiModel) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
+    lines.push(section_header("turn"));
     lines.push(Line::from(format!(
-        "actor#: {:?} | robber: {:?} | longest road: {:?} | largest army: {:?}",
-        match model.actor {
-            Some(id) => format!("{}", id),
-            None => "None".to_owned(),
-        },
+        "  actor {:<6} robber {:?}",
+        player_option_label(model.actor),
         model.public.board_state.robber_pos.index().to_spiral(),
-        model.public.longest_road_owner,
-        model.public.largest_army_owner
     )));
     lines.push(Line::from(format!(
-        "board: radius {} | tiles {}",
+        "  longest road {:<6} largest army {}",
+        player_option_label(model.public.longest_road_owner),
+        player_option_label(model.public.largest_army_owner),
+    )));
+    lines.push(Line::from(format!(
+        "  board r{} / {} tiles",
         model.public.board.field_radius,
         model.public.board.tiles.len()
     )));
+    lines.push(Line::from(""));
+
+    lines.push(section_header("bank"));
     lines.push(bank_resources_line(model));
     lines.push(Line::from(""));
-    lines.push(Line::from("players:"));
+    lines.push(section_header("players"));
     for player in &model.public.players {
         lines.push(public_player_line(player));
     }
     lines.push(Line::from(""));
-    lines.push(Line::from("commands: roll | end | buy dev | build road [h1] [h2] | build settlement [h1] [h2] [h3] | build city [h1] [h2] [h3]"));
-    lines.push(Line::from(
-        "trades: bank-trade/bt for menu | bank-trade [give] [take] [G4 | G3 | S2]",
-    ));
-    lines.push(Line::from(
-        "dev cards: kn | yp | m | rb, or typed: use knight/yop/monopoly/roadbuild ...",
-    ));
+    lines.push(section_header("actions"));
+    lines.push(Line::from("  roll | end | buy dev"));
+    lines.push(Line::from("  build road | settlement | city"));
+    lines.push(Line::from(""));
+    lines.push(section_header("trade / dev"));
+    lines.push(Line::from("  bt menu | bt [give] [take] [G4|G3|S2]"));
+    lines.push(Line::from("  kn | yp | m | rb"));
     lines
 }
 
@@ -168,26 +172,45 @@ fn bank_resources_line(model: &UiModel) -> Line<'static> {
 fn public_player_line(player: &catan_agents::remote_agent::UiPublicPlayer) -> Line<'static> {
     let style = player_style(player.player_id);
     let mut spans = vec![
-        Span::styled("  ", style),
+        Span::raw("  "),
         Span::styled(format!("p{}", player.player_id), style),
-        Span::styled(" resources ", style),
+        Span::raw(format!(
+            "  vp {:<2}  hand ",
+            victory_points_label(player.victory_points)
+        )),
     ];
     match &player.resources {
         UiPublicPlayerResources::Exact(resources) => {
             push_resource_values(&mut spans, resources, |count| count.to_string());
         }
         UiPublicPlayerResources::Total(total) => {
-            spans.push(Span::styled(total.to_string(), style));
+            spans.push(Span::styled(format!("{total:>2}"), style));
         }
     }
-    spans.push(Span::styled(
-        format!(
-            " active_dev={} queued_dev={} vp={:?}",
-            player.active_dev_cards, player.queued_dev_cards, player.victory_points
-        ),
-        style,
-    ));
+    spans.push(Span::raw(format!(
+        "  dev {}/{}",
+        player.active_dev_cards, player.queued_dev_cards
+    )));
     Line::from(spans)
+}
+
+fn section_header(label: &'static str) -> Line<'static> {
+    Line::from(Span::styled(
+        label.to_ascii_uppercase(),
+        Style::default().fg(Color::Cyan),
+    ))
+}
+
+fn player_option_label(player_id: Option<PlayerId>) -> String {
+    player_id
+        .map(|player_id| format!("p{player_id}"))
+        .unwrap_or_else(|| "-".to_owned())
+}
+
+fn victory_points_label(victory_points: Option<u16>) -> String {
+    victory_points
+        .map(|victory_points| victory_points.to_string())
+        .unwrap_or_else(|| "?".to_owned())
 }
 
 pub(crate) fn resource_card_lines(

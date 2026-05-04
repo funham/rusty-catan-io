@@ -37,7 +37,7 @@ use super::{
         adjust_drop_selection, bank_trade_menu_lines, drop_personal_lines, game_ended_lines,
         personal_model_lines, player_menu_lines, public_model_lines, resource_picker_lines,
     },
-    render::field_lines,
+    render::{field_lines, field_size},
     selectors::{
         board_hex_set, initial_roads_for_settlement, move_hex_by_key, ordered_bank_trades_for_menu,
         selection_status,
@@ -621,19 +621,22 @@ impl CliUi {
 
             match model {
                 Some(model) => {
+                    let (field_width, field_height) = field_size();
+                    let field_pane_width = field_width.saturating_add(2);
+                    let field_pane_height = field_height.saturating_add(2);
                     let body_chunks = Layout::default()
                         .direction(Direction::Horizontal)
-                        .constraints([Constraint::Min(68), Constraint::Length(42)])
+                        .constraints([Constraint::Length(field_pane_width), Constraint::Min(36)])
                         .split(chunks[1]);
+
+                    let field_chunks = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([Constraint::Length(field_pane_height), Constraint::Min(8)])
+                        .split(body_chunks[0]);
 
                     let field = Paragraph::new(field_lines(model, &overlay))
                         .block(Block::default().borders(Borders::ALL).title("Field"));
-                    frame.render_widget(field, body_chunks[0]);
-
-                    let info_chunks = Layout::default()
-                        .direction(Direction::Vertical)
-                        .constraints([Constraint::Min(6), Constraint::Length(15)])
-                        .split(body_chunks[1]);
+                    frame.render_widget(field, field_chunks[0]);
 
                     let has_public_override = public_override.is_some();
                     let public_lines = public_override.unwrap_or_else(|| public_model_lines(model));
@@ -645,14 +648,14 @@ impl CliUi {
                     let public = Paragraph::new(public_lines)
                         .wrap(Wrap { trim: false })
                         .block(Block::default().borders(Borders::ALL).title(public_title));
-                    frame.render_widget(public, info_chunks[0]);
+                    frame.render_widget(public, body_chunks[1]);
 
                     let personal = Paragraph::new(
                         personal_override.unwrap_or_else(|| personal_model_lines(model)),
                     )
                     .wrap(Wrap { trim: false })
                     .block(Block::default().borders(Borders::ALL).title("Personal"));
-                    frame.render_widget(personal, info_chunks[1]);
+                    frame.render_widget(personal, field_chunks[1]);
                 }
                 None => {
                     let body = Paragraph::new(vec![Line::from("waiting for game state")])

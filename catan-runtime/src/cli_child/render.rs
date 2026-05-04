@@ -18,6 +18,14 @@ pub(crate) fn field_lines(model: &UiModel, overlay: &FieldOverlay) -> Vec<Line<'
     canvas_lines(renderer.canvas())
 }
 
+pub(crate) fn field_size() -> (u16, u16) {
+    let renderer = FieldRenderer::new();
+    (
+        renderer.canvas().width() as u16,
+        renderer.canvas().height() as u16,
+    )
+}
+
 fn render_game_view(model: &UiModel) -> RenderGameView {
     RenderGameView {
         board: RenderBoard {
