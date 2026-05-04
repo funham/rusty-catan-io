@@ -528,11 +528,18 @@ impl GameObserver for RemoteCliObserver {
 
     fn on_event(&mut self, event: &GameEvent, context: ObserverNotificationContext<'_>) {
         let model = UiModel::from_observer(context, self.include_snapshot_state);
+        let summary = ui_model_summary(&model);
+        let started = std::time::Instant::now();
+        let frame_len = observer_event_frame_len(event, &model)
+            .map(|len| len.to_string())
+            .unwrap_or_else(|err| format!("serialize_error:{err}"));
         log::trace!(
-            target: "catan_agents::remote_agent",
-            "sending observer event {:?}; include_snapshot_state={}",
+            target: "catan_agents::remote_observer_flow",
+            "send start event={:?} snapshot={} frame_len={} {}",
             event,
-            self.include_snapshot_state
+            self.include_snapshot_state,
+            frame_len,
+            summary
         );
         if let Err(err) = write_frame(
             &mut self.stream,
@@ -541,9 +548,27 @@ impl GameObserver for RemoteCliObserver {
                 view: model,
             },
         ) {
-            log::warn!(target: "catan_agents::remote_agent", "failed to write observer event frame: {err}");
+            log::warn!(target: "catan_agents::remote_observer_flow", "send failed event={:?} elapsed_ms={} err={err}", event, started.elapsed().as_millis());
+        } else {
+            log::trace!(
+                target: "catan_agents::remote_observer_flow",
+                "send done event={:?} elapsed_ms={}",
+                event,
+                started.elapsed().as_millis()
+            );
         }
     }
+}
+
+fn observer_event_frame_len(
+    event: &GameEvent,
+    model: &UiModel,
+) -> Result<usize, serde_json::Error> {
+    serde_json::to_vec(&HostToCli::Event {
+        event: event.clone(),
+        view: model.clone(),
+    })
+    .map(|payload| payload.len())
 }
 
 impl Drop for RemoteCliObserver {
@@ -606,6 +631,45 @@ impl UiModel {
             },
         }
     }
+}
+
+pub fn ui_model_summary(model: &UiModel) -> String {
+    let settlements: usize = model
+        .public
+        .builds
+        .iter()
+        .map(|builds| builds.establishments.len())
+        .sum();
+    let roads: usize = model
+        .public
+        .builds
+        .iter()
+        .map(|builds| builds.roads.len())
+        .sum();
+    let resources = model
+        .snapshot_state
+        .as_ref()
+        .map(|state| {
+            state
+                .players
+                .iter()
+                .enumerate()
+                .map(|(player_id, player)| format!("p{player_id}:{}", player.resources().total()))
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .or_else(|| {
+            model.omniscient.as_ref().map(|omniscient| {
+                omniscient
+                    .players
+                    .iter()
+                    .map(|player| format!("p{}:{}", player.player_id, player.resources.total()))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            })
+        })
+        .unwrap_or_else(|| "-".to_owned());
+    format!("builds S:{settlements} R:{roads}; resources [{resources}]")
 }
 
 impl UiPublicGame {
@@ -975,6 +1039,53 @@ mod tests {
             &mut bytes,
             &HostToCli::Event {
                 event: catan_core::gameplay::game::event::GameEvent::GameStarted,
+                view: model,
+            },
+        )
+        .unwrap();
+
+        assert!(!bytes.is_empty());
+    }
+
+    #[test]
+    fn snapshot_observer_event_frame_writes_with_built_exact_state() {
+        let mut init = GameInitializationState::default();
+        let (settlement, road) = init
+            .builds
+            .query()
+            .possible_initial_placements(&init.board, 0)
+            .into_iter()
+            .next()
+            .expect("default board should have an initial placement");
+        init.builds
+            .try_init_place(0, road, settlement)
+            .expect("generated initial placement should be valid");
+
+        let state = init.finish();
+        let index = GameIndex::rebuild(&state);
+        let visibility = VisibilityConfig::default();
+        let factory = ContextFactory {
+            state: &state,
+            index: &index,
+            visibility: &visibility,
+        };
+        let model = UiModel::from_observer(
+            ObserverNotificationContext::Omniscient {
+                public: factory.spectator_public_view(),
+                full: factory.omniscient_view(),
+            },
+            true,
+        );
+        let mut bytes = Vec::new();
+
+        write_frame(
+            &mut bytes,
+            &HostToCli::Event {
+                event: GameEvent::InitialPlacementBuilt {
+                    player_id: 0,
+                    settlement: settlement.pos,
+                    road,
+                },
                 view: model,
             },
         )

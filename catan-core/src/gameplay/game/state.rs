@@ -581,6 +581,23 @@ mod tests {
     }
 
     #[test]
+    fn game_state_serializes_built_roads_and_settlements_for_snapshots() {
+        let (state, _) = state_with_two_initial_settlements();
+
+        let raw = serde_json::to_string(&state).unwrap();
+        let restored: GameState = serde_json::from_str(&raw).unwrap();
+
+        assert_eq!(restored.builds.by_player(0).settlements_count(), 1);
+        assert_eq!(restored.builds.by_player(0).roads_count(), 1);
+        assert_eq!(restored.builds.by_player(1).settlements_count(), 1);
+        assert_eq!(restored.builds.by_player(1).roads_count(), 1);
+        assert_eq!(
+            restored.builds.by_player(0).roads.edges(),
+            state.builds.by_player(0).roads.edges()
+        );
+    }
+
+    #[test]
     fn knight_moves_robber_steals_and_marks_card_used() {
         let (mut state, victim_hex) = state_with_two_initial_settlements();
         give_active_knight(&mut state, 0);

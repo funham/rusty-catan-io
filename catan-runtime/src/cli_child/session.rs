@@ -12,7 +12,7 @@ use std::{
 
 use catan_agents::remote_agent::{
     CliRole, CliToHost, DecisionRequestFrame, DecisionResponseFrame, HostToCli, read_frame,
-    write_frame,
+    ui_model_summary, write_frame,
 };
 use catan_core::agent::action::{
     ChoosePlayerToRobAction, DropHalfAction, InitStageAction, MoveRobbersAction, PostDevCardAction,
@@ -169,6 +169,7 @@ fn run_observer_loop(
     let mut reader = NonblockingFrameReader::default();
     let mut latest_view = None;
     let mut latest_message = "connected as SnapshotObserver".to_owned();
+    let mut event_count = 0;
     loop {
         let mut received_message = false;
         while let Some(msg) = reader
@@ -187,10 +188,14 @@ fn run_observer_loop(
                     return Ok(());
                 }
                 HostToCli::Event { event, view } => {
+                    event_count += 1;
+                    let summary = ui_model_summary(&view);
                     log::trace!(
-                        target: "catan_runtime::cli_child::session",
-                        "observer received event: {:?}",
-                        event
+                        target: "catan_runtime::cli_child::observer_flow",
+                        "decode event_count={} event={:?} {}",
+                        event_count,
+                        event,
+                        summary
                     );
                     if let (
                         CliDisplayMode::Normal,
@@ -206,7 +211,14 @@ fn run_observer_loop(
                         return Ok(());
                     }
                     latest_message = format!("event: {event:?}");
-                    ui.show_model(&view, latest_message.clone())
+                    log::trace!(
+                        target: "catan_runtime::cli_child::observer_flow",
+                        "display event_count={} event={:?} {}",
+                        event_count,
+                        event,
+                        summary
+                    );
+                    ui.show_observer_model(&view, latest_message.clone(), event_count)
                         .map_err(|err| format!("failed to draw TUI: {err}"))?;
                     latest_view = Some(view);
                 }
@@ -217,7 +229,7 @@ fn run_observer_loop(
                     log::warn!("{latest_message}");
                     match latest_view.as_ref() {
                         Some(view) => ui
-                            .show_model(view, latest_message.clone())
+                            .show_observer_model(view, latest_message.clone(), event_count)
                             .map_err(|err| format!("failed to draw TUI: {err}"))?,
                         None => ui
                             .set_message(latest_message.clone())
@@ -238,7 +250,7 @@ fn run_observer_loop(
                 };
                 match latest_view.as_ref() {
                     Some(view) => ui
-                        .show_model(view, latest_message.clone())
+                        .show_observer_model(view, latest_message.clone(), event_count)
                         .map_err(|err| format!("failed to draw TUI: {err}"))?,
                     None => ui
                         .set_message(latest_message.clone())
@@ -247,7 +259,7 @@ fn run_observer_loop(
             }
             Some(SnapshotInput::Redraw) => match latest_view.as_ref() {
                 Some(view) => ui
-                    .show_model(view, latest_message.clone())
+                    .show_observer_model(view, latest_message.clone(), event_count)
                     .map_err(|err| format!("failed to draw TUI: {err}"))?,
                 None => ui
                     .set_message(latest_message.clone())

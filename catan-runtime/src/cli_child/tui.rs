@@ -8,7 +8,7 @@ use std::{
     time::Duration,
 };
 
-use catan_agents::remote_agent::{LegalDecisionOptions, UiModel};
+use catan_agents::remote_agent::{LegalDecisionOptions, UiModel, ui_model_summary};
 use catan_core::gameplay::{
     game::event::GameEndPlayerStats,
     primitives::{
@@ -55,6 +55,8 @@ pub(crate) struct CliUi {
     overlay: FieldOverlay,
     public_override: Option<Vec<Line<'static>>>,
     personal_override: Option<Vec<Line<'static>>>,
+    observer_event_count: u64,
+    observer_summary: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,6 +86,8 @@ impl CliUi {
             overlay: FieldOverlay::default(),
             public_override: None,
             personal_override: None,
+            observer_event_count: 0,
+            observer_summary: None,
         })
     }
 
@@ -111,6 +115,17 @@ impl CliUi {
         self.public_override = None;
         self.personal_override = None;
         self.draw(Some(model), "", "")
+    }
+
+    pub(crate) fn show_observer_model(
+        &mut self,
+        model: &UiModel,
+        message: String,
+        event_count: u64,
+    ) -> io::Result<()> {
+        self.observer_event_count = event_count;
+        self.observer_summary = Some(ui_model_summary(model));
+        self.show_model(model, message)
     }
 
     pub(crate) fn show_game_ended(
@@ -656,6 +671,10 @@ impl CliUi {
                 Span::styled("rusty-catan", Style::default().fg(Color::Green)),
                 Span::raw("  "),
                 Span::raw(message.as_str()),
+                Span::raw(observer_status_suffix(
+                    self.observer_event_count,
+                    self.observer_summary.as_deref(),
+                )),
             ]))
             .block(Block::default().borders(Borders::ALL).title("Status"));
             frame.render_widget(title, chunks[0]);
@@ -763,5 +782,13 @@ impl Drop for CliUi {
         let _ = disable_raw_mode();
         let _ = execute!(self.terminal.backend_mut(), LeaveAlternateScreen);
         let _ = self.terminal.show_cursor();
+    }
+}
+
+fn observer_status_suffix(event_count: u64, summary: Option<&str>) -> String {
+    match (event_count, summary) {
+        (0, _) => String::new(),
+        (count, Some(summary)) => format!("  | events:{count} {summary}"),
+        (count, None) => format!("  | events:{count}"),
     }
 }

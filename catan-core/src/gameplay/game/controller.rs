@@ -248,6 +248,13 @@ impl GameController {
                 "Notifying initialization observer of kind {:?}",
                 observer.kind()
             );
+            log::trace!(
+                target: "catan_core::observer_flow",
+                "init emit event={:?} kind={:?} {}",
+                event,
+                observer.kind(),
+                observer_state_summary(game)
+            );
             let cx = match observer.kind() {
                 ObserverKind::Spectator => ObserverNotificationContext::Spectator {
                     public: factory.spectator_public_view(),
@@ -316,6 +323,13 @@ impl GameController {
 
         log::trace!("Notifying {} observers", observers.len());
         for observer in observers.iter_mut() {
+            log::trace!(
+                target: "catan_core::observer_flow",
+                "game emit event={:?} kind={:?} {}",
+                event,
+                observer.kind(),
+                observer_state_summary(game)
+            );
             let cx = match observer.kind() {
                 ObserverKind::Spectator => ObserverNotificationContext::Spectator {
                     public: factory.spectator_public_view(),
@@ -1148,6 +1162,26 @@ impl GameController {
             })
             .collect()
     }
+}
+
+fn observer_state_summary(game: &GameState) -> String {
+    let settlements: usize = (0..game.players.count())
+        .map(|player_id| game.builds.by_player(player_id).settlements_count())
+        .sum();
+    let roads: usize = (0..game.players.count())
+        .map(|player_id| game.builds.by_player(player_id).roads_count())
+        .sum();
+    let resources = game
+        .players
+        .iter()
+        .enumerate()
+        .map(|(player_id, player)| format!("p{player_id}:{}", player.resources().total()))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "turn={} builds S:{settlements} R:{roads}; resources [{resources}]",
+        game.turn.get_turns_played()
+    )
 }
 
 #[cfg(test)]

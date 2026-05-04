@@ -10,10 +10,29 @@ use crate::{
 // (better than v -> {v}, cause edge's invariant enforces correctness of a graph)
 
 /// Not oriented graph
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone)]
 pub struct RoadGraph {
     edges: BTreeSet<Path>,
     out: BTreeMap<Intersection, BTreeSet<Path>>,
+}
+
+impl Serialize for RoadGraph {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.edges.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for RoadGraph {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let edges = BTreeSet::<Path>::deserialize(deserializer)?;
+        Ok(Self::from_roads(edges))
+    }
 }
 
 impl RoadGraph {
