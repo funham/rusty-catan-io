@@ -1,0 +1,13 @@
+{
+    "players": [
+      { "kind": "greedy" },
+      { "kind": "greedy" },
+      { "kind": "greedy" },
+      { "kind": "greedy" }
+    ],
+    "observers": [],
+    "field": { "kind": "default" },
+    "dice": { "kind": "random" },
+    "limits": { "max_turns": 500 }
+  }
+  
