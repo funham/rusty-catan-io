@@ -3,7 +3,10 @@
 //! Contains `CliUi`, terminal setup/cleanup, the main draw routine, and interactive
 //! selection widgets for board positions, builds, resources, bank trades, and players.
 
-use std::io::{self, Stdout};
+use std::{
+    io::{self, Stdout},
+    time::Duration,
+};
 
 use catan_agents::remote_agent::{LegalDecisionOptions, UiModel};
 use catan_core::gameplay::{
@@ -36,6 +39,7 @@ use super::{
     panels::{
         adjust_drop_selection, bank_trade_menu_lines, drop_personal_lines, game_ended_lines,
         personal_model_lines, player_menu_lines, public_model_lines, resource_picker_lines,
+        snapshot_state_lines,
     },
     render::{field_lines, field_size},
     selectors::{
@@ -46,14 +50,27 @@ use super::{
 
 pub(crate) struct CliUi {
     terminal: Terminal<CrosstermBackend<Stdout>>,
+    display_mode: CliDisplayMode,
     message: String,
     overlay: FieldOverlay,
     public_override: Option<Vec<Line<'static>>>,
     personal_override: Option<Vec<Line<'static>>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CliDisplayMode {
+    Normal,
+    Snapshot,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SnapshotInput {
+    Snapshot,
+    Redraw,
+}
+
 impl CliUi {
-    pub(crate) fn new() -> io::Result<Self> {
+    pub(crate) fn new(display_mode: CliDisplayMode) -> io::Result<Self> {
         log::trace!("Initializing CLI UI");
         enable_raw_mode()?;
         let mut stdout = io::stdout();
@@ -62,6 +79,7 @@ impl CliUi {
         log::trace!("CLI UI initialized successfully");
         Ok(Self {
             terminal,
+            display_mode,
             message: "waiting for host".to_owned(),
             overlay: FieldOverlay::default(),
             public_override: None,
@@ -78,6 +96,10 @@ impl CliUi {
         self.public_override = None;
         self.personal_override = None;
         self.draw(None, "", "")
+    }
+
+    pub(crate) fn display_mode(&self) -> CliDisplayMode {
+        self.display_mode
     }
 
     pub(crate) fn show_model(&mut self, model: &UiModel, message: String) -> io::Result<()> {
@@ -145,6 +167,25 @@ impl CliUi {
                     _ => {}
                 }
             }
+        }
+    }
+
+    pub(crate) fn poll_snapshot_input(&mut self) -> io::Result<Option<SnapshotInput>> {
+        if !event::poll(Duration::from_millis(25))? {
+            return Ok(None);
+        }
+        match event::read()? {
+            CrosstermEvent::Key(key) if key.kind == KeyEventKind::Press => {
+                if self.display_mode == CliDisplayMode::Snapshot
+                    && matches!(key.code, KeyCode::Char('s') | KeyCode::Char('S'))
+                {
+                    Ok(Some(SnapshotInput::Snapshot))
+                } else {
+                    Ok(None)
+                }
+            }
+            CrosstermEvent::Resize(_, _) => Ok(Some(SnapshotInput::Redraw)),
+            _ => Ok(None),
         }
     }
 
@@ -620,43 +661,72 @@ impl CliUi {
             frame.render_widget(title, chunks[0]);
 
             match model {
-                Some(model) => {
-                    let (field_width, field_height) = field_size();
-                    let field_pane_width = field_width.saturating_add(2);
-                    let field_pane_height = field_height.saturating_add(2);
-                    let body_chunks = Layout::default()
-                        .direction(Direction::Horizontal)
-                        .constraints([Constraint::Length(field_pane_width), Constraint::Min(36)])
-                        .split(chunks[1]);
+                Some(model) => match self.display_mode {
+                    CliDisplayMode::Normal => {
+                        let (field_width, field_height) = field_size();
+                        let field_pane_width = field_width.saturating_add(2);
+                        let field_pane_height = field_height.saturating_add(2);
+                        let body_chunks = Layout::default()
+                            .direction(Direction::Horizontal)
+                            .constraints([
+                                Constraint::Length(field_pane_width),
+                                Constraint::Min(36),
+                            ])
+                            .split(chunks[1]);
 
-                    let field_chunks = Layout::default()
-                        .direction(Direction::Vertical)
-                        .constraints([Constraint::Length(field_pane_height), Constraint::Min(8)])
-                        .split(body_chunks[0]);
+                        let field_chunks = Layout::default()
+                            .direction(Direction::Vertical)
+                            .constraints([
+                                Constraint::Length(field_pane_height),
+                                Constraint::Min(8),
+                            ])
+                            .split(body_chunks[0]);
 
-                    let field = Paragraph::new(field_lines(model, &overlay))
-                        .block(Block::default().borders(Borders::ALL).title("Field"));
-                    frame.render_widget(field, field_chunks[0]);
+                        let field = Paragraph::new(field_lines(model, &overlay))
+                            .block(Block::default().borders(Borders::ALL).title("Field"));
+                        frame.render_widget(field, field_chunks[0]);
 
-                    let has_public_override = public_override.is_some();
-                    let public_lines = public_override.unwrap_or_else(|| public_model_lines(model));
-                    let public_title = if has_public_override {
-                        "Game Ended"
-                    } else {
-                        "Public"
-                    };
-                    let public = Paragraph::new(public_lines)
+                        let has_public_override = public_override.is_some();
+                        let title = if has_public_override {
+                            "Game Ended"
+                        } else {
+                            "Public"
+                        };
+                        let public = Paragraph::new(
+                            public_override.unwrap_or_else(|| public_model_lines(model)),
+                        )
                         .wrap(Wrap { trim: false })
-                        .block(Block::default().borders(Borders::ALL).title(public_title));
-                    frame.render_widget(public, body_chunks[1]);
+                        .block(Block::default().borders(Borders::ALL).title(title));
+                        frame.render_widget(public, body_chunks[1]);
 
-                    let personal = Paragraph::new(
-                        personal_override.unwrap_or_else(|| personal_model_lines(model)),
-                    )
-                    .wrap(Wrap { trim: false })
-                    .block(Block::default().borders(Borders::ALL).title("Personal"));
-                    frame.render_widget(personal, field_chunks[1]);
-                }
+                        let personal = Paragraph::new(
+                            personal_override.unwrap_or_else(|| personal_model_lines(model)),
+                        )
+                        .wrap(Wrap { trim: false })
+                        .block(Block::default().borders(Borders::ALL).title("Personal"));
+                        frame.render_widget(personal, field_chunks[1]);
+                    }
+                    CliDisplayMode::Snapshot => {
+                        let (field_width, _) = field_size();
+                        let field_pane_width = field_width.saturating_add(2);
+                        let body_chunks = Layout::default()
+                            .direction(Direction::Horizontal)
+                            .constraints([
+                                Constraint::Length(field_pane_width),
+                                Constraint::Min(42),
+                            ])
+                            .split(chunks[1]);
+
+                        let field = Paragraph::new(field_lines(model, &overlay))
+                            .block(Block::default().borders(Borders::ALL).title("Field"));
+                        frame.render_widget(field, body_chunks[0]);
+
+                        let state = Paragraph::new(snapshot_state_lines(model))
+                            .wrap(Wrap { trim: false })
+                            .block(Block::default().borders(Borders::ALL).title("State"));
+                        frame.render_widget(state, body_chunks[1]);
+                    }
+                },
                 None => {
                     let body = Paragraph::new(vec![Line::from("waiting for game state")])
                         .wrap(Wrap { trim: false })
@@ -671,9 +741,14 @@ impl CliUi {
                     input.to_owned(),
                     Style::default().fg(Color::Yellow),
                 )),
-                Line::from(
-                    "Text: Esc clears, Enter submits. Select: arrows/tab move, Enter picks.",
-                ),
+                Line::from(match self.display_mode {
+                    CliDisplayMode::Normal => {
+                        "Text: Esc clears, Enter submits. Select: arrows/tab move, Enter picks."
+                    }
+                    CliDisplayMode::Snapshot => {
+                        "Snapshot observer: press s after an update to save the latest exact state."
+                    }
+                }),
             ])
             .block(Block::default().borders(Borders::ALL).title("Command"));
             frame.render_widget(input, chunks[2]);

@@ -5,7 +5,9 @@
     { "kind": "greedy" },
     { "kind": "random" }
   ],
-  "observers": [],
+  "observers": [
+    { "kind": "snapshot_observer" }
+  ],
   "field": { "kind": "default" },
   "dice": { "kind": "random" },
   "limits": { "max_turns": 500 }

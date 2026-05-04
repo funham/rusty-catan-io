@@ -7,7 +7,7 @@ use crate::gameplay::primitives::{
     resource::{Resource, ResourceCollection, ResourceMap},
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bank {
     pub resources: ResourceCollection,
     pub dev_cards: Vec<DevCardKind>,

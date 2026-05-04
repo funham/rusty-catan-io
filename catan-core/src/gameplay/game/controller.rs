@@ -107,10 +107,23 @@ impl GameController {
     }
 
     pub fn init(
-        mut game_init: GameInitializationState,
+        game_init: GameInitializationState,
         players: &mut Vec<Box<dyn Agent>>,
     ) -> GameState {
+        Self::init_with_observers(game_init, players, &mut [])
+    }
+
+    pub fn init_with_observers(
+        mut game_init: GameInitializationState,
+        players: &mut Vec<Box<dyn Agent>>,
+        observers: &mut [Box<dyn GameObserver>],
+    ) -> GameState {
         log::trace!("Initializing game with {} players", players.len());
+        Self::notify_observers_for_state(
+            &game_init.clone().finish(),
+            observers,
+            &GameEvent::GameStarted,
+        );
 
         while game_init.turn.get_rounds_played() < 2 {
             let player_id = game_init.turn.get_turn_index();
@@ -182,6 +195,15 @@ impl GameController {
                                 establishment,
                             );
                         }
+                        Self::notify_observers_for_state(
+                            &game_init.clone().finish(),
+                            observers,
+                            &GameEvent::InitialPlacementBuilt {
+                                player_id,
+                                settlement: establishment.pos,
+                                road: action.road,
+                            },
+                        );
                         break;
                     }
                 }
@@ -200,6 +222,46 @@ impl GameController {
             bank: game_init.bank,
             players: game_init.players,
             builds: game_init.builds,
+        }
+    }
+
+    fn notify_observers_for_state(
+        game: &GameState,
+        observers: &mut [Box<dyn GameObserver>],
+        event: &GameEvent,
+    ) {
+        log::trace!(
+            "Notifying {} initialization observers of event: {:?}",
+            observers.len(),
+            event
+        );
+        let index = GameIndex::rebuild(game);
+        let visibility = VisibilityConfig::default();
+        let factory = ContextFactory {
+            state: game,
+            index: &index,
+            visibility: &visibility,
+        };
+
+        for observer in observers.iter_mut() {
+            log::trace!(
+                "Notifying initialization observer of kind {:?}",
+                observer.kind()
+            );
+            let cx = match observer.kind() {
+                ObserverKind::Spectator => ObserverNotificationContext::Spectator {
+                    public: factory.spectator_public_view(),
+                },
+                ObserverKind::Player(player_id) => ObserverNotificationContext::Player {
+                    public: factory.public_view(visibility.player_policy(player_id)),
+                    private: factory.private_view(player_id),
+                },
+                ObserverKind::Omniscient => ObserverNotificationContext::Omniscient {
+                    public: factory.spectator_public_view(),
+                    full: factory.omniscient_view(),
+                },
+            };
+            observer.on_event(event, cx);
         }
     }
 
@@ -1105,6 +1167,7 @@ mod tests {
                 PlayerNotification,
             },
             init::GameInitializationState,
+            legal,
             state::GameState,
             view::PlayerDecisionContext,
         },
@@ -1328,6 +1391,111 @@ mod tests {
         }
     }
 
+    #[derive(Debug, Clone)]
+    struct OmniscientRecord {
+        event: GameEvent,
+        settlements: usize,
+        roads: usize,
+        player_resource_totals: Vec<u16>,
+    }
+
+    struct RecordingOmniscientObserver {
+        records: Rc<RefCell<Vec<OmniscientRecord>>>,
+    }
+
+    impl GameObserver for RecordingOmniscientObserver {
+        fn kind(&self) -> ObserverKind {
+            ObserverKind::Omniscient
+        }
+
+        fn on_event(&mut self, event: &GameEvent, context: ObserverNotificationContext<'_>) {
+            let ObserverNotificationContext::Omniscient { full, .. } = context else {
+                panic!("omniscient observer should receive omniscient context");
+            };
+            let settlements = (0..full.state.players.count())
+                .map(|player_id| full.state.builds.by_player(player_id).settlements_count())
+                .sum();
+            let roads = (0..full.state.players.count())
+                .map(|player_id| full.state.builds.by_player(player_id).roads_count())
+                .sum();
+            let player_resource_totals = full
+                .state
+                .players
+                .iter()
+                .map(|player| player.resources().total())
+                .collect();
+
+            self.records.borrow_mut().push(OmniscientRecord {
+                event: event.clone(),
+                settlements,
+                roads,
+                player_resource_totals,
+            });
+        }
+    }
+
+    struct LegalInitAgent {
+        id: PlayerId,
+    }
+
+    impl PlayerNotification for LegalInitAgent {}
+
+    impl PlayerRuntime for LegalInitAgent {
+        fn player_id(&self) -> PlayerId {
+            self.id
+        }
+
+        fn init_stage_action(&mut self, context: PlayerDecisionContext<'_>) -> InitStageAction {
+            let (establishment, road) = legal::legal_initial_placements(&context)
+                .into_iter()
+                .next()
+                .expect("default board should have legal initial placements");
+            InitStageAction {
+                establishment_position: establishment.pos,
+                road,
+            }
+        }
+
+        fn init_action(&mut self, _context: PlayerDecisionContext<'_>) -> InitAction {
+            unreachable!("not used by initialization test")
+        }
+
+        fn after_dice_action(&mut self, _context: PlayerDecisionContext<'_>) -> PostDiceAction {
+            unreachable!("not used by initialization test")
+        }
+
+        fn after_dev_card_action(
+            &mut self,
+            _context: PlayerDecisionContext<'_>,
+        ) -> PostDevCardAction {
+            unreachable!("not used by initialization test")
+        }
+
+        fn regular_action(&mut self, _context: PlayerDecisionContext<'_>) -> RegularAction {
+            unreachable!("not used by initialization test")
+        }
+
+        fn move_robbers(&mut self, _context: PlayerDecisionContext<'_>) -> MoveRobbersAction {
+            unreachable!("not used by initialization test")
+        }
+
+        fn choose_player_to_rob(
+            &mut self,
+            _context: PlayerDecisionContext<'_>,
+            _robber_pos: Hex,
+        ) -> ChoosePlayerToRobAction {
+            unreachable!("not used by initialization test")
+        }
+
+        fn answer_trade(&mut self, _context: PlayerDecisionContext<'_>) -> TradeAnswer {
+            unreachable!("not used by initialization test")
+        }
+
+        fn drop_half(&mut self, _context: PlayerDecisionContext<'_>) -> DropHalfAction {
+            unreachable!("not used by initialization test")
+        }
+    }
+
     fn invalid_agents(
         first_invalid_actions_before_end: Option<u64>,
     ) -> Vec<Box<dyn crate::agent::Agent>> {
@@ -1343,6 +1511,106 @@ mod tests {
                 }) as Box<dyn crate::agent::Agent>
             })
             .collect()
+    }
+
+    #[test]
+    fn init_with_observers_reports_initial_state_and_placements() {
+        let mut agents = (0..4)
+            .map(|id| Box::new(LegalInitAgent { id }) as Box<dyn crate::agent::Agent>)
+            .collect::<Vec<_>>();
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let mut observers = vec![Box::new(RecordingObserver {
+            events: events.clone(),
+        }) as Box<dyn GameObserver>];
+
+        let state = GameController::init_with_observers(
+            GameInitializationState::default(),
+            &mut agents,
+            &mut observers,
+        );
+        let events = events.borrow();
+
+        assert!(matches!(events.first(), Some(GameEvent::GameStarted)));
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, GameEvent::InitialPlacementBuilt { .. }))
+                .count(),
+            8
+        );
+        assert_eq!(state.builds.players().len(), 4);
+    }
+
+    #[test]
+    fn omniscient_observer_receives_full_state_updates_during_initialization() {
+        let mut agents = (0..4)
+            .map(|id| Box::new(LegalInitAgent { id }) as Box<dyn crate::agent::Agent>)
+            .collect::<Vec<_>>();
+        let records = Rc::new(RefCell::new(Vec::new()));
+        let mut observers = vec![Box::new(RecordingOmniscientObserver {
+            records: records.clone(),
+        }) as Box<dyn GameObserver>];
+
+        GameController::init_with_observers(
+            GameInitializationState::default(),
+            &mut agents,
+            &mut observers,
+        );
+        let records = records.borrow();
+
+        assert!(matches!(
+            records.first().map(|record| &record.event),
+            Some(GameEvent::GameStarted)
+        ));
+        assert_eq!(records.first().unwrap().settlements, 0);
+        assert_eq!(records.first().unwrap().roads, 0);
+        assert_eq!(
+            records
+                .iter()
+                .filter(|record| matches!(record.event, GameEvent::InitialPlacementBuilt { .. }))
+                .count(),
+            8
+        );
+        assert_eq!(records.last().unwrap().settlements, 8);
+        assert_eq!(records.last().unwrap().roads, 8);
+        assert!(
+            records
+                .iter()
+                .any(|record| record.player_resource_totals.iter().any(|total| *total > 0)),
+            "second setup round should grant at least one player initial resources"
+        );
+    }
+
+    #[test]
+    fn omniscient_observer_receives_full_state_updates_during_gameplay() {
+        let (state, _, target_num) = game_with_settlement_on_numbered_hex();
+        let records = Rc::new(RefCell::new(Vec::new()));
+        let mut controller = GameController::new(state, invalid_agents(Some(0)));
+        controller.add_observer(Box::new(RecordingOmniscientObserver {
+            records: records.clone(),
+        }));
+
+        let result = controller.run_with_options(
+            &mut FixedDice(target_num),
+            RunOptions {
+                max_turns: Some(1),
+                max_invalid_actions: Some(10),
+            },
+        );
+        let records = records.borrow();
+
+        assert_eq!(result, GameResult::LimitReached { turns: 1 });
+        assert!(
+            records
+                .iter()
+                .any(|record| matches!(record.event, GameEvent::ResourcesDistributed))
+        );
+        assert!(
+            records
+                .iter()
+                .any(|record| record.player_resource_totals.first() == Some(&1)),
+            "omniscient observer should see player 0 receive harvested resources"
+        );
     }
 
     #[test]

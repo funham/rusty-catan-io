@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use serde::{Deserialize, Serialize};
+
 use crate::{
     gameplay::{
         field::state::{BoardLayout, BoardState},
@@ -18,14 +20,37 @@ use crate::{
 
 use crate::topology::Path;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameState {
+    #[serde(with = "arc_board_layout")]
     pub board: Arc<BoardLayout>,
     pub board_state: BoardState,
     pub turn: GameTurn,
     pub bank: Bank,
     pub players: PlayerDataContainer,
     pub builds: BoardBuildData,
+}
+
+mod arc_board_layout {
+    use std::sync::Arc;
+
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    use crate::gameplay::field::state::BoardLayout;
+
+    pub(super) fn serialize<S>(board: &Arc<BoardLayout>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        board.as_ref().serialize(serializer)
+    }
+
+    pub(super) fn deserialize<'de, D>(deserializer: D) -> Result<Arc<BoardLayout>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        BoardLayout::deserialize(deserializer).map(Arc::new)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -503,6 +528,56 @@ mod tests {
             .get_mut(player_id)
             .dev_cards_add(DevCardKind::Usable(UsableDevCard::Knight));
         state.players.get_mut(player_id).dev_cards_reset_queue();
+    }
+
+    #[test]
+    fn game_state_serializes_exact_state_for_snapshots() {
+        let mut state = GameInitializationState::default().finish();
+        state.bank.dev_cards = vec![
+            DevCardKind::VictoryPoint,
+            DevCardKind::Usable(UsableDevCard::Knight),
+            DevCardKind::Usable(UsableDevCard::Monopoly),
+        ];
+        state
+            .transfer_from_bank(
+                ResourceCollection {
+                    brick: 3,
+                    sheep: 2,
+                    ..ResourceCollection::ZERO
+                },
+                0,
+            )
+            .unwrap();
+        for _ in 0..3 {
+            give_active_knight(&mut state, 1);
+        }
+        for _ in 0..3 {
+            state
+                .players
+                .get_mut(1)
+                .dev_cards_move_to_used(UsableDevCard::Knight)
+                .unwrap();
+        }
+
+        let raw = serde_json::to_string(&state).unwrap();
+        let restored: GameState = serde_json::from_str(&raw).unwrap();
+
+        assert_eq!(restored.board.n_players, state.board.n_players);
+        assert_eq!(
+            restored.board.arrangement.len(),
+            state.board.arrangement.len()
+        );
+        assert_eq!(restored.bank.resources, state.bank.resources);
+        assert_eq!(restored.bank.dev_cards, state.bank.dev_cards);
+        assert_eq!(
+            restored.players.get(0).resources(),
+            state.players.get(0).resources()
+        );
+        assert_eq!(restored.players.best_army(), Some(1));
+        assert_eq!(
+            restored.players.get(1).dev_cards().used[UsableDevCard::Knight],
+            3
+        );
     }
 
     #[test]

@@ -10,6 +10,7 @@ mod panels;
 mod render;
 mod selectors;
 mod session;
+mod snapshot;
 mod tui;
 
 pub use session::run;

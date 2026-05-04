@@ -31,7 +31,7 @@ impl UsableDevCard {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DevCardKind {
     Usable(UsableDevCard),
     VictoryPoint,
@@ -112,6 +112,7 @@ impl std::fmt::Display for DevCardData {
     }
 }
 
+#[derive(Debug)]
 pub struct DevCardDataPlayingError;
 
 impl DevCardData {

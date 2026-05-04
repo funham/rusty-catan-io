@@ -8,7 +8,7 @@ use catan_core::gameplay::{
     game::event::GameEndPlayerStats,
     primitives::{
         bank::DeckFullnessLevel,
-        dev_card::{DevCardData, UsableDevCard},
+        dev_card::{DevCardData, DevCardKind, UsableDevCard},
         player::PlayerId,
         resource::{Resource, ResourceCollection},
         trade::{BankTrade, BankTradeKind},
@@ -143,6 +143,52 @@ pub(crate) fn personal_model_lines(model: &UiModel) -> Vec<Line<'static>> {
     lines
 }
 
+pub(crate) fn snapshot_state_lines(model: &UiModel) -> Vec<Line<'static>> {
+    let Some(state) = &model.snapshot_state else {
+        return vec![Line::from("no exact snapshot state available")];
+    };
+
+    let mut lines = Vec::new();
+    lines.push(section_header("turn"));
+    lines.push(Line::from(format!(
+        "  player p{} | turns {} | rounds {}",
+        state.turn.get_turn_index(),
+        state.turn.get_turns_played(),
+        state.turn.get_rounds_played(),
+    )));
+    lines.push(Line::from(format!(
+        "  robber {:?} | longest road {} | largest army {}",
+        state.board_state.robber_pos.index().to_spiral(),
+        player_option_label(state.builds.longest_road()),
+        player_option_label(state.players.best_army()),
+    )));
+    lines.push(Line::from(""));
+
+    lines.push(section_header("bank"));
+    lines.push(resource_collection_line(
+        "  resources ",
+        &state.bank.resources,
+    ));
+    lines.push(Line::from(format!(
+        "  dev deck {} [{}]",
+        state.bank.dev_cards.len(),
+        dev_deck_summary(&state.bank.dev_cards),
+    )));
+    lines.push(Line::from(""));
+
+    lines.push(section_header("players"));
+    for (player_id, player) in state.players.iter().enumerate() {
+        lines.push(Line::from(format!("  p{player_id}")));
+        lines.push(resource_collection_line(
+            "    resources ",
+            player.resources(),
+        ));
+        lines.extend(indent_lines(dev_card_lines(player.dev_cards()), "    "));
+    }
+
+    lines
+}
+
 fn bank_resources_line(model: &UiModel) -> Line<'static> {
     let mut spans = vec![Span::raw("bank: resources ")];
     match &model.public.bank.resources {
@@ -166,6 +212,12 @@ fn bank_resources_line(model: &UiModel) -> Line<'static> {
         }
     };
     spans.push(Span::styled(dev, Style::default().fg(Color::Magenta)));
+    Line::from(spans)
+}
+
+fn resource_collection_line(prefix: &'static str, resources: &ResourceCollection) -> Line<'static> {
+    let mut spans = vec![Span::raw(prefix)];
+    push_resource_values(&mut spans, resources, |count| count.to_string());
     Line::from(spans)
 }
 
@@ -211,6 +263,35 @@ fn victory_points_label(victory_points: Option<u16>) -> String {
     victory_points
         .map(|victory_points| victory_points.to_string())
         .unwrap_or_else(|| "?".to_owned())
+}
+
+fn indent_lines(lines: Vec<Line<'static>>, indent: &'static str) -> Vec<Line<'static>> {
+    lines
+        .into_iter()
+        .map(|line| {
+            let mut spans = vec![Span::raw(indent)];
+            spans.extend(line.spans);
+            Line::from(spans)
+        })
+        .collect()
+}
+
+fn dev_deck_summary(dev_cards: &[DevCardKind]) -> String {
+    let mut knight = 0;
+    let mut yop = 0;
+    let mut monopoly = 0;
+    let mut roadbuild = 0;
+    let mut victory = 0;
+    for card in dev_cards {
+        match card {
+            DevCardKind::VictoryPoint => victory += 1,
+            DevCardKind::Usable(UsableDevCard::Knight) => knight += 1,
+            DevCardKind::Usable(UsableDevCard::YearOfPlenty) => yop += 1,
+            DevCardKind::Usable(UsableDevCard::Monopoly) => monopoly += 1,
+            DevCardKind::Usable(UsableDevCard::RoadBuild) => roadbuild += 1,
+        }
+    }
+    format!("KN:{knight} YP:{yop} M:{monopoly} RB:{roadbuild} VP:{victory}")
 }
 
 pub(crate) fn resource_card_lines(

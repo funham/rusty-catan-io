@@ -12,8 +12,13 @@ fn main() {
             eprintln!("missing --socket");
             std::process::exit(2);
         });
+        let log_socket = arg_value(&args, "--log-socket").unwrap_or_else(|| {
+            eprintln!("missing --log-socket");
+            std::process::exit(2);
+        });
         let role = arg_value(&args, "--role").unwrap_or_else(|| "unknown".to_owned());
-        if let Err(err) = cli_child::run(&PathBuf::from(socket), &role) {
+        if let Err(err) = cli_child::run(&PathBuf::from(socket), &PathBuf::from(log_socket), &role)
+        {
             eprintln!("{err}");
             std::process::exit(1);
         }

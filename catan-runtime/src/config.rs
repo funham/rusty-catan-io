@@ -32,6 +32,7 @@ pub enum ObserverConfig {
     CliSpectator,
     CliPlayer { player_id: usize },
     CliOmniscient,
+    SnapshotObserver,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -103,4 +104,25 @@ fn default_logging_directory() -> PathBuf {
 
 fn default_logging_file_prefix() -> String {
     "rusty-catan".to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MatchConfig, ObserverConfig};
+
+    #[test]
+    fn parses_snapshot_observer_config() {
+        let config: MatchConfig = serde_json::from_str(
+            r#"{
+              "players": [{ "kind": "lazy" }],
+              "observers": [{ "kind": "snapshot_observer" }]
+            }"#,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            config.observers.as_slice(),
+            [ObserverConfig::SnapshotObserver]
+        ));
+    }
 }

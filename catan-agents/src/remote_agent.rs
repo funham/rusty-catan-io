@@ -1,7 +1,6 @@
 use std::{
     io::{self, Read, Write},
     os::unix::net::UnixStream,
-    thread,
 };
 
 use catan_core::{
@@ -23,6 +22,7 @@ use catan_core::{
                 PlayerNotification,
             },
             legal::{self, BuildClass},
+            state::GameState,
             view::{
                 OmniscientGameView, PlayerDecisionContext, PlayerNotificationContext,
                 PrivatePlayerView, PublicBankResources, PublicGameView, PublicPlayerResources,
@@ -51,6 +51,7 @@ pub enum CliRole {
     Spectator,
     PlayerObserver { player_id: PlayerId },
     Omniscient,
+    SnapshotObserver,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -215,6 +216,7 @@ pub struct UiModel {
     pub public: UiPublicGame,
     pub private: Option<UiPrivatePlayer>,
     pub omniscient: Option<UiOmniscient>,
+    pub snapshot_state: Option<GameState>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -486,45 +488,37 @@ impl Drop for RemoteCliAgent {
 pub struct RemoteCliObserver {
     kind: ObserverKind,
     stream: UnixStream,
+    include_snapshot_state: bool,
 }
 
 impl RemoteCliObserver {
-    pub fn new(kind: ObserverKind, mut stream: UnixStream) -> io::Result<Self> {
+    pub fn new(kind: ObserverKind, stream: UnixStream) -> io::Result<Self> {
         let role = match kind {
             ObserverKind::Spectator => CliRole::Spectator,
             ObserverKind::Player(player_id) => CliRole::PlayerObserver { player_id },
             ObserverKind::Omniscient => CliRole::Omniscient,
         };
+        Self::new_with_role(kind, role, stream)
+    }
+
+    pub fn new_snapshot(stream: UnixStream) -> io::Result<Self> {
+        Self::new_with_role(ObserverKind::Omniscient, CliRole::SnapshotObserver, stream)
+    }
+
+    fn new_with_role(
+        kind: ObserverKind,
+        role: CliRole,
+        mut stream: UnixStream,
+    ) -> io::Result<Self> {
+        let include_snapshot_state = matches!(role, CliRole::SnapshotObserver);
         write_frame(&mut stream, &HostToCli::Hello { role })?;
         expect_ready(&mut stream)?;
-        spawn_observer_log_reader(stream.try_clone()?);
-        Ok(Self { kind, stream })
+        Ok(Self {
+            kind,
+            stream,
+            include_snapshot_state,
+        })
     }
-}
-
-fn spawn_observer_log_reader(mut stream: UnixStream) {
-    thread::spawn(move || {
-        loop {
-            match read_frame::<CliToHost>(&mut stream) {
-                Ok(CliToHost::Log {
-                    level,
-                    target,
-                    message,
-                }) => log_remote_cli_message(level, &target, &message),
-                Ok(CliToHost::Error { message }) => {
-                    log::error!(target: "catan_cli_child", "remote CLI observer error: {message}");
-                }
-                Ok(other) => {
-                    log::warn!(target: "catan_cli_child", "unexpected observer frame: {other:?}");
-                }
-                Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => return,
-                Err(err) => {
-                    log::warn!(target: "catan_cli_child", "observer log reader stopped: {err}");
-                    return;
-                }
-            }
-        }
-    });
 }
 
 impl GameObserver for RemoteCliObserver {
@@ -533,14 +527,22 @@ impl GameObserver for RemoteCliObserver {
     }
 
     fn on_event(&mut self, event: &GameEvent, context: ObserverNotificationContext<'_>) {
-        let model = UiModel::from_observer(context);
-        let _ = write_frame(
+        let model = UiModel::from_observer(context, self.include_snapshot_state);
+        log::trace!(
+            target: "catan_agents::remote_agent",
+            "sending observer event {:?}; include_snapshot_state={}",
+            event,
+            self.include_snapshot_state
+        );
+        if let Err(err) = write_frame(
             &mut self.stream,
             &HostToCli::Event {
                 event: event.clone(),
                 view: model,
             },
-        );
+        ) {
+            log::warn!(target: "catan_agents::remote_agent", "failed to write observer event frame: {err}");
+        }
     }
 }
 
@@ -562,6 +564,7 @@ impl UiModel {
             public: UiPublicGame::from_public(&context.public),
             private: Some(UiPrivatePlayer::from_private(&context.private)),
             omniscient: None,
+            snapshot_state: None,
         }
     }
 
@@ -571,28 +574,35 @@ impl UiModel {
             public: UiPublicGame::from_public(&context.public),
             private: Some(UiPrivatePlayer::from_private(&context.private)),
             omniscient: None,
+            snapshot_state: None,
         }
     }
 
-    pub fn from_observer(context: ObserverNotificationContext<'_>) -> Self {
+    pub fn from_observer(
+        context: ObserverNotificationContext<'_>,
+        include_snapshot_state: bool,
+    ) -> Self {
         match context {
             ObserverNotificationContext::Spectator { public } => Self {
                 actor: None,
                 public: UiPublicGame::from_public(&public),
                 private: None,
                 omniscient: None,
+                snapshot_state: None,
             },
             ObserverNotificationContext::Player { public, private } => Self {
                 actor: Some(private.player_id),
                 public: UiPublicGame::from_public(&public),
                 private: Some(UiPrivatePlayer::from_private(&private)),
                 omniscient: None,
+                snapshot_state: None,
             },
             ObserverNotificationContext::Omniscient { public, full } => Self {
                 actor: None,
                 public: UiPublicGame::from_public(&public),
                 private: None,
                 omniscient: Some(UiOmniscient::from_full(&full)),
+                snapshot_state: include_snapshot_state.then(|| full.state.clone()),
             },
         }
     }
@@ -739,10 +749,12 @@ impl From<RemoteLogLevel> for log::Level {
 #[cfg(test)]
 mod tests {
     use super::{
-        CliRole, HostToCli, LegalDecisionOptions, UiBoard, UiModel, read_frame, write_frame,
+        CliRole, HostToCli, LegalDecisionOptions, RemoteCliObserver, UiBoard, UiModel, read_frame,
+        write_frame,
     };
     use catan_core::gameplay::{
         game::{
+            event::{GameEvent, GameObserver, ObserverNotificationContext},
             index::GameIndex,
             init::GameInitializationState,
             view::{ContextFactory, SearchFactory, VisibilityConfig},
@@ -903,5 +915,148 @@ mod tests {
         assert_eq!(legal.robber_pos, Some(victim_hex));
         assert!(legal.rob_targets.contains(&1));
         assert!(!legal.robber_hexes.contains(&state.board_state.robber_pos));
+    }
+
+    #[test]
+    fn snapshot_observer_model_includes_exact_state_only_when_requested() {
+        let state = GameInitializationState::default().finish();
+        let index = GameIndex::rebuild(&state);
+        let visibility = VisibilityConfig::default();
+        let factory = ContextFactory {
+            state: &state,
+            index: &index,
+            visibility: &visibility,
+        };
+
+        let normal = UiModel::from_observer(
+            ObserverNotificationContext::Omniscient {
+                public: factory.spectator_public_view(),
+                full: factory.omniscient_view(),
+            },
+            false,
+        );
+        let snapshot = UiModel::from_observer(
+            ObserverNotificationContext::Omniscient {
+                public: factory.spectator_public_view(),
+                full: factory.omniscient_view(),
+            },
+            true,
+        );
+
+        assert!(normal.omniscient.is_some());
+        assert!(normal.snapshot_state.is_none());
+        assert!(snapshot.snapshot_state.is_some());
+        assert_eq!(
+            snapshot.snapshot_state.unwrap().bank.dev_cards,
+            state.bank.dev_cards
+        );
+    }
+
+    #[test]
+    fn snapshot_observer_event_frame_writes_with_exact_state() {
+        let state = GameInitializationState::default().finish();
+        let index = GameIndex::rebuild(&state);
+        let visibility = VisibilityConfig::default();
+        let factory = ContextFactory {
+            state: &state,
+            index: &index,
+            visibility: &visibility,
+        };
+        let model = UiModel::from_observer(
+            ObserverNotificationContext::Omniscient {
+                public: factory.spectator_public_view(),
+                full: factory.omniscient_view(),
+            },
+            true,
+        );
+        let mut bytes = Vec::new();
+
+        write_frame(
+            &mut bytes,
+            &HostToCli::Event {
+                event: catan_core::gameplay::game::event::GameEvent::GameStarted,
+                view: model,
+            },
+        )
+        .unwrap();
+
+        assert!(!bytes.is_empty());
+    }
+
+    #[test]
+    fn remote_observer_streams_multiple_event_frames_without_responses() {
+        let (host, mut child) = std::os::unix::net::UnixStream::pair().unwrap();
+        child
+            .set_read_timeout(Some(std::time::Duration::from_secs(1)))
+            .unwrap();
+        let writer = std::thread::spawn(move || {
+            let mut observer = RemoteCliObserver {
+                kind: catan_core::gameplay::game::event::ObserverKind::Omniscient,
+                stream: host,
+                include_snapshot_state: true,
+            };
+
+            let mut state = GameInitializationState::default().finish();
+            let first_index = GameIndex::rebuild(&state);
+            let visibility = VisibilityConfig::default();
+            let first_factory = ContextFactory {
+                state: &state,
+                index: &first_index,
+                visibility: &visibility,
+            };
+            observer.on_event(
+                &GameEvent::GameStarted,
+                ObserverNotificationContext::Omniscient {
+                    public: first_factory.spectator_public_view(),
+                    full: first_factory.omniscient_view(),
+                },
+            );
+
+            state
+                .transfer_from_bank(Resource::Brick.into(), 0)
+                .expect("bank should fund player");
+            let second_index = GameIndex::rebuild(&state);
+            let second_factory = ContextFactory {
+                state: &state,
+                index: &second_index,
+                visibility: &visibility,
+            };
+            observer.on_event(
+                &GameEvent::ResourcesDistributed,
+                ObserverNotificationContext::Omniscient {
+                    public: second_factory.spectator_public_view(),
+                    full: second_factory.omniscient_view(),
+                },
+            );
+        });
+
+        let first = read_frame::<HostToCli>(&mut child).unwrap();
+        let second = read_frame::<HostToCli>(&mut child).unwrap();
+        assert!(matches!(
+            first,
+            HostToCli::Event {
+                event: GameEvent::GameStarted,
+                ..
+            }
+        ));
+        assert!(matches!(
+            second,
+            HostToCli::Event {
+                event: GameEvent::ResourcesDistributed,
+                ..
+            }
+        ));
+        if let HostToCli::Event { view, .. } = second {
+            assert_eq!(
+                view.snapshot_state
+                    .expect("snapshot role should include exact state")
+                    .players
+                    .get(0)
+                    .resources()
+                    .total(),
+                1
+            );
+        }
+        writer.join().unwrap();
     }
 }
