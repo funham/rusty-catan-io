@@ -501,43 +501,48 @@ pub mod data {
                         {
                             Err(BuildingError::SettlementLimit())
                         }
-                        true => Ok({
-                            debug_assert!(
-                                self.players[player_id].establishments.insert(establishment),
-                                "checker malfunction"
-                            );
-                        }),
+                        true => {
+                            if self.players[player_id].establishments.insert(establishment) {
+                                Ok(())
+                            } else {
+                                Err(BuildingError::Settlement())
+                            }
+                        }
                         false => Err(BuildingError::Settlement()), // invalid placement for a settlement
                     },
-                    EstablishmentType::City => match self.players[player_id]
-                        .establishments
-                        .contains(&Establishment {
+                    EstablishmentType::City => {
+                        let settlement = Establishment {
                             pos: establishment.pos,
                             stage: EstablishmentType::Settlement,
-                        }) {
-                        true if self.players[player_id].cities_count()
-                            >= PlayerBuildData::CITY_LIMIT =>
-                        {
-                            Err(BuildingError::CityLimit())
-                        }
-                        true => Ok({
-                            debug_assert!(
-                                self.players[player_id]
-                                    .establishments
-                                    .remove(&Establishment {
-                                        pos: establishment.pos,
-                                        stage: EstablishmentType::Settlement,
-                                    }),
-                                "set handling logic error"
-                            );
+                        };
 
-                            assert!(
-                                self.players[player_id].establishments.insert(establishment),
-                                "set handling logic error"
-                            );
-                        }),
-                        false => Err(BuildingError::City()), // no settlement to upgrade into a city
-                    },
+                        match self.players[player_id].establishments.contains(&settlement) {
+                            true if self.players[player_id].cities_count()
+                                >= PlayerBuildData::CITY_LIMIT =>
+                            {
+                                Err(BuildingError::CityLimit())
+                            }
+                            true => {
+                                if self.players[player_id]
+                                    .establishments
+                                    .contains(&establishment)
+                                {
+                                    return Err(BuildingError::City());
+                                }
+
+                                if !self.players[player_id].establishments.remove(&settlement) {
+                                    return Err(BuildingError::City());
+                                }
+
+                                if self.players[player_id].establishments.insert(establishment) {
+                                    Ok(())
+                                } else {
+                                    Err(BuildingError::City())
+                                }
+                            }
+                            false => Err(BuildingError::City()), // no settlement to upgrade into a city
+                        }
+                    }
                 },
             }
         }
@@ -866,6 +871,25 @@ mod tests {
     }
 
     #[test]
+    fn settlement_build_is_persisted() {
+        let road = Road {
+            pos: path(h(0, 0), h(1, 0)),
+        };
+        let settlement = settlement(road.pos.intersections()[0]);
+        let mut builds = BoardBuildData::from_build_collections(vec![BuildCollection {
+            establishments: vec![],
+            roads: vec![road],
+        }]);
+
+        builds
+            .try_build(0, Build::Establishment(settlement))
+            .expect("connected settlement should be legal");
+
+        assert!(builds[0].establishments.contains(&settlement));
+        assert_eq!(builds[0].settlements_count(), 1);
+    }
+
+    #[test]
     fn city_upgrade_returns_settlement_to_inventory() {
         let vertices = h(0, 0).vertices_arr();
         let mut establishments = vertices
@@ -889,6 +913,28 @@ mod tests {
             PlayerBuildData::SETTLEMENT_LIMIT - 1
         );
         assert_eq!(builds[0].cities_count(), 4);
+        assert!(!builds[0].establishments.contains(&settlement(vertices[3])));
+        assert!(builds[0].establishments.contains(&city(vertices[3])));
+    }
+
+    #[test]
+    fn city_upgrade_cannot_be_repeated() {
+        let pos = h(0, 0).vertices_arr()[0];
+        let mut builds = BoardBuildData::from_build_collections(vec![BuildCollection {
+            establishments: vec![settlement(pos)],
+            roads: vec![],
+        }]);
+
+        builds
+            .try_build(0, Build::Establishment(city(pos)))
+            .expect("first city upgrade should be legal");
+        let err = builds
+            .try_build(0, Build::Establishment(city(pos)))
+            .expect_err("city upgrade should require an existing settlement");
+
+        assert!(matches!(err, BuildingError::City()));
+        assert_eq!(builds[0].settlements_count(), 0);
+        assert_eq!(builds[0].cities_count(), 1);
     }
 
     #[test]

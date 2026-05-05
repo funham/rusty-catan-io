@@ -117,10 +117,11 @@ pub fn legal_road_spots(context: &PlayerDecisionContext<'_>, player_id: PlayerId
 }
 
 pub fn can_buy_dev_card(context: &PlayerDecisionContext<'_>) -> bool {
-    context
-        .private
-        .resources
-        .has_enough(&crate::constants::costs::DEV_CARD)
+    context.public.bank.dev_card_count > 0
+        && context
+            .private
+            .resources
+            .has_enough(&crate::constants::costs::DEV_CARD)
 }
 
 pub fn can_buy_road(context: &PlayerDecisionContext<'_>) -> bool {
@@ -597,6 +598,42 @@ mod tests {
         });
 
         assert!(matches!(action, RegularAction::BuyDevCard));
+    }
+
+    #[test]
+    fn legal_actions_exclude_dev_card_when_bank_deck_is_empty() {
+        let mut state = initialized_state();
+        state.bank.dev_cards.clear();
+        state
+            .transfer_from_bank(
+                ResourceCollection {
+                    wheat: 1,
+                    sheep: 1,
+                    ore: 1,
+                    ..ResourceCollection::ZERO
+                },
+                0,
+            )
+            .expect("bank should fund test player");
+
+        let index = GameIndex::rebuild(&state);
+        let visibility = VisibilityConfig::default();
+        let factory = ContextFactory {
+            state: &state,
+            index: &index,
+            visibility: &visibility,
+        };
+        let search = Some(SearchFactory::new(&state, visibility.player_policy(0), 0));
+        let context = factory.player_decision_context(0, search);
+        let actions = legal_regular_actions(&context);
+
+        assert!(!can_buy_dev_card(&context));
+        assert!(
+            !actions
+                .iter()
+                .any(|action| matches!(action, RegularAction::BuyDevCard)),
+            "empty dev-card deck should not produce BuyDevCard, got {actions:?}"
+        );
     }
 
     #[test]
