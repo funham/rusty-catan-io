@@ -734,7 +734,8 @@ impl GameController {
                 log::trace!("Player building: {:?}", build);
                 match self.execute_build(current_player, build) {
                     Ok(()) => {
-                        self.index = GameIndex::rebuild(&self.game);
+                        self.index
+                            .refresh_after_build(&self.game, current_player, build);
                         self.notify_observers(&GameEvent::Built {
                             player_id: current_player,
                             build,
@@ -864,9 +865,7 @@ impl GameController {
     ) -> Result<(), BankTradeExecutionError> {
         log::trace!("Executing bank trade for player {}: {:?}", player, trade);
 
-        let index = GameIndex::rebuild(&self.game);
-
-        let ports = &index.ports_aquired[player];
+        let ports = &self.index.ports_aquired[player];
         let required_port = match trade.kind {
             BankTradeKind::BankGeneric => None,
             BankTradeKind::PortGeneric => Some(PortKind::Universal),

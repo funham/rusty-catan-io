@@ -168,82 +168,106 @@ impl RoadGraph {
     /// Find the longest sequence of non-repeating roads (edges can't repeat, vertices can).
     /// This is finding the longest trail in the graph.
     pub fn find_longest_trail_length(&self) -> usize {
+        self.find_longest_trail_length_with_blockers(&BTreeSet::new())
+    }
+
+    /// Find the longest trail while treating blocked intersections as endpoints.
+    ///
+    /// In Catan, an opponent settlement/city interrupts road continuity at that
+    /// intersection. A road may still end at the blocked intersection, but a
+    /// longest-road trail cannot pass through it to another road.
+    pub fn find_longest_trail_length_with_blockers(
+        &self,
+        blockers: &BTreeSet<Intersection>,
+    ) -> usize {
         if self.edges.is_empty() {
             return 0;
         }
 
-        let mut max_length = 0;
-        let mut visited_components = BTreeSet::new();
+        self.longest_trail_length_bitmask(blockers)
+    }
 
-        // Process each connected component separately
-        for &start_vertex in self.out.keys() {
-            if visited_components.contains(&start_vertex) {
+    fn longest_trail_length_bitmask(&self, blockers: &BTreeSet<Intersection>) -> usize {
+        let edges = self.edges.iter().copied().collect::<Vec<_>>();
+        let mut vertex_indices = BTreeMap::new();
+
+        for edge in &edges {
+            for vertex in edge.intersections() {
+                if !vertex_indices.contains_key(&vertex) {
+                    vertex_indices.insert(vertex, vertex_indices.len());
+                }
+            }
+        }
+
+        let mut adjacency = vec![Vec::new(); vertex_indices.len()];
+        for (edge_index, edge) in edges.iter().enumerate() {
+            let [from, to] = edge.intersections();
+            let from_index = vertex_indices[&from];
+            let to_index = vertex_indices[&to];
+            adjacency[from_index].push((edge_index, to_index));
+            adjacency[to_index].push((edge_index, from_index));
+        }
+
+        let blocked = vertex_indices
+            .keys()
+            .map(|vertex| blockers.contains(vertex))
+            .collect::<Vec<_>>();
+
+        let mut max_length = 0;
+        for start in 0..adjacency.len() {
+            let blocked_used = if blocked[start] { 1u64 << start } else { 0 };
+            Self::dfs_longest_trail_bitmask(
+                start,
+                0,
+                blocked_used,
+                0,
+                &adjacency,
+                &blocked,
+                &mut max_length,
+            );
+        }
+
+        max_length
+    }
+
+    fn dfs_longest_trail_bitmask(
+        current: usize,
+        visited_edges: u32,
+        blocked_used: u64,
+        current_length: usize,
+        adjacency: &[Vec<(usize, usize)>],
+        blocked: &[bool],
+        max_length: &mut usize,
+    ) {
+        *max_length = (*max_length).max(current_length);
+
+        if blocked[current] && current_length > 0 {
+            return;
+        }
+
+        for &(edge_index, neighbor) in &adjacency[current] {
+            let edge_bit = 1u32 << edge_index;
+            if visited_edges & edge_bit != 0 {
+                continue;
+            }
+            let neighbor_blocked_bit = if blocked[neighbor] {
+                1u64 << neighbor
+            } else {
+                0
+            };
+            if neighbor_blocked_bit != 0 && blocked_used & neighbor_blocked_bit != 0 {
                 continue;
             }
 
-            let component_vertices = self.collect_component(start_vertex, &mut visited_components);
-            let component_longest = self.longest_trail_length_in_component(&component_vertices);
-            max_length = max_length.max(component_longest);
-        }
-
-        max_length
-    }
-
-    /// Find longest trail (non-repeating edges) in a connected component
-    fn longest_trail_length_in_component(&self, component: &[Intersection]) -> usize {
-        self.longest_trail_dfs(component)
-    }
-
-    /// DFS to find longest trail (non-repeating edges)
-    fn longest_trail_dfs(&self, component: &[Intersection]) -> usize {
-        let mut max_length = 0;
-
-        // Try starting from each vertex in the component
-        for &start in component {
-            let mut visited_edges = BTreeSet::new();
-            self.dfs_calculate_longest_trail_length(start, &mut visited_edges, 0, &mut max_length);
-        }
-
-        max_length
-    }
-
-    /// DFS helper for finding longest trail
-    fn dfs_calculate_longest_trail_length(
-        &self,
-        current: Intersection,
-        visited_edges: &mut BTreeSet<Path>,
-        current_length: usize,
-        max_length: &mut usize,
-    ) {
-        // Update max length
-        if current_length > *max_length {
-            *max_length = current_length;
-        }
-
-        // Try all edges from current vertex
-        if let Some(edges) = self.out.get(&current) {
-            for edge in edges.iter() {
-                if visited_edges.contains(&edge) {
-                    continue;
-                }
-
-                // Mark edge as visited
-                visited_edges.insert(edge.clone());
-
-                // Move to the other endpoint
-                let neighbor = edge.opposite_or_panic(current);
-
-                // Recurse
-                self.dfs_calculate_longest_trail_length(
-                    neighbor,
-                    visited_edges,
-                    current_length + 1,
-                    max_length,
-                );
-
-                // Backtrack
-                visited_edges.remove(&edge);
-            }
+            Self::dfs_longest_trail_bitmask(
+                neighbor,
+                visited_edges | edge_bit,
+                blocked_used | neighbor_blocked_bit,
+                current_length + 1,
+                adjacency,
+                blocked,
+                max_length,
+            );
         }
     }
 
@@ -469,6 +493,21 @@ mod tests {
         }
 
         assert_eq!(graph.find_longest_trail_length(), 6);
+    }
+
+    #[test]
+    fn opponent_blocker_splits_cycle_longest_trail() {
+        let mut graph = RoadGraph::default();
+
+        for n in h(0, 0).neighbors() {
+            graph.add_edge(&path(h(0, 0), n));
+        }
+
+        let blocker = path(h(0, 0), h(1, 0)).intersections()[0];
+        assert_eq!(
+            graph.find_longest_trail_length_with_blockers(&BTreeSet::from([blocker])),
+            5
+        );
     }
 
     #[test]
