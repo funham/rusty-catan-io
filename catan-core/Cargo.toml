@@ -17,6 +17,9 @@ strum = { version = "0.28.0", features = ["derive"] }
 strum_macros = "0.28.0"
 serde_with = "3.18.0"
 
+[features]
+bench-counters = []
+
 
 [[bin]]
 name = "hex_spiral_to_canonical"

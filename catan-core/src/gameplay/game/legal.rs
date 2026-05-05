@@ -18,6 +18,64 @@ use crate::{
     topology::{Hex, Path},
 };
 
+#[cfg(feature = "bench-counters")]
+pub mod counters {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+    pub struct LegalCounters {
+        pub city_candidates: u64,
+        pub settlement_candidates: u64,
+        pub road_candidates: u64,
+        pub dev_card_candidates: u64,
+        pub roadbuild_candidates: u64,
+    }
+
+    static CITY_CANDIDATES: AtomicU64 = AtomicU64::new(0);
+    static SETTLEMENT_CANDIDATES: AtomicU64 = AtomicU64::new(0);
+    static ROAD_CANDIDATES: AtomicU64 = AtomicU64::new(0);
+    static DEV_CARD_CANDIDATES: AtomicU64 = AtomicU64::new(0);
+    static ROADBUILD_CANDIDATES: AtomicU64 = AtomicU64::new(0);
+
+    pub fn reset() {
+        CITY_CANDIDATES.store(0, Ordering::Relaxed);
+        SETTLEMENT_CANDIDATES.store(0, Ordering::Relaxed);
+        ROAD_CANDIDATES.store(0, Ordering::Relaxed);
+        DEV_CARD_CANDIDATES.store(0, Ordering::Relaxed);
+        ROADBUILD_CANDIDATES.store(0, Ordering::Relaxed);
+    }
+
+    pub fn snapshot() -> LegalCounters {
+        LegalCounters {
+            city_candidates: CITY_CANDIDATES.load(Ordering::Relaxed),
+            settlement_candidates: SETTLEMENT_CANDIDATES.load(Ordering::Relaxed),
+            road_candidates: ROAD_CANDIDATES.load(Ordering::Relaxed),
+            dev_card_candidates: DEV_CARD_CANDIDATES.load(Ordering::Relaxed),
+            roadbuild_candidates: ROADBUILD_CANDIDATES.load(Ordering::Relaxed),
+        }
+    }
+
+    pub(super) fn city_candidate() {
+        CITY_CANDIDATES.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(super) fn settlement_candidate() {
+        SETTLEMENT_CANDIDATES.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(super) fn road_candidate() {
+        ROAD_CANDIDATES.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(super) fn dev_card_candidate() {
+        DEV_CARD_CANDIDATES.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(super) fn roadbuild_candidate() {
+        ROADBUILD_CANDIDATES.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BuildClass {
     Road,
@@ -60,6 +118,8 @@ pub fn legal_city_spots(context: &PlayerDecisionContext<'_>, player_id: PlayerId
             })
         })
         .filter(|build| {
+            #[cfg(feature = "bench-counters")]
+            counters::city_candidate();
             let mut state = seed.state.clone();
             state.build(player_id, *build).is_ok()
         })
@@ -89,6 +149,8 @@ pub fn legal_settlement_spots(
             })
         })
         .filter(|build| {
+            #[cfg(feature = "bench-counters")]
+            counters::settlement_candidate();
             let mut state = seed.state.clone();
             state.build(player_id, *build).is_ok()
         })
@@ -110,6 +172,8 @@ pub fn legal_road_spots(context: &PlayerDecisionContext<'_>, player_id: PlayerId
         .into_iter()
         .map(|pos| Build::Road(Road { pos }))
         .filter(|build| {
+            #[cfg(feature = "bench-counters")]
+            counters::road_candidate();
             let mut state = seed.state.clone();
             state.build(player_id, *build).is_ok()
         })
@@ -195,6 +259,8 @@ pub fn legal_dev_card_usages(context: &PlayerDecisionContext<'_>) -> Vec<DevCard
     candidates
         .into_iter()
         .filter(|usage| {
+            #[cfg(feature = "bench-counters")]
+            counters::dev_card_candidate();
             let mut state = state.clone();
             state.use_dev_card(*usage, context.actor).is_ok()
         })
@@ -242,6 +308,8 @@ fn legal_road_paths_from_builds(
         .iter()
         .copied()
         .filter(|pos| {
+            #[cfg(feature = "bench-counters")]
+            counters::roadbuild_candidate();
             let mut candidate = builds.clone();
             candidate
                 .try_build(player_id, Build::Road(Road { pos: *pos }))

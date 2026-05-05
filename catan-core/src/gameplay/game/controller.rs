@@ -21,6 +21,7 @@ use crate::gameplay::primitives::turn::GameTurn;
 use crate::gameplay::primitives::{PortKind, Tile};
 use crate::topology::Hex;
 use crate::{math::dice::DiceRoller, math::dice::DiceVal};
+use rand::{SeedableRng, rngs::SmallRng};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GameResult {
@@ -40,6 +41,48 @@ impl Default for RunOptions {
         Self {
             max_turns: Some(500),
             max_invalid_actions: Some(10),
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct GameRunStats {
+    pub game_started: u64,
+    pub turns_started: u64,
+    pub turns_ended: u64,
+    pub decision_requests: u64,
+    pub regular_actions: u64,
+    pub builds: u64,
+    pub bank_trades: u64,
+    pub dev_cards_bought: u64,
+    pub dev_cards_used: u64,
+    pub dice_rolls: u64,
+    pub resources_distributed: u64,
+    pub player_discards: u64,
+    pub robber_moves: u64,
+    pub action_rejections: u64,
+    pub games_ended: u64,
+    pub games_interrupted: u64,
+}
+
+impl GameRunStats {
+    fn record_event(&mut self, event: &GameEvent) {
+        match event {
+            GameEvent::GameStarted => self.game_started += 1,
+            GameEvent::TurnStarted { .. } => self.turns_started += 1,
+            GameEvent::TurnEnded { .. } => self.turns_ended += 1,
+            GameEvent::InitialPlacementBuilt { .. } => {}
+            GameEvent::DiceRolled { .. } => self.dice_rolls += 1,
+            GameEvent::ResourcesDistributed => self.resources_distributed += 1,
+            GameEvent::DevCardBought { .. } => self.dev_cards_bought += 1,
+            GameEvent::DevCardUsed { .. } => self.dev_cards_used += 1,
+            GameEvent::Built { .. } => self.builds += 1,
+            GameEvent::Traded { .. } => self.bank_trades += 1,
+            GameEvent::PlayerDiscarded { .. } => self.player_discards += 1,
+            GameEvent::RobberMoved { .. } => self.robber_moves += 1,
+            GameEvent::ActionRejected { .. } => self.action_rejections += 1,
+            GameEvent::GameEnded { .. } => self.games_ended += 1,
+            GameEvent::GameInterrupted { .. } => self.games_interrupted += 1,
         }
     }
 }
@@ -74,6 +117,8 @@ pub struct GameController {
     visibility: VisibilityConfig,
     invalid_actions: u64,
     max_invalid_actions: Option<u64>,
+    stats: GameRunStats,
+    random: Option<SmallRng>,
 }
 
 impl GameController {
@@ -98,12 +143,22 @@ impl GameController {
             visibility,
             invalid_actions: 0,
             max_invalid_actions: RunOptions::default().max_invalid_actions,
+            stats: GameRunStats::default(),
+            random: None,
         }
     }
 
     pub fn add_observer(&mut self, observer: Box<dyn GameObserver>) {
         log::trace!("Adding observer of kind: {:?}", observer.kind());
         self.observers.push(observer);
+    }
+
+    pub fn run_stats(&self) -> GameRunStats {
+        self.stats
+    }
+
+    pub fn use_seeded_randomness(&mut self, seed: u64) {
+        self.random = Some(SmallRng::seed_from_u64(seed));
     }
 
     pub fn init(
@@ -298,6 +353,7 @@ impl GameController {
     }
 
     fn notify_observers(&mut self, event: &GameEvent) {
+        self.stats.record_event(event);
         log::trace!("Notifying observers of event: {:?}", event);
         log::info!("Event: {:?}", event);
 
@@ -354,6 +410,7 @@ impl GameController {
     }
 
     fn request_dispatch<R: action::DecisionRequest>(&mut self, player_id: PlayerId) -> R {
+        self.stats.decision_requests += 1;
         log::trace!("Dispatching decision request for player {}", player_id);
         let policy = self.visibility.player_policy(player_id);
         let search = Some(SearchFactory::new(&self.game, policy, player_id));
@@ -402,6 +459,7 @@ impl GameController {
         player_id: PlayerId,
         robber_pos: Hex,
     ) -> ChoosePlayerToRobAction {
+        self.stats.decision_requests += 1;
         log::trace!(
             "Requesting choose-player-to-rob action from player {}",
             player_id
@@ -439,6 +497,7 @@ impl GameController {
         log::trace!("Starting game run with options: {:?}", options);
         self.invalid_actions = 0;
         self.max_invalid_actions = options.max_invalid_actions;
+        self.stats = GameRunStats::default();
         self.notify_observers(&GameEvent::GameStarted);
         loop {
             let turn_no = self.game.turn.get_turns_played();
@@ -628,7 +687,14 @@ impl GameController {
         let player_id = self.curr_player();
         log::trace!("Executing dev card for player {}: {:?}", player_id, usage);
 
-        match self.game.use_dev_card(usage.clone(), player_id) {
+        let result = match self.random.as_mut() {
+            Some(rng) => self
+                .game
+                .use_dev_card_with_rng(usage.clone(), player_id, rng),
+            None => self.game.use_dev_card(usage.clone(), player_id),
+        };
+
+        match result {
             Ok(()) => {
                 log::trace!("Dev card executed successfully");
                 self.index = GameIndex::rebuild(&self.game);
@@ -655,6 +721,7 @@ impl GameController {
     }
 
     fn execute_regular_action(&mut self, action: RegularAction) -> TurnFlow {
+        self.stats.regular_actions += 1;
         let current_player = self.curr_player();
         log::trace!(
             "Executing regular action for player {}: {:?}",
@@ -1108,7 +1175,14 @@ impl GameController {
                 },
             };
 
-            match self.game.use_robbers(target_hex, player, robbed_id) {
+            let result = match self.random.as_mut() {
+                Some(rng) => self
+                    .game
+                    .use_robbers_with_rng(target_hex, player, robbed_id, rng),
+                None => self.game.use_robbers(target_hex, player, robbed_id),
+            };
+
+            match result {
                 Ok(()) => {
                     log::trace!(
                         "Robber moved to {:?}, robbed player: {:?}",

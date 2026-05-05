@@ -122,6 +122,12 @@ impl RandomDiceRoller {
             rng: SmallRng::from_rng(&mut rand::rng()),
         }
     }
+
+    pub fn with_seed(seed: u64) -> Self {
+        Self {
+            rng: SmallRng::seed_from_u64(seed),
+        }
+    }
 }
 
 impl DiceRoller for RandomDiceRoller {

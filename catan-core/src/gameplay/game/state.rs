@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -280,6 +281,17 @@ impl GameState {
         robber_id: PlayerId,
         robbed_id: Option<PlayerId>,
     ) -> Result<(), DevCardUsageError> {
+        let mut rng = rand::rng();
+        self.use_robbers_with_rng(rob_hex, robber_id, robbed_id, &mut rng)
+    }
+
+    pub fn use_robbers_with_rng<R: Rng + ?Sized>(
+        &mut self,
+        rob_hex: Hex,
+        robber_id: PlayerId,
+        robbed_id: Option<PlayerId>,
+        rng: &mut R,
+    ) -> Result<(), DevCardUsageError> {
         log::trace!("use robbers");
 
         if (self.board.arrangement.radius() as usize) < rob_hex.norm() {
@@ -302,7 +314,7 @@ impl GameState {
 
         self.board_state.robber_pos = rob_hex;
         if let Some(robbed_id) = robbed_id {
-            self.steal(robbed_id, robber_id);
+            self.steal_with_rng(robbed_id, robber_id, rng);
         }
         log::trace!("use robbers success");
         Ok(())
@@ -326,6 +338,16 @@ impl GameState {
         &mut self,
         usage: DevCardUsage,
         user: PlayerId,
+    ) -> Result<(), DevCardUsageError> {
+        let mut rng = rand::rng();
+        self.use_dev_card_with_rng(usage, user, &mut rng)
+    }
+
+    pub fn use_dev_card_with_rng<R: Rng + ?Sized>(
+        &mut self,
+        usage: DevCardUsage,
+        user: PlayerId,
+        rng: &mut R,
     ) -> Result<(), DevCardUsageError> {
         if !self
             .players
@@ -359,7 +381,7 @@ impl GameState {
 
         match usage {
             DevCardUsage::Knight { rob_hex, robbed_id } => {
-                self.use_robbers(rob_hex, user, robbed_id)?
+                self.use_robbers_with_rng(rob_hex, user, robbed_id, rng)?
             }
             DevCardUsage::YearOfPlenty(list) => self.apply_year_of_plenty(list, user)?,
             DevCardUsage::RoadBuild(poses) => self.apply_roadbuild(poses, user)?,
@@ -391,10 +413,15 @@ impl GameState {
         }
     }
 
-    fn steal(&mut self, robbed_id: PlayerId, robber_id: PlayerId) {
+    fn steal_with_rng<R: Rng + ?Sized>(
+        &mut self,
+        robbed_id: PlayerId,
+        robber_id: PlayerId,
+        rng: &mut R,
+    ) {
         log::trace!("steal");
         let robbed_account = self.players.get(robbed_id).resources();
-        let stolen = robbed_account.peek_random();
+        let stolen = robbed_account.peek_random_with_rng(rng);
         log::trace!("peek random success");
         if let Some(card) = stolen {
             if let Err(e) = self.players_resource_transfer(robbed_id, robber_id, card.into()) {

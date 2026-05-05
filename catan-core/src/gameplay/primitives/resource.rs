@@ -3,7 +3,7 @@ use std::{
     ops::{Add, AddAssign, Index, IndexMut},
 };
 
-use rand::RngExt;
+use rand::{Rng, RngExt};
 use serde::{Deserialize, Serialize};
 
 #[derive(
@@ -197,6 +197,11 @@ impl ResourceCollection {
 
     // None if empty, weighted random otherwise
     pub fn peek_random(&self) -> Option<Resource> {
+        let mut rng = rand::rng();
+        self.peek_random_with_rng(&mut rng)
+    }
+
+    pub fn peek_random_with_rng<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<Resource> {
         // Calculate total and return None if empty
         if self.is_empty() {
             return None;
@@ -204,8 +209,6 @@ impl ResourceCollection {
 
         log::debug!("self.total={}", self.total());
 
-        // Generate random number
-        let mut rng = rand::rng();
         let rand_val: u16 = rng.random_range(0..self.total());
         let mut cum_total: u16 = 0;
 
@@ -222,7 +225,12 @@ impl ResourceCollection {
     }
 
     pub fn pop_random(&mut self) -> Option<Resource> {
-        match self.peek_random() {
+        let mut rng = rand::rng();
+        self.pop_random_with_rng(&mut rng)
+    }
+
+    pub fn pop_random_with_rng<R: Rng + ?Sized>(&mut self, rng: &mut R) -> Option<Resource> {
+        match self.peek_random_with_rng(rng) {
             Some(resource) => {
                 self.subtract_in_place(&resource.into()).ok()?;
                 Some(resource)
