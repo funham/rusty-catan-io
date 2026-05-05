@@ -136,14 +136,19 @@ pub fn legal_city_spots(context: &PlayerDecisionContext<'_>, player_id: PlayerId
 }
 
 pub fn legal_city_spots_count(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> usize {
+    legal_city_spots_count_with_resources(context, player_id, context.private.resources)
+}
+
+pub fn legal_city_spots_count_with_resources(
+    context: &PlayerDecisionContext<'_>,
+    player_id: PlayerId,
+    resources: &crate::gameplay::primitives::resource::ResourceCollection,
+) -> usize {
     if context.search.is_none() {
         log::debug!("legal city spots require search context");
         return 0;
     }
-    if !context
-        .private
-        .resources
-        .has_enough(&EstablishmentType::City.cost())
+    if !resources.has_enough(&EstablishmentType::City.cost())
         || context.public.builds.by_player(player_id).cities_count() >= PlayerBuildData::CITY_LIMIT
     {
         return 0;
@@ -196,9 +201,51 @@ pub fn legal_settlement_spots_count(
     context: &PlayerDecisionContext<'_>,
     player_id: PlayerId,
 ) -> usize {
-    let Some((other_occupancy, this_occupancy)) = settlement_occupancy(context, player_id) else {
+    legal_settlement_spots_count_with_resources(context, player_id, context.private.resources)
+}
+
+pub fn legal_settlement_spots_count_with_resources(
+    context: &PlayerDecisionContext<'_>,
+    player_id: PlayerId,
+    resources: &crate::gameplay::primitives::resource::ResourceCollection,
+) -> usize {
+    let Some((other_occupancy, this_occupancy)) =
+        settlement_occupancy_with_resources(context, player_id, resources)
+    else {
         return 0;
     };
+
+    context
+        .public
+        .board
+        .intersections()
+        .iter()
+        .copied()
+        .filter(|&pos| {
+            #[cfg(feature = "bench-counters")]
+            counters::settlement_candidate();
+            can_place_settlement_at(pos, &other_occupancy, &this_occupancy)
+        })
+        .count()
+}
+
+pub fn legal_settlement_spots_count_with_extra_road(
+    context: &PlayerDecisionContext<'_>,
+    player_id: PlayerId,
+    extra_road: Path,
+    resources: &crate::gameplay::primitives::resource::ResourceCollection,
+) -> usize {
+    let Some((other_occupancy, mut this_occupancy)) =
+        settlement_occupancy_with_resources(context, player_id, resources)
+    else {
+        return 0;
+    };
+
+    this_occupancy.roads_occupancy.paths.insert(extra_road);
+    this_occupancy
+        .roads_occupancy
+        .occupancy
+        .extend(extra_road.intersections_iter());
 
     context
         .public
@@ -235,7 +282,17 @@ pub fn legal_road_spots(context: &PlayerDecisionContext<'_>, player_id: PlayerId
 }
 
 pub fn legal_road_spots_count(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> usize {
-    let Some((other_occupancy, this_occupancy)) = road_occupancy(context, player_id) else {
+    legal_road_spots_count_with_resources(context, player_id, context.private.resources)
+}
+
+pub fn legal_road_spots_count_with_resources(
+    context: &PlayerDecisionContext<'_>,
+    player_id: PlayerId,
+    resources: &crate::gameplay::primitives::resource::ResourceCollection,
+) -> usize {
+    let Some((other_occupancy, this_occupancy)) =
+        road_occupancy_with_resources(context, player_id, resources)
+    else {
         return 0;
     };
 
@@ -257,11 +314,19 @@ fn settlement_occupancy(
     context: &PlayerDecisionContext<'_>,
     player_id: PlayerId,
 ) -> Option<(AggregateOccupancy, AggregateOccupancy)> {
+    settlement_occupancy_with_resources(context, player_id, context.private.resources)
+}
+
+fn settlement_occupancy_with_resources(
+    context: &PlayerDecisionContext<'_>,
+    player_id: PlayerId,
+    resources: &crate::gameplay::primitives::resource::ResourceCollection,
+) -> Option<(AggregateOccupancy, AggregateOccupancy)> {
     if context.search.is_none() {
         log::debug!("legal settlement spots require search context");
         return None;
     }
-    if !can_buy_settlement(context)
+    if !resources.has_enough(&crate::constants::costs::SETTLEMENT)
         || context
             .public
             .builds
@@ -278,11 +343,19 @@ fn road_occupancy(
     context: &PlayerDecisionContext<'_>,
     player_id: PlayerId,
 ) -> Option<(AggregateOccupancy, AggregateOccupancy)> {
+    road_occupancy_with_resources(context, player_id, context.private.resources)
+}
+
+fn road_occupancy_with_resources(
+    context: &PlayerDecisionContext<'_>,
+    player_id: PlayerId,
+    resources: &crate::gameplay::primitives::resource::ResourceCollection,
+) -> Option<(AggregateOccupancy, AggregateOccupancy)> {
     if context.search.is_none() {
         log::debug!("legal road spots require search context");
         return None;
     }
-    if !can_buy_road(context)
+    if !resources.has_enough(&crate::constants::costs::ROAD)
         || context.public.builds.by_player(player_id).roads_count() >= PlayerBuildData::ROAD_LIMIT
     {
         return None;
@@ -516,7 +589,7 @@ pub fn legal_bank_trades(context: &PlayerDecisionContext<'_>) -> Vec<BankTrade> 
         4,
     ));
 
-    for port in &context.public.get_ports_aquired()[context.actor] {
+    for port in context.public.ports_aquired_for(context.actor) {
         let trades = match port {
             PortKind::Special(resource) => resource_trades_at_rate(
                 context,

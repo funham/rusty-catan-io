@@ -121,6 +121,7 @@ pub struct PublicGameView<'a> {
     pub builds: &'a BoardBuildData,
     pub longest_road_owner: Option<PlayerId>,
     pub largest_army_owner: Option<PlayerId>,
+    ports_aquired: &'a [BTreeSet<PortKind>],
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -194,6 +195,10 @@ impl<'a> PublicGameView<'a> {
     pub fn get_ports_aquired(&self) -> Vec<BTreeSet<PortKind>> {
         algorithm::get_ports_aquired(self.board.index().ports_intersection, self.builds)
     }
+
+    pub fn ports_aquired_for(&self, player_id: PlayerId) -> &'a BTreeSet<PortKind> {
+        &self.ports_aquired[player_id]
+    }
 }
 
 impl<'a> SearchFactory<'a> {
@@ -211,6 +216,10 @@ impl<'a> SearchFactory<'a> {
             policy: self.policy,
             state: self.state.clone(),
         }
+    }
+
+    pub fn state(&self) -> &'a GameState {
+        self.state
     }
 }
 
@@ -262,6 +271,7 @@ impl<'a> ContextFactory<'a> {
             builds: &self.state.builds,
             longest_road_owner: query.longest_road_owner(),
             largest_army_owner: query.largest_army_owner(),
+            ports_aquired: &self.index.ports_aquired,
         }
     }
 

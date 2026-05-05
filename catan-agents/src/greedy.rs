@@ -12,17 +12,13 @@ use catan_core::{
         constants,
         game::{
             event::PlayerNotification,
-            index::GameIndex,
-            view::{
-                ContextFactory, CountingMode, PlayerDecisionContext, SearchFactory,
-                VisibilityConfig,
-            },
+            view::{CountingMode, PlayerDecisionContext},
         },
         primitives::{
             Tile,
             build::{Build, Establishment},
             player::PlayerId,
-            resource::Resource,
+            resource::{Resource, ResourceCollection},
             trade::BankTrade,
         },
     },
@@ -237,30 +233,24 @@ fn best_settlement_build(
 
 fn best_road_build(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> Option<Build> {
     let roads = legal::legal_road_spots(context, player_id);
-    let Some(search) = &context.search else {
-        return roads.into_iter().next();
+    let Some(resources_after_road) = context
+        .private
+        .resources
+        .checked_sub(&constants::costs::ROAD)
+    else {
+        return None;
     };
-    let seed = search.make_owned();
 
     roads.into_iter().max_by_key(|build| {
-        let mut state = seed.state.clone();
-        if state.build(player_id, *build).is_err() {
+        let Build::Road(road) = build else {
             return 0;
-        }
-        let index = GameIndex::rebuild(&state);
-        let visibility = VisibilityConfig::default();
-        let factory = ContextFactory {
-            state: &state,
-            index: &index,
-            visibility: &visibility,
         };
-        let search = Some(SearchFactory::new(
-            &state,
-            visibility.player_policy(player_id),
+        legal::legal_settlement_spots_count_with_extra_road(
+            context,
             player_id,
-        ));
-        let context = factory.player_decision_context(player_id, search);
-        legal::legal_settlement_spots_count(&context, player_id)
+            road.pos,
+            &resources_after_road,
+        )
     })
 }
 
@@ -269,50 +259,62 @@ fn best_bank_trade(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> 
     let Some(search) = &context.search else {
         return trades.into_iter().next();
     };
-    let seed = search.make_owned();
+    let state = search.state();
 
-    trades.into_iter().max_by_key(|trade| {
-        let mut state = seed.state.clone();
-        if state.trade_with_bank(player_id, *trade).is_err() {
-            return (0, 0);
-        }
-        let index = GameIndex::rebuild(&state);
-        let visibility = VisibilityConfig::default();
-        let factory = ContextFactory {
-            state: &state,
-            index: &index,
-            visibility: &visibility,
-        };
-        let search = Some(SearchFactory::new(
-            &state,
-            visibility.player_policy(player_id),
-            player_id,
-        ));
-        let context = factory.player_decision_context(player_id, search);
-        next_objective_score(&context, player_id)
-    })
+    trades
+        .into_iter()
+        .max_by_key(|trade| bank_trade_objective_score(context, player_id, *trade, state))
 }
 
-fn next_objective_score(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> (u8, usize) {
-    let city_count = legal::legal_city_spots_count(context, player_id);
+fn bank_trade_objective_score(
+    context: &PlayerDecisionContext<'_>,
+    player_id: PlayerId,
+    trade: BankTrade,
+    state: &catan_core::gameplay::game::state::GameState,
+) -> (u8, usize) {
+    if !state.bank.can_pay(&trade.from_bank()) {
+        return (0, 0);
+    }
+
+    let Some(resources_after_trade) = resources_after_bank_trade(context.private.resources, trade)
+    else {
+        return (0, 0);
+    };
+
+    next_objective_score_for_resources(context, player_id, &resources_after_trade)
+}
+
+fn resources_after_bank_trade(
+    resources: &ResourceCollection,
+    trade: BankTrade,
+) -> Option<ResourceCollection> {
+    let mut resources = *resources;
+    resources.subtract_in_place(&trade.to_bank()).ok()?;
+    resources += &trade.from_bank();
+    Some(resources)
+}
+
+fn next_objective_score_for_resources(
+    context: &PlayerDecisionContext<'_>,
+    player_id: PlayerId,
+    resources: &ResourceCollection,
+) -> (u8, usize) {
+    let city_count = legal::legal_city_spots_count_with_resources(context, player_id, resources);
     if city_count > 0 {
         return (4, city_count);
     }
 
-    let settlement_count = legal::legal_settlement_spots_count(context, player_id);
+    let settlement_count =
+        legal::legal_settlement_spots_count_with_resources(context, player_id, resources);
     if settlement_count > 0 {
         return (3, settlement_count);
     }
 
-    let road_count = legal::legal_road_spots_count(context, player_id);
+    let road_count = legal::legal_road_spots_count_with_resources(context, player_id, resources);
     if road_count > 0 {
         return (2, road_count);
     }
-    if context
-        .private
-        .resources
-        .has_enough(&constants::costs::DEV_CARD)
-    {
+    if resources.has_enough(&constants::costs::DEV_CARD) {
         return (1, 1);
     }
     (0, 0)
