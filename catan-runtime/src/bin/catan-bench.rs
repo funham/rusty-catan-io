@@ -449,18 +449,78 @@ fn print_human_summary(summary: &Summary) {
 mod tests {
     use super::*;
 
-    #[test]
-    fn same_seed_produces_same_short_run_result_and_stats() {
-        let config = load_config(
+    fn greedy_brawl_config() -> MatchConfig {
+        load_config(
             &PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .join("data/configurations/greedy_brawl.json"),
         )
-        .unwrap();
+        .unwrap()
+    }
+
+    #[test]
+    fn same_seed_produces_same_short_run_result_and_stats() {
+        let config = greedy_brawl_config();
 
         let first = run_one_game(&config, 42, Some(5)).unwrap();
         let second = run_one_game(&config, 42, Some(5)).unwrap();
 
         assert_eq!(first.result, second.result);
         assert_eq!(first.stats, second.stats);
+    }
+
+    #[test]
+    fn greedy_brawl_seed_zero_keeps_golden_summary() {
+        let config = greedy_brawl_config();
+        let outcome = run_one_game(&config, 0, None).unwrap();
+
+        assert!(matches!(outcome.result, GameResult::Win(_)));
+        assert_eq!(outcome.stats.turns_started, 108);
+        assert_eq!(outcome.stats.turns_ended, 107);
+        assert_eq!(outcome.stats.decision_requests, 374);
+        assert_eq!(outcome.stats.regular_actions, 221);
+        assert_eq!(outcome.stats.builds, 51);
+        assert_eq!(outcome.stats.bank_trades, 39);
+        assert_eq!(outcome.stats.dev_cards_bought, 24);
+        assert_eq!(outcome.stats.dev_cards_used, 18);
+        assert_eq!(outcome.stats.dice_rolls, 107);
+        assert_eq!(outcome.stats.resources_distributed, 94);
+        assert_eq!(outcome.stats.player_discards, 2);
+        assert_eq!(outcome.stats.robber_moves, 27);
+        assert_eq!(outcome.stats.action_rejections, 0);
+    }
+
+    #[test]
+    #[ignore = "larger deterministic benchmark guard; run before behavior-sensitive refactors"]
+    fn greedy_brawl_seed_batch_keeps_golden_summary() {
+        let config = greedy_brawl_config();
+        let mut totals = Totals::default();
+        let mut result_counts = ResultCounts::default();
+
+        for seed in 0..5 {
+            let outcome = run_one_game(&config, seed, None).unwrap();
+            totals.add_stats(outcome.stats);
+            match outcome.result {
+                GameResult::Win(_) => result_counts.wins += 1,
+                GameResult::LimitReached { .. } => result_counts.limits += 1,
+                GameResult::Interrupted { .. } => result_counts.interruptions += 1,
+            }
+        }
+
+        assert_eq!(result_counts.wins, 5);
+        assert_eq!(result_counts.limits, 0);
+        assert_eq!(result_counts.interruptions, 0);
+        assert_eq!(totals.turns_started, 453);
+        assert_eq!(totals.turns_ended, 448);
+        assert_eq!(totals.decision_requests, 1590);
+        assert_eq!(totals.regular_actions, 909);
+        assert_eq!(totals.builds, 200);
+        assert_eq!(totals.bank_trades, 165);
+        assert_eq!(totals.dev_cards_bought, 96);
+        assert_eq!(totals.dev_cards_used, 74);
+        assert_eq!(totals.dice_rolls, 452);
+        assert_eq!(totals.resources_distributed, 386);
+        assert_eq!(totals.player_discards, 26);
+        assert_eq!(totals.robber_moves, 122);
+        assert_eq!(totals.action_rejections, 0);
     }
 }

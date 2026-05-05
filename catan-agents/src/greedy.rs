@@ -260,7 +260,7 @@ fn best_road_build(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> 
             player_id,
         ));
         let context = factory.player_decision_context(player_id, search);
-        legal::legal_settlement_spots(&context, player_id).len()
+        legal::legal_settlement_spots_count(&context, player_id)
     })
 }
 
@@ -294,14 +294,19 @@ fn best_bank_trade(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> 
 }
 
 fn next_objective_score(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> (u8, usize) {
-    if !legal::legal_city_spots(context, player_id).is_empty() {
-        return (4, legal::legal_city_spots(context, player_id).len());
+    let city_count = legal::legal_city_spots_count(context, player_id);
+    if city_count > 0 {
+        return (4, city_count);
     }
-    if !legal::legal_settlement_spots(context, player_id).is_empty() {
-        return (3, legal::legal_settlement_spots(context, player_id).len());
+
+    let settlement_count = legal::legal_settlement_spots_count(context, player_id);
+    if settlement_count > 0 {
+        return (3, settlement_count);
     }
-    if !legal::legal_road_spots(context, player_id).is_empty() {
-        return (2, legal::legal_road_spots(context, player_id).len());
+
+    let road_count = legal::legal_road_spots_count(context, player_id);
+    if road_count > 0 {
+        return (2, road_count);
     }
     if context
         .private

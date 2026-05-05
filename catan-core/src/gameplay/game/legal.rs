@@ -8,14 +8,16 @@ use crate::{
         game::view::{PlayerDecisionContext, PublicPlayerResources},
         primitives::{
             PortKind,
-            build::{BoardBuildData, Build, Establishment, EstablishmentType, Road},
+            build::{
+                BoardBuildData, Build, Establishment, EstablishmentType, PlayerBuildData, Road,
+            },
             dev_card::{DevCardUsage, UsableDevCard},
             player::PlayerId,
-            resource::Resource,
+            resource::{HasCost, Resource},
             trade::{BankTrade, BankTradeKind},
         },
     },
-    topology::{Hex, Path},
+    topology::{Hex, Path, collision::CollisionChecker},
 };
 
 #[cfg(feature = "bench-counters")]
@@ -100,41 +102,96 @@ pub fn legal_builds(context: &PlayerDecisionContext<'_>, class: BuildClass) -> V
 }
 
 pub fn legal_city_spots(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> Vec<Build> {
-    let Some(search) = &context.search else {
+    if context.search.is_none() {
         log::debug!("legal city spots require search context");
         return Vec::new();
-    };
-    let seed = search.make_owned();
+    }
+    if !context
+        .private
+        .resources
+        .has_enough(&EstablishmentType::City.cost())
+        || context.public.builds.by_player(player_id).cities_count() >= PlayerBuildData::CITY_LIMIT
+    {
+        return Vec::new();
+    }
 
-    seed.state.builds[player_id]
+    context
+        .public
+        .builds
+        .by_player(player_id)
         .establishments
         .iter()
         .copied()
         .filter(|est| est.stage == EstablishmentType::Settlement)
         .map(|est| {
+            #[cfg(feature = "bench-counters")]
+            counters::city_candidate();
             Build::Establishment(Establishment {
                 pos: est.pos,
                 stage: EstablishmentType::City,
             })
         })
-        .filter(|build| {
+        .collect()
+}
+
+pub fn legal_city_spots_count(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> usize {
+    if context.search.is_none() {
+        log::debug!("legal city spots require search context");
+        return 0;
+    }
+    if !context
+        .private
+        .resources
+        .has_enough(&EstablishmentType::City.cost())
+        || context.public.builds.by_player(player_id).cities_count() >= PlayerBuildData::CITY_LIMIT
+    {
+        return 0;
+    }
+
+    context
+        .public
+        .builds
+        .by_player(player_id)
+        .establishments
+        .iter()
+        .copied()
+        .filter(|est| est.stage == EstablishmentType::Settlement)
+        .inspect(|_| {
             #[cfg(feature = "bench-counters")]
             counters::city_candidate();
-            let mut state = seed.state.clone();
-            state.build(player_id, *build).is_ok()
         })
-        .collect()
+        .count()
 }
 
 pub fn legal_settlement_spots(
     context: &PlayerDecisionContext<'_>,
     player_id: PlayerId,
 ) -> Vec<Build> {
-    let Some(search) = &context.search else {
+    if context.search.is_none() {
         log::debug!("legal settlement spots require search context");
         return Vec::new();
+    }
+    if !can_buy_settlement(context)
+        || context
+            .public
+            .builds
+            .by_player(player_id)
+            .settlements_count()
+            >= PlayerBuildData::SETTLEMENT_LIMIT
+    {
+        return Vec::new();
+    }
+    if player_id >= context.public.builds.players().len() {
+        return Vec::new();
+    }
+    let occ = context.public.builds.occupancy();
+    let other_occupancy =
+        occ.occupancy((0..context.public.builds.players().len()).filter(|id| id != &player_id));
+    let this_occupancy = occ.occupancy([player_id]);
+    let checker = CollisionChecker {
+        other_occupancy: &other_occupancy,
+        this_occupancy: &this_occupancy,
     };
-    let seed = search.make_owned();
 
     context
         .public
@@ -151,18 +208,88 @@ pub fn legal_settlement_spots(
         .filter(|build| {
             #[cfg(feature = "bench-counters")]
             counters::settlement_candidate();
-            let mut state = seed.state.clone();
-            state.build(player_id, *build).is_ok()
+            match build {
+                Build::Establishment(establishment) => checker.can_place(establishment),
+                Build::Road(_) => unreachable!(),
+            }
         })
         .collect()
 }
 
+pub fn legal_settlement_spots_count(
+    context: &PlayerDecisionContext<'_>,
+    player_id: PlayerId,
+) -> usize {
+    if context.search.is_none() {
+        log::debug!("legal settlement spots require search context");
+        return 0;
+    }
+    if !can_buy_settlement(context)
+        || context
+            .public
+            .builds
+            .by_player(player_id)
+            .settlements_count()
+            >= PlayerBuildData::SETTLEMENT_LIMIT
+    {
+        return 0;
+    }
+    if player_id >= context.public.builds.players().len() {
+        return 0;
+    }
+    let occ = context.public.builds.occupancy();
+    let other_occupancy =
+        occ.occupancy((0..context.public.builds.players().len()).filter(|id| id != &player_id));
+    let this_occupancy = occ.occupancy([player_id]);
+    let checker = CollisionChecker {
+        other_occupancy: &other_occupancy,
+        this_occupancy: &this_occupancy,
+    };
+
+    context
+        .public
+        .board
+        .arrangement
+        .intersections()
+        .into_iter()
+        .map(|pos| {
+            Build::Establishment(Establishment {
+                pos,
+                stage: EstablishmentType::Settlement,
+            })
+        })
+        .filter(|build| {
+            #[cfg(feature = "bench-counters")]
+            counters::settlement_candidate();
+            match build {
+                Build::Establishment(establishment) => checker.can_place(establishment),
+                Build::Road(_) => unreachable!(),
+            }
+        })
+        .count()
+}
+
 pub fn legal_road_spots(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> Vec<Build> {
-    let Some(search) = &context.search else {
+    if context.search.is_none() {
         log::debug!("legal road spots require search context");
         return Vec::new();
+    }
+    if !can_buy_road(context)
+        || context.public.builds.by_player(player_id).roads_count() >= PlayerBuildData::ROAD_LIMIT
+    {
+        return Vec::new();
+    }
+    if player_id >= context.public.builds.players().len() {
+        return Vec::new();
+    }
+    let occ = context.public.builds.occupancy();
+    let other_occupancy =
+        occ.occupancy((0..context.public.builds.players().len()).filter(|id| id != &player_id));
+    let this_occupancy = occ.occupancy([player_id]);
+    let checker = CollisionChecker {
+        other_occupancy: &other_occupancy,
+        this_occupancy: &this_occupancy,
     };
-    let seed = search.make_owned();
 
     context
         .public
@@ -174,10 +301,52 @@ pub fn legal_road_spots(context: &PlayerDecisionContext<'_>, player_id: PlayerId
         .filter(|build| {
             #[cfg(feature = "bench-counters")]
             counters::road_candidate();
-            let mut state = seed.state.clone();
-            state.build(player_id, *build).is_ok()
+            match build {
+                Build::Road(road) => checker.can_place(road),
+                Build::Establishment(_) => unreachable!(),
+            }
         })
         .collect()
+}
+
+pub fn legal_road_spots_count(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> usize {
+    if context.search.is_none() {
+        log::debug!("legal road spots require search context");
+        return 0;
+    }
+    if !can_buy_road(context)
+        || context.public.builds.by_player(player_id).roads_count() >= PlayerBuildData::ROAD_LIMIT
+    {
+        return 0;
+    }
+    if player_id >= context.public.builds.players().len() {
+        return 0;
+    }
+    let occ = context.public.builds.occupancy();
+    let other_occupancy =
+        occ.occupancy((0..context.public.builds.players().len()).filter(|id| id != &player_id));
+    let this_occupancy = occ.occupancy([player_id]);
+    let checker = CollisionChecker {
+        other_occupancy: &other_occupancy,
+        this_occupancy: &this_occupancy,
+    };
+
+    context
+        .public
+        .board
+        .arrangement
+        .paths()
+        .into_iter()
+        .map(|pos| Build::Road(Road { pos }))
+        .filter(|build| {
+            #[cfg(feature = "bench-counters")]
+            counters::road_candidate();
+            match build {
+                Build::Road(road) => checker.can_place(road),
+                Build::Establishment(_) => unreachable!(),
+            }
+        })
+        .count()
 }
 
 pub fn can_buy_dev_card(context: &PlayerDecisionContext<'_>) -> bool {
@@ -486,7 +655,7 @@ mod tests {
             index::GameIndex,
             init::GameInitializationState,
             state::GameState,
-            view::{ContextFactory, SearchFactory, VisibilityConfig},
+            view::{ContextFactory, PlayerDecisionContext, SearchFactory, VisibilityConfig},
         },
         primitives::{
             PortKind,
@@ -619,6 +788,157 @@ mod tests {
         legal_bank_trades(&context)
     }
 
+    fn with_decision_context<T>(
+        state: &GameState,
+        player_id: PlayerId,
+        f: impl FnOnce(PlayerDecisionContext<'_>) -> T,
+    ) -> T {
+        let index = GameIndex::rebuild(state);
+        let visibility = VisibilityConfig::default();
+        let factory = ContextFactory {
+            state,
+            index: &index,
+            visibility: &visibility,
+        };
+        let search = Some(SearchFactory::new(
+            state,
+            visibility.player_policy(player_id),
+            player_id,
+        ));
+        f(factory.player_decision_context(player_id, search))
+    }
+
+    fn clone_apply_city_spots(
+        context: &PlayerDecisionContext<'_>,
+        player_id: PlayerId,
+    ) -> Vec<Build> {
+        let Some(search) = &context.search else {
+            return Vec::new();
+        };
+        let seed = search.make_owned();
+
+        seed.state.builds[player_id]
+            .establishments
+            .iter()
+            .copied()
+            .filter(|est| est.stage == EstablishmentType::Settlement)
+            .map(|est| {
+                Build::Establishment(Establishment {
+                    pos: est.pos,
+                    stage: EstablishmentType::City,
+                })
+            })
+            .filter(|build| {
+                let mut state = seed.state.clone();
+                state.build(player_id, *build).is_ok()
+            })
+            .collect()
+    }
+
+    fn clone_apply_settlement_spots(
+        context: &PlayerDecisionContext<'_>,
+        player_id: PlayerId,
+    ) -> Vec<Build> {
+        let Some(search) = &context.search else {
+            return Vec::new();
+        };
+        let seed = search.make_owned();
+
+        context
+            .public
+            .board
+            .arrangement
+            .intersections()
+            .into_iter()
+            .map(|pos| {
+                Build::Establishment(Establishment {
+                    pos,
+                    stage: EstablishmentType::Settlement,
+                })
+            })
+            .filter(|build| {
+                let mut state = seed.state.clone();
+                state.build(player_id, *build).is_ok()
+            })
+            .collect()
+    }
+
+    fn clone_apply_road_spots(
+        context: &PlayerDecisionContext<'_>,
+        player_id: PlayerId,
+    ) -> Vec<Build> {
+        let Some(search) = &context.search else {
+            return Vec::new();
+        };
+        let seed = search.make_owned();
+
+        context
+            .public
+            .board
+            .arrangement
+            .paths()
+            .into_iter()
+            .map(|pos| Build::Road(Road { pos }))
+            .filter(|build| {
+                let mut state = seed.state.clone();
+                state.build(player_id, *build).is_ok()
+            })
+            .collect()
+    }
+
+    fn sorted_debug(builds: Vec<Build>) -> Vec<String> {
+        let mut values = builds
+            .into_iter()
+            .map(|build| format!("{build:?}"))
+            .collect::<Vec<_>>();
+        values.sort();
+        values
+    }
+
+    #[test]
+    fn direct_legal_build_spots_match_clone_apply_generation() {
+        let mut state = initialized_state();
+        state
+            .transfer_from_bank(
+                ResourceCollection {
+                    brick: 5,
+                    wood: 5,
+                    wheat: 5,
+                    sheep: 5,
+                    ore: 5,
+                },
+                0,
+            )
+            .expect("bank should fund test player");
+
+        with_decision_context(&state, 0, |context| {
+            assert_eq!(
+                sorted_debug(legal_city_spots(&context, 0)),
+                sorted_debug(clone_apply_city_spots(&context, 0))
+            );
+            assert_eq!(
+                sorted_debug(legal_settlement_spots(&context, 0)),
+                sorted_debug(clone_apply_settlement_spots(&context, 0))
+            );
+            assert_eq!(
+                sorted_debug(legal_road_spots(&context, 0)),
+                sorted_debug(clone_apply_road_spots(&context, 0))
+            );
+            assert_eq!(
+                legal_city_spots_count(&context, 0),
+                clone_apply_city_spots(&context, 0).len()
+            );
+            assert_eq!(
+                legal_settlement_spots_count(&context, 0),
+                clone_apply_settlement_spots(&context, 0).len()
+            );
+            assert_eq!(
+                legal_road_spots_count(&context, 0),
+                clone_apply_road_spots(&context, 0).len()
+            );
+        });
+    }
+
     #[test]
     fn legal_actions_include_city_when_affordable() {
         let action = context_action_with_resources(ResourceCollection {
@@ -635,6 +955,28 @@ mod tests {
             }
             other => panic!("expected city build, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn can_buy_city_requires_city_resources() {
+        let mut state = initialized_state();
+        state
+            .transfer_from_bank(
+                ResourceCollection {
+                    brick: 1,
+                    wood: 1,
+                    wheat: 1,
+                    sheep: 1,
+                    ore: 0,
+                },
+                0,
+            )
+            .expect("bank should fund settlement-cost resources");
+
+        with_decision_context(&state, 0, |context| {
+            assert!(!can_buy_city(&context));
+            assert!(legal_city_spots(&context, 0).is_empty());
+        });
     }
 
     #[test]

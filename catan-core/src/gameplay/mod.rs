@@ -22,10 +22,8 @@ pub mod constants {
             ..ResourceCollection::ZERO
         };
         pub const CITY: ResourceCollection = ResourceCollection {
-            brick: 1,
-            wood: 1,
-            wheat: 1,
-            sheep: 1,
+            ore: 3,
+            wheat: 2,
             ..ResourceCollection::ZERO
         };
         pub const DEV_CARD: ResourceCollection = ResourceCollection {
