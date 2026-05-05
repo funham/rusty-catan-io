@@ -9,7 +9,8 @@ use crate::{
         primitives::{
             PortKind,
             build::{
-                BoardBuildData, Build, Establishment, EstablishmentType, PlayerBuildData, Road,
+                AggregateOccupancy, BoardBuildData, Build, Establishment, EstablishmentType,
+                PlayerBuildData, Road,
             },
             dev_card::{DevCardUsage, UsableDevCard},
             player::PlayerId,
@@ -17,7 +18,7 @@ use crate::{
             trade::{BankTrade, BankTradeKind},
         },
     },
-    topology::{Hex, Path, collision::CollisionChecker},
+    topology::{Hex, Intersection, Path},
 };
 
 #[cfg(feature = "bench-counters")]
@@ -167,51 +168,26 @@ pub fn legal_settlement_spots(
     context: &PlayerDecisionContext<'_>,
     player_id: PlayerId,
 ) -> Vec<Build> {
-    if context.search.is_none() {
-        log::debug!("legal settlement spots require search context");
+    let Some((other_occupancy, this_occupancy)) = settlement_occupancy(context, player_id) else {
         return Vec::new();
-    }
-    if !can_buy_settlement(context)
-        || context
-            .public
-            .builds
-            .by_player(player_id)
-            .settlements_count()
-            >= PlayerBuildData::SETTLEMENT_LIMIT
-    {
-        return Vec::new();
-    }
-    if player_id >= context.public.builds.players().len() {
-        return Vec::new();
-    }
-    let occ = context.public.builds.occupancy();
-    let other_occupancy =
-        occ.occupancy((0..context.public.builds.players().len()).filter(|id| id != &player_id));
-    let this_occupancy = occ.occupancy([player_id]);
-    let checker = CollisionChecker {
-        other_occupancy: &other_occupancy,
-        this_occupancy: &this_occupancy,
     };
 
     context
         .public
         .board
-        .arrangement
         .intersections()
-        .into_iter()
+        .iter()
+        .copied()
+        .filter(|&pos| {
+            #[cfg(feature = "bench-counters")]
+            counters::settlement_candidate();
+            can_place_settlement_at(pos, &other_occupancy, &this_occupancy)
+        })
         .map(|pos| {
             Build::Establishment(Establishment {
                 pos,
                 stage: EstablishmentType::Settlement,
             })
-        })
-        .filter(|build| {
-            #[cfg(feature = "bench-counters")]
-            counters::settlement_candidate();
-            match build {
-                Build::Establishment(establishment) => checker.can_place(establishment),
-                Build::Road(_) => unreachable!(),
-            }
         })
         .collect()
 }
@@ -220,9 +196,70 @@ pub fn legal_settlement_spots_count(
     context: &PlayerDecisionContext<'_>,
     player_id: PlayerId,
 ) -> usize {
+    let Some((other_occupancy, this_occupancy)) = settlement_occupancy(context, player_id) else {
+        return 0;
+    };
+
+    context
+        .public
+        .board
+        .intersections()
+        .iter()
+        .copied()
+        .filter(|&pos| {
+            #[cfg(feature = "bench-counters")]
+            counters::settlement_candidate();
+            can_place_settlement_at(pos, &other_occupancy, &this_occupancy)
+        })
+        .count()
+}
+
+pub fn legal_road_spots(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> Vec<Build> {
+    let Some((other_occupancy, this_occupancy)) = road_occupancy(context, player_id) else {
+        return Vec::new();
+    };
+
+    context
+        .public
+        .board
+        .paths()
+        .iter()
+        .copied()
+        .filter(|&pos| {
+            #[cfg(feature = "bench-counters")]
+            counters::road_candidate();
+            can_place_road_at(pos, &other_occupancy, &this_occupancy)
+        })
+        .map(|pos| Build::Road(Road { pos }))
+        .collect()
+}
+
+pub fn legal_road_spots_count(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> usize {
+    let Some((other_occupancy, this_occupancy)) = road_occupancy(context, player_id) else {
+        return 0;
+    };
+
+    context
+        .public
+        .board
+        .paths()
+        .iter()
+        .copied()
+        .filter(|&pos| {
+            #[cfg(feature = "bench-counters")]
+            counters::road_candidate();
+            can_place_road_at(pos, &other_occupancy, &this_occupancy)
+        })
+        .count()
+}
+
+fn settlement_occupancy(
+    context: &PlayerDecisionContext<'_>,
+    player_id: PlayerId,
+) -> Option<(AggregateOccupancy, AggregateOccupancy)> {
     if context.search.is_none() {
         log::debug!("legal settlement spots require search context");
-        return 0;
+        return None;
     }
     if !can_buy_settlement(context)
         || context
@@ -232,121 +269,76 @@ pub fn legal_settlement_spots_count(
             .settlements_count()
             >= PlayerBuildData::SETTLEMENT_LIMIT
     {
-        return 0;
+        return None;
     }
-    if player_id >= context.public.builds.players().len() {
-        return 0;
-    }
-    let occ = context.public.builds.occupancy();
-    let other_occupancy =
-        occ.occupancy((0..context.public.builds.players().len()).filter(|id| id != &player_id));
-    let this_occupancy = occ.occupancy([player_id]);
-    let checker = CollisionChecker {
-        other_occupancy: &other_occupancy,
-        this_occupancy: &this_occupancy,
-    };
-
-    context
-        .public
-        .board
-        .arrangement
-        .intersections()
-        .into_iter()
-        .map(|pos| {
-            Build::Establishment(Establishment {
-                pos,
-                stage: EstablishmentType::Settlement,
-            })
-        })
-        .filter(|build| {
-            #[cfg(feature = "bench-counters")]
-            counters::settlement_candidate();
-            match build {
-                Build::Establishment(establishment) => checker.can_place(establishment),
-                Build::Road(_) => unreachable!(),
-            }
-        })
-        .count()
+    build_occupancy_for_player(context, player_id)
 }
 
-pub fn legal_road_spots(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> Vec<Build> {
+fn road_occupancy(
+    context: &PlayerDecisionContext<'_>,
+    player_id: PlayerId,
+) -> Option<(AggregateOccupancy, AggregateOccupancy)> {
     if context.search.is_none() {
         log::debug!("legal road spots require search context");
-        return Vec::new();
+        return None;
     }
     if !can_buy_road(context)
         || context.public.builds.by_player(player_id).roads_count() >= PlayerBuildData::ROAD_LIMIT
     {
-        return Vec::new();
+        return None;
     }
-    if player_id >= context.public.builds.players().len() {
-        return Vec::new();
-    }
-    let occ = context.public.builds.occupancy();
-    let other_occupancy =
-        occ.occupancy((0..context.public.builds.players().len()).filter(|id| id != &player_id));
-    let this_occupancy = occ.occupancy([player_id]);
-    let checker = CollisionChecker {
-        other_occupancy: &other_occupancy,
-        this_occupancy: &this_occupancy,
-    };
-
-    context
-        .public
-        .board
-        .arrangement
-        .paths()
-        .into_iter()
-        .map(|pos| Build::Road(Road { pos }))
-        .filter(|build| {
-            #[cfg(feature = "bench-counters")]
-            counters::road_candidate();
-            match build {
-                Build::Road(road) => checker.can_place(road),
-                Build::Establishment(_) => unreachable!(),
-            }
-        })
-        .collect()
+    build_occupancy_for_player(context, player_id)
 }
 
-pub fn legal_road_spots_count(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> usize {
-    if context.search.is_none() {
-        log::debug!("legal road spots require search context");
-        return 0;
-    }
-    if !can_buy_road(context)
-        || context.public.builds.by_player(player_id).roads_count() >= PlayerBuildData::ROAD_LIMIT
-    {
-        return 0;
-    }
+fn build_occupancy_for_player(
+    context: &PlayerDecisionContext<'_>,
+    player_id: PlayerId,
+) -> Option<(AggregateOccupancy, AggregateOccupancy)> {
     if player_id >= context.public.builds.players().len() {
-        return 0;
+        return None;
     }
     let occ = context.public.builds.occupancy();
     let other_occupancy =
         occ.occupancy((0..context.public.builds.players().len()).filter(|id| id != &player_id));
     let this_occupancy = occ.occupancy([player_id]);
-    let checker = CollisionChecker {
-        other_occupancy: &other_occupancy,
-        this_occupancy: &this_occupancy,
-    };
+    Some((other_occupancy, this_occupancy))
+}
 
-    context
-        .public
-        .board
-        .arrangement
-        .paths()
-        .into_iter()
-        .map(|pos| Build::Road(Road { pos }))
-        .filter(|build| {
-            #[cfg(feature = "bench-counters")]
-            counters::road_candidate();
-            match build {
-                Build::Road(road) => checker.can_place(road),
-                Build::Establishment(_) => unreachable!(),
-            }
-        })
-        .count()
+fn can_place_settlement_at(
+    pos: Intersection,
+    other_occupancy: &AggregateOccupancy,
+    this_occupancy: &AggregateOccupancy,
+) -> bool {
+    if !this_occupancy.roads_occupancy.occupancy.contains(&pos) {
+        return false;
+    }
+    if other_occupancy.builds_occupancy.contains(&pos)
+        || this_occupancy.builds_occupancy.contains(&pos)
+    {
+        return false;
+    }
+
+    pos.neighbors().into_iter().all(|neighbor| {
+        !other_occupancy.builds_occupancy.contains(&neighbor)
+            && !this_occupancy.builds_occupancy.contains(&neighbor)
+    })
+}
+
+fn can_place_road_at(
+    pos: Path,
+    other_occupancy: &AggregateOccupancy,
+    this_occupancy: &AggregateOccupancy,
+) -> bool {
+    if other_occupancy.roads_occupancy.paths.contains(&pos)
+        || this_occupancy.roads_occupancy.paths.contains(&pos)
+    {
+        return false;
+    }
+
+    pos.intersections_iter().any(|v| {
+        this_occupancy.roads_occupancy.occupancy.contains(&v)
+            && !other_occupancy.builds_occupancy.contains(&v)
+    })
 }
 
 pub fn can_buy_dev_card(context: &PlayerDecisionContext<'_>) -> bool {

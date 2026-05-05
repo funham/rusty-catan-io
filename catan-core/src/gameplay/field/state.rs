@@ -19,12 +19,16 @@ pub struct BoardIndex {
     pub desert_pos: Hex,
     pub hex_by_num: HexesByNum,
     pub ports_intersection: BTreeMap<Intersection, PortKind>,
+    intersections: Vec<Intersection>,
+    paths: Vec<Path>,
 }
 
 impl BoardIndex {
     fn new(board: &BoardArrangement) -> Self {
         let desert_pos = Self::find_desert_pos(board);
         let hex_by_num = Self::get_hex_by_num(board);
+        let intersections = board.intersections().into_iter().collect();
+        let paths = board.path_set().into_iter().collect();
         let ports_intersection = board
             .ports()
             .iter()
@@ -39,6 +43,8 @@ impl BoardIndex {
             desert_pos,
             hex_by_num,
             ports_intersection,
+            intersections,
+            paths,
         }
     }
 
@@ -209,6 +215,14 @@ impl BoardLayout {
     pub fn index(&self) -> BoardIndex {
         self.index.clone()
     }
+
+    pub fn intersections(&self) -> &[Intersection] {
+        &self.index.intersections
+    }
+
+    pub fn paths(&self) -> &[Path] {
+        &self.index.paths
+    }
 }
 
 impl BoardState {
@@ -216,5 +230,30 @@ impl BoardState {
         Self {
             robber_pos: layout.desert_pos(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use super::*;
+
+    #[test]
+    fn board_layout_cached_topology_matches_arrangement_generation() {
+        let layout = BoardLayout::new(FieldBuildParam::default());
+
+        assert_eq!(
+            layout
+                .intersections()
+                .iter()
+                .copied()
+                .collect::<BTreeSet<_>>(),
+            layout.arrangement.intersections().into_iter().collect()
+        );
+        assert_eq!(
+            layout.paths().iter().copied().collect::<BTreeSet<_>>(),
+            layout.arrangement.path_set()
+        );
     }
 }
