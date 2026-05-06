@@ -563,12 +563,7 @@ pub mod data {
                 return Err(BuildingError::Road(EdgeInsertationError));
             }
 
-            if self.players[player_id]
-                .roads
-                .edges()
-                .iter()
-                .any(|road| self.roads_touch_at_unblocked_intersection(player_id, path, *road))
-            {
+            if self.player_has_road_touching_path_at_unblocked_intersection(player_id, path) {
                 Ok(())
             } else {
                 Err(BuildingError::Road(EdgeInsertationError))
@@ -602,11 +597,7 @@ pub mod data {
                 return Err(BuildingError::Road(EdgeInsertationError));
             }
 
-            if self.players[player_id]
-                .roads
-                .edges()
-                .iter()
-                .any(|road| self.roads_touch_at_unblocked_intersection(player_id, path, *road))
+            if self.player_has_road_touching_path_at_unblocked_intersection(player_id, path)
                 || extra_roads
                     .clone()
                     .into_iter()
@@ -680,7 +671,7 @@ pub mod data {
         fn is_road_occupied(&self, path: Path) -> bool {
             self.players
                 .iter()
-                .any(|player| player.roads.edges().contains(&path))
+                .any(|player| player.roads.contains_edge(path))
         }
 
         fn player_has_road_at_intersection(
@@ -688,11 +679,18 @@ pub mod data {
             player_id: PlayerId,
             intersection: Intersection,
         ) -> bool {
-            self.players[player_id]
-                .roads
-                .edges()
-                .iter()
-                .any(|path| path_contains_intersection(*path, intersection))
+            self.players[player_id].roads.touches(intersection)
+        }
+
+        fn player_has_road_touching_path_at_unblocked_intersection(
+            &self,
+            player_id: PlayerId,
+            path: Path,
+        ) -> bool {
+            path.intersections().into_iter().any(|intersection| {
+                self.players[player_id].roads.touches(intersection)
+                    && !self.opponent_has_establishment_at(player_id, intersection)
+            })
         }
 
         fn roads_touch_at_unblocked_intersection(
@@ -706,6 +704,21 @@ pub mod data {
             };
 
             !self.opponent_has_establishment_on_hexes(player_id, [a, b, c])
+        }
+
+        fn opponent_has_establishment_at(
+            &self,
+            player_id: PlayerId,
+            intersection: Intersection,
+        ) -> bool {
+            self.players_indexed()
+                .filter(|(other_id, _)| *other_id != player_id)
+                .any(|(_, player)| {
+                    player
+                        .establishments
+                        .iter()
+                        .any(|establishment| establishment.pos == intersection)
+                })
         }
 
         fn opponent_has_establishment_on_hexes(

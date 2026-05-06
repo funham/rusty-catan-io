@@ -54,6 +54,18 @@ impl RoadGraph {
         &self.edges
     }
 
+    pub fn contains_edge(&self, edge: Path) -> bool {
+        self.edges.contains(&edge)
+    }
+
+    pub fn touches(&self, intersection: Intersection) -> bool {
+        self.out.contains_key(&intersection)
+    }
+
+    pub fn edges_at(&self, intersection: Intersection) -> Option<&SmallSet<Path, 3>> {
+        self.out.get(&intersection)
+    }
+
     /// add an edge, no questions asked
     /// ---
     /// for inside use only basically
