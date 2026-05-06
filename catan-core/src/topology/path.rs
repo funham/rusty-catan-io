@@ -170,8 +170,8 @@ impl Path<repr::Canon> {
     }
 
     pub fn intersections(&self) -> [Intersection; 2] {
-        let [d1, d2] = self.dual().as_arr();
         let (h1, h2) = self.as_pair();
+        let [d1, d2] = common_neighbors(h1, h2).unwrap();
 
         [
             Intersection::from_adjacent_hexes([d1, h1, h2]),
@@ -197,21 +197,17 @@ impl Path<repr::Canon> {
     }
 }
 
-fn common_neighbors(h1: Hex, h2: Hex) -> Option<[Hex; 2]> {
-    let mut common = [Hex::new(0, 0); 2];
-    let mut len = 0;
+pub(crate) fn common_neighbors(h1: Hex, h2: Hex) -> Option<[Hex; 2]> {
+    let dir = h1.direction_index_to(h2)?;
+    let left = (dir + 5) % 6;
+    let right = (dir + 1) % 6;
+    let (first, second) = if left < right {
+        (left, right)
+    } else {
+        (right, left)
+    };
 
-    for candidate in h1.neighbors() {
-        if candidate.are_neighbors(&h2) {
-            if len == common.len() {
-                return None;
-            }
-            common[len] = candidate;
-            len += 1;
-        }
-    }
-
-    (len == common.len()).then_some(common)
+    Some([h1 + Hex::direction(first), h1 + Hex::direction(second)])
 }
 
 fn common_hexes_3(a: [Hex; 3], b: [Hex; 3]) -> Option<[Hex; 2]> {
@@ -276,5 +272,26 @@ mod tests {
     #[test]
     fn intersections_works() {
         let _ = Path::<Canon>::try_from((h(0, 1), h(0, 0))).unwrap();
+    }
+
+    #[test]
+    fn common_neighbors_preserves_neighbor_scan_order() {
+        let center = h(0, 0);
+
+        for dir in 0..6 {
+            let other = center + Hex::direction(dir);
+            let common = common_neighbors(center, other).unwrap();
+            let expected = {
+                let mut common = Vec::new();
+                for candidate in center.neighbors() {
+                    if candidate.are_neighbors(&other) {
+                        common.push(candidate);
+                    }
+                }
+                [common[0], common[1]]
+            };
+
+            assert_eq!(common, expected);
+        }
     }
 }

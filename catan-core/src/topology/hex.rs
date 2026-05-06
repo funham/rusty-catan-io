@@ -181,6 +181,18 @@ impl Hex {
         self.distance(other) == 1
     }
 
+    pub const fn direction_index_to(&self, other: Self) -> Option<usize> {
+        match (other.q - self.q, other.r - self.r) {
+            (1, 0) => Some(0),
+            (1, -1) => Some(1),
+            (0, -1) => Some(2),
+            (-1, 0) => Some(3),
+            (-1, 1) => Some(4),
+            (0, 1) => Some(5),
+            _ => None,
+        }
+    }
+
     pub const fn directions() -> [Hex; 6] {
         Hex { q: 0, r: 0 }.neighbors()
     }
@@ -262,10 +274,7 @@ impl Axis {
 
     pub fn from_path(path: Path) -> Axis {
         let (h1, h2) = path.as_pair();
-        let dir_index = Hex::directions()
-            .iter()
-            .position(|d| *d == (h1 - h2))
-            .expect("must be one of those");
+        let dir_index = h2.direction_index_to(h1).expect("must be one of those");
 
         Self::from_dir(dir_index)
     }

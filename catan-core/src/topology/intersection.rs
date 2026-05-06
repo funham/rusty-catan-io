@@ -128,7 +128,7 @@ impl Intersection {
 }
 
 fn neighbor_across_path(path_a: Hex, path_b: Hex, current_third: Hex) -> Intersection {
-    let dual = Path::try_from((path_a, path_b)).unwrap().dual().as_arr();
+    let dual = common_neighbors(path_a, path_b).unwrap();
     let other = if dual[0] == current_third {
         dual[1]
     } else if dual[1] == current_third {
