@@ -25,7 +25,6 @@ use crate::{
     },
     topology::{
         HasPos, Hex, Intersection, Path,
-        collision::CollisionChecker,
         graph::{self, EdgeInsertationError},
     },
 };
@@ -467,75 +466,37 @@ pub mod data {
             player_id: PlayerId,
             build: Build,
         ) -> Result<(), BuildingError> {
-            let occ = self.occupancy();
-
-            let checker = CollisionChecker {
-                other_occupancy: &occ
-                    .occupancy((0..self.players.len()).filter(|id| id != &player_id)),
-                this_occupancy: &occ.occupancy([player_id]),
-            };
+            self.can_build(player_id, build)?;
 
             match build {
                 Build::Road(road) => {
-                    if self.players[player_id].roads_count() >= PlayerBuildData::ROAD_LIMIT {
-                        return Err(BuildingError::RoadLimit());
-                    }
-                    match self.players[player_id].roads.extend(&road.pos, &checker) {
-                        Ok(_) => {
-                            self.update_longest_road(player_id);
-                            Ok(())
-                        }
-                        Err(err) => Err(BuildingError::Road(err)),
-                    }
+                    self.players[player_id].roads.add_edge(&road.pos);
+                    self.update_longest_road(player_id);
+                    Ok(())
                 }
 
                 Build::Establishment(establishment) => match establishment.stage {
-                    EstablishmentType::Settlement => match checker.can_place(&establishment) {
-                        true if self.players[player_id].settlements_count()
-                            >= PlayerBuildData::SETTLEMENT_LIMIT =>
-                        {
-                            Err(BuildingError::SettlementLimit())
+                    EstablishmentType::Settlement => {
+                        if self.players[player_id].establishments.insert(establishment) {
+                            Ok(())
+                        } else {
+                            Err(BuildingError::Settlement())
                         }
-                        true => {
-                            if self.players[player_id].establishments.insert(establishment) {
-                                Ok(())
-                            } else {
-                                Err(BuildingError::Settlement())
-                            }
-                        }
-                        false => Err(BuildingError::Settlement()), // invalid placement for a settlement
-                    },
+                    }
                     EstablishmentType::City => {
                         let settlement = Establishment {
                             pos: establishment.pos,
                             stage: EstablishmentType::Settlement,
                         };
 
-                        match self.players[player_id].establishments.contains(&settlement) {
-                            true if self.players[player_id].cities_count()
-                                >= PlayerBuildData::CITY_LIMIT =>
-                            {
-                                Err(BuildingError::CityLimit())
-                            }
-                            true => {
-                                if self.players[player_id]
-                                    .establishments
-                                    .contains(&establishment)
-                                {
-                                    return Err(BuildingError::City());
-                                }
+                        if !self.players[player_id].establishments.remove(&settlement) {
+                            return Err(BuildingError::City());
+                        }
 
-                                if !self.players[player_id].establishments.remove(&settlement) {
-                                    return Err(BuildingError::City());
-                                }
-
-                                if self.players[player_id].establishments.insert(establishment) {
-                                    Ok(())
-                                } else {
-                                    Err(BuildingError::City())
-                                }
-                            }
-                            false => Err(BuildingError::City()), // no settlement to upgrade into a city
+                        if self.players[player_id].establishments.insert(establishment) {
+                            Ok(())
+                        } else {
+                            Err(BuildingError::City())
                         }
                     }
                 },
@@ -668,7 +629,7 @@ pub mod data {
             Ok(())
         }
 
-        fn is_road_occupied(&self, path: Path) -> bool {
+        pub(crate) fn is_road_occupied(&self, path: Path) -> bool {
             self.players
                 .iter()
                 .any(|player| player.roads.contains_edge(path))
@@ -736,7 +697,7 @@ pub mod data {
                 })
         }
 
-        fn has_establishment_in_deadzone(&self, pos: Intersection) -> bool {
+        pub(crate) fn has_establishment_in_deadzone(&self, pos: Intersection) -> bool {
             self.players.iter().any(|player| {
                 player
                     .establishments
@@ -781,20 +742,7 @@ pub mod data {
             road: Road,
             establishment: Establishment,
         ) -> Result<(), BuildingError> {
-            let occ = self.occupancy();
-
-            let checker = CollisionChecker {
-                other_occupancy: &occ
-                    .occupancy((0..self.players.len()).filter(|id| id != &player_id)),
-                this_occupancy: &occ.occupancy([player_id]),
-            };
-
-            let settlement_ok = checker
-                .full_occupancy()
-                .builds_occupancy
-                .is_disjoint(&checker.building_deadzone(establishment.pos));
-
-            if !settlement_ok {
+            if self.has_establishment_in_deadzone(establishment.pos) {
                 return Err(BuildingError::InitSettlement(establishment.pos));
             }
 
@@ -811,11 +759,7 @@ pub mod data {
                 .pos
                 .intersections_iter()
                 .any(|v| v == establishment.pos)
-                && !checker
-                    .full_occupancy()
-                    .roads_occupancy
-                    .paths
-                    .contains(&road.pos);
+                && !self.is_road_occupied(road.pos);
 
             if !road_ok {
                 log::error!("invalid initial road placement");
@@ -936,50 +880,25 @@ pub mod query {
         pub fn possible_initial_placements(
             &self,
             field: &BoardLayout,
-            player_id: PlayerId,
+            _player_id: PlayerId,
         ) -> Vec<(Establishment, Road)> {
-            let occ = self.container.occupancy();
-
-            let checker = CollisionChecker {
-                other_occupancy: &occ
-                    .occupancy((0..self.container.players().len()).filter(|id| id != &player_id)),
-                this_occupancy: &occ.occupancy([player_id]),
-            };
-
             let intersections = field
                 .arrangement
                 .intersections()
                 .into_iter()
                 .collect::<Vec<_>>();
 
-            // plan:
-            // build_deadzone = full_occupancy.builds_occupancy.map(|v| v.deadzone()).union()
-            // intersections = intersections.substract(build_deadzone)
-            //
-            // path_deadzone = occ.occupancy_full().roads_occupancy.paths()
-            // poissible_placements = intersections.flat_map(|v| v.paths().substract(path_deadzone).map(|p| (v, p)))
-
-            let build_deadzone = occ
-                .occupancy_full()
-                .builds_occupancy
-                .iter()
-                .flat_map(|v| checker.building_deadzone(*v))
-                .collect::<IntersectionOccupancy>();
-
             let available_intersections = intersections
                 .into_iter()
-                .filter(|v| !build_deadzone.contains(v));
+                .filter(|v| !self.container.has_establishment_in_deadzone(*v));
 
-            let path_deadzone = &occ.occupancy_full().roads_occupancy.paths;
             let valid_paths = field.arrangement.path_set();
-
-            // log::debug!("build_deadzone: {:?}", build_deadzone);
 
             let possible_placements = available_intersections.flat_map(|v| {
                 let paths = v
                     .paths()
                     .into_iter()
-                    .filter(|p| !path_deadzone.contains(p) && valid_paths.contains(p));
+                    .filter(|p| !self.container.is_road_occupied(*p) && valid_paths.contains(p));
                 paths.map(move |p| (v, p))
             });
 
