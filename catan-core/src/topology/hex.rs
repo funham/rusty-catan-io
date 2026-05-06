@@ -1,7 +1,8 @@
-use std::{collections::BTreeSet, hash::Hash, sync::OnceLock};
+use std::{hash::Hash, sync::OnceLock};
 
 use serde::{Deserialize, Serialize};
 
+use crate::common::SmallSet;
 use crate::topology::{Intersection, Path};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -136,7 +137,7 @@ impl Hex {
         ]
     }
 
-    pub fn neighbors_set(&self) -> BTreeSet<Hex> {
+    pub fn neighbors_set(&self) -> SmallSet<Hex, 6> {
         self.neighbors().into_iter().collect()
     }
 
@@ -392,6 +393,8 @@ impl Hash for Hex {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use itertools::Itertools;
 
     use super::*;
@@ -429,7 +432,7 @@ mod tests {
         assert_eq!(
             HexIndex::hex_ring(h(32, -12), 1)
                 .into_iter()
-                .collect::<BTreeSet<_>>(),
+                .collect::<SmallSet<_, 6>>(),
             h(32, -12).neighbors_set()
         );
     }

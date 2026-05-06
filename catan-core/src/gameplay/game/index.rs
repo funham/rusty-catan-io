@@ -1,7 +1,6 @@
-use std::collections::BTreeSet;
-
 use crate::{
     algorithm,
+    common::SmallSet,
     gameplay::{
         field::state::BuildCollection,
         game::state::GameState,
@@ -20,7 +19,7 @@ pub struct GameIndex {
     pub longest_road_lengths: Vec<u16>,
     pub longest_road_owner: Option<PlayerId>,
     pub largest_army_owner: Option<PlayerId>,
-    pub ports_aquired: Vec<BTreeSet<PortKind>>,
+    pub ports_aquired: Vec<SmallSet<PortKind, 6>>,
 }
 
 impl GameIndex {
@@ -38,7 +37,7 @@ impl GameIndex {
         }
     }
 
-    fn get_ports_aquired(state: &GameState) -> Vec<BTreeSet<PortKind>> {
+    fn get_ports_aquired(state: &GameState) -> Vec<SmallSet<PortKind, 6>> {
         algorithm::get_ports_aquired(state.board.ports_intersection(), &state.builds)
     }
 
@@ -78,7 +77,10 @@ impl GameIndex {
             .collect()
     }
 
-    fn opponent_establishments(state: &GameState, player_id: PlayerId) -> BTreeSet<Intersection> {
+    fn opponent_establishments(
+        state: &GameState,
+        player_id: PlayerId,
+    ) -> SmallSet<Intersection, 32> {
         state
             .builds
             .players_indexed()

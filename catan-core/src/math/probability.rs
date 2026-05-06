@@ -3,7 +3,7 @@ use std::{
     ops::{BitAnd, BitOr},
 };
 
-use tinyvec::ArrayVec;
+use smallvec::SmallVec;
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
 pub struct Probability(f32);
@@ -88,17 +88,17 @@ pub trait Probable {
 
 /// Disjunction of possible Die rolls
 /// (all unique) (basically Set<DiceVal>)
-#[derive(Clone, Copy)]
-pub struct Variant<T: Default + Probable + PartialEq + Clone> {
-    values: ArrayVec<[T; 11]>,
+#[derive(Clone)]
+pub struct Variant<T: Probable + PartialEq + Clone> {
+    values: SmallVec<[T; 11]>,
 }
 
-impl<T: Default + Probable + PartialEq + Clone> Variant<T> {
+impl<T: Probable + PartialEq + Clone> Variant<T> {
     pub fn new(values: impl IntoIterator<Item = T>) -> Option<Self> {
         let values_vec: Vec<T> = values.into_iter().collect();
 
         // check
-        if values_vec.is_empty() || values_vec.len() > values_vec.capacity() {
+        if values_vec.is_empty() || values_vec.len() > 11 {
             return None;
         }
 
@@ -117,7 +117,7 @@ impl<T: Default + Probable + PartialEq + Clone> Variant<T> {
     }
 }
 
-impl<T: Default + Probable + PartialEq + Clone> Probable for Variant<T> {
+impl<T: Probable + PartialEq + Clone> Probable for Variant<T> {
     fn prob(&self) -> Probability {
         self.values.iter().map(|d| d.prob()).fold(
             *Probability::zero(),
@@ -127,11 +127,11 @@ impl<T: Default + Probable + PartialEq + Clone> Probable for Variant<T> {
 }
 
 #[derive(Clone)]
-pub struct Sequence<T: Default + Probable + PartialEq + Clone> {
+pub struct Sequence<T: Probable + PartialEq + Clone> {
     values: Vec<Variant<T>>,
 }
 
-impl<T: Default + Probable + PartialEq + Clone> Sequence<T> {
+impl<T: Probable + PartialEq + Clone> Sequence<T> {
     pub fn new(values: impl IntoIterator<Item = Variant<T>>) -> Self {
         Self {
             values: values.into_iter().collect(),
@@ -139,7 +139,7 @@ impl<T: Default + Probable + PartialEq + Clone> Sequence<T> {
     }
 }
 
-impl<T: Default + Probable + PartialEq + Clone> BitAnd for &Variant<T> {
+impl<T: Probable + PartialEq + Clone> BitAnd for &Variant<T> {
     type Output = Sequence<T>;
 
     fn bitand(self, rhs: Self) -> Self::Output {
@@ -147,7 +147,7 @@ impl<T: Default + Probable + PartialEq + Clone> BitAnd for &Variant<T> {
     }
 }
 
-impl<T: Default + Probable + PartialEq + Clone> BitAnd for &Sequence<T> {
+impl<T: Probable + PartialEq + Clone> BitAnd for &Sequence<T> {
     type Output = Sequence<T>;
 
     fn bitand(self, rhs: Self) -> Self::Output {
@@ -155,7 +155,7 @@ impl<T: Default + Probable + PartialEq + Clone> BitAnd for &Sequence<T> {
     }
 }
 
-impl<T: Default + Probable + PartialEq + Clone> BitOr for &Variant<T> {
+impl<T: Probable + PartialEq + Clone> BitOr for &Variant<T> {
     type Output = Option<Variant<T>>;
 
     fn bitor(self, rhs: Self) -> Self::Output {
@@ -163,7 +163,7 @@ impl<T: Default + Probable + PartialEq + Clone> BitOr for &Variant<T> {
     }
 }
 
-impl<T: Default + Probable + PartialEq + Clone> BitOr for &Sequence<T> {
+impl<T: Probable + PartialEq + Clone> BitOr for &Sequence<T> {
     type Output = Option<Sequence<T>>;
 
     fn bitor(self, rhs: Self) -> Self::Output {
@@ -187,7 +187,7 @@ impl<T: Default + Probable + PartialEq + Clone> BitOr for &Sequence<T> {
     }
 }
 
-impl<T: Default + Probable + PartialEq + Clone> Probable for Sequence<T> {
+impl<T: Probable + PartialEq + Clone> Probable for Sequence<T> {
     fn prob(&self) -> Probability {
         self.values
             .iter()

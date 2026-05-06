@@ -1,6 +1,5 @@
-use std::collections::BTreeSet;
-
-use tinyvec::TinyVec;
+use crate::common::SmallSet;
+use smallvec::SmallVec;
 
 use crate::{
     algorithm,
@@ -125,7 +124,7 @@ pub struct PublicPlayerView {
     pub dev_cards: PublicPlayerDevCards,
 }
 
-type PublicPlayerViews = TinyVec<[PublicPlayerView; 4]>;
+type PublicPlayerViews = SmallVec<[PublicPlayerView; 4]>;
 
 #[derive(Debug, Clone)]
 pub struct PublicGameView<'a> {
@@ -137,7 +136,7 @@ pub struct PublicGameView<'a> {
     pub builds: &'a BoardBuildData,
     pub longest_road_owner: Option<PlayerId>,
     pub largest_army_owner: Option<PlayerId>,
-    ports_aquired: &'a [BTreeSet<PortKind>],
+    ports_aquired: &'a [SmallSet<PortKind, 6>],
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -208,11 +207,11 @@ impl<'a> PublicGameView<'a> {
             .collect()
     }
 
-    pub fn get_ports_aquired(&self) -> Vec<BTreeSet<PortKind>> {
+    pub fn get_ports_aquired(&self) -> Vec<SmallSet<PortKind, 6>> {
         algorithm::get_ports_aquired(self.board.ports_intersection(), self.builds)
     }
 
-    pub fn ports_aquired_for(&self, player_id: PlayerId) -> &'a BTreeSet<PortKind> {
+    pub fn ports_aquired_for(&self, player_id: PlayerId) -> &'a SmallSet<PortKind, 6> {
         &self.ports_aquired[player_id]
     }
 }

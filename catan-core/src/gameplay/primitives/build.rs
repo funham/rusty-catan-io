@@ -8,13 +8,14 @@
 //! clearly separated while avoiding unnecessary file fragmentation.
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     ops::{Index, IndexMut},
 };
 
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    common::SmallSet,
     gameplay::{
         field::state::{BoardLayout, BuildCollection},
         primitives::{
@@ -46,13 +47,13 @@ pub mod builds {
     use super::*;
 
     /// Set of intersections currently occupied by builds or roads.
-    /// BTreeSet is used for deterministic ordering and efficient set operations.
-    pub type IntersectionOccupancy = BTreeSet<Intersection>;
+    /// Sorted small set optimized for the fixed-size Catan intersection domain.
+    pub type IntersectionOccupancy = SmallSet<Intersection, 64>;
 
     /// Trait for objects that occupy intersections on the board.
     /// Used by collision and placement logic.
     pub trait Occupying {
-        fn occupancy(&self) -> BTreeSet<Intersection>;
+        fn occupancy(&self) -> IntersectionOccupancy;
     }
 
     /// Marker trait for objects that can be built.
@@ -205,18 +206,20 @@ pub mod builds {
 pub mod occupancy {
     use super::*;
 
+    pub type PathSet = SmallSet<Path, 72>;
+
     #[derive(Debug, Default)]
     pub struct PathOccupancy {
         pub occupancy: IntersectionOccupancy,
-        pub paths: BTreeSet<Path>,
+        pub paths: PathSet,
     }
 
     impl PathOccupancy {
         /// Union of two road occupancy sets.
         pub fn union(&self, other: &Self) -> Self {
             Self {
-                occupancy: self.occupancy.union(&other.occupancy).copied().collect(),
-                paths: self.paths.union(&other.paths).cloned().collect(),
+                occupancy: self.occupancy.union(&other.occupancy),
+                paths: self.paths.union(&other.paths),
             }
         }
     }
@@ -236,24 +239,16 @@ pub mod occupancy {
         /// Union of two aggregate occupancies.
         pub fn union(&self, other: &AggregateOccupancy) -> AggregateOccupancy {
             AggregateOccupancy {
-                builds_occupancy: self
-                    .builds_occupancy
-                    .union(&other.builds_occupancy)
-                    .copied()
-                    .collect(),
+                builds_occupancy: self.builds_occupancy.union(&other.builds_occupancy),
                 roads_occupancy: PathOccupancy {
                     occupancy: self
                         .roads_occupancy
                         .occupancy
-                        .union(&other.roads_occupancy.occupancy)
-                        .copied()
-                        .collect(),
+                        .union(&other.roads_occupancy.occupancy),
                     paths: self
                         .roads_occupancy
                         .paths
-                        .union(&other.roads_occupancy.paths)
-                        .cloned()
-                        .collect(),
+                        .union(&other.roads_occupancy.paths),
                 },
             }
         }
@@ -343,7 +338,7 @@ pub mod data {
 
     #[derive(Debug, Default, Clone, Serialize, Deserialize)]
     pub struct PlayerBuildData {
-        pub establishments: BTreeSet<Establishment>,
+        pub establishments: SmallSet<Establishment, 10>,
         pub roads: graph::RoadGraph,
     }
 
@@ -387,7 +382,7 @@ pub mod data {
         pub fn roads_occupancy(&self) -> PathOccupancy {
             PathOccupancy {
                 occupancy: Self::generic_occupancy(self.roads.iter()),
-                paths: self.roads.edges().clone(),
+                paths: self.roads.edges().iter().copied().collect(),
             }
         }
 
@@ -956,7 +951,7 @@ pub mod query {
                 .builds_occupancy
                 .iter()
                 .flat_map(|v| checker.building_deadzone(*v))
-                .collect::<BTreeSet<_>>();
+                .collect::<IntersectionOccupancy>();
 
             let available_intersections = intersections
                 .into_iter()

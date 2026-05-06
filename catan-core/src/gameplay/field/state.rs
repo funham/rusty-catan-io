@@ -1,11 +1,9 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    usize,
-};
+use std::{collections::BTreeMap, usize};
 
 use serde::{Deserialize, Serialize};
 
 use super::{BoardArrangement, HexesByNum};
+use crate::common::SmallSet;
 use crate::gameplay::primitives::{
     PortKind, Tile,
     build::{Establishment, Road},
@@ -208,7 +206,7 @@ impl BoardLayout {
         self.index.desert_pos
     }
 
-    pub fn hexes_by_num(&self, num: DiceVal) -> &BTreeSet<Hex> {
+    pub fn hexes_by_num(&self, num: DiceVal) -> &SmallSet<Hex, 4> {
         &self.index.hex_by_num[num]
     }
 
@@ -253,11 +251,15 @@ mod tests {
                 .iter()
                 .copied()
                 .collect::<BTreeSet<_>>(),
-            layout.arrangement.intersections().into_iter().collect()
+            layout
+                .arrangement
+                .intersections()
+                .into_iter()
+                .collect::<BTreeSet<_>>()
         );
         assert_eq!(
             layout.paths().iter().copied().collect::<BTreeSet<_>>(),
-            layout.arrangement.path_set()
+            layout.arrangement.path_set().into_iter().collect()
         );
     }
 }

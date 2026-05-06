@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::marker::PhantomData;
 
 use serde::Deserialize;
@@ -118,8 +117,8 @@ impl TryFrom<(Hex, Hex)> for Path<repr::Dual> {
 }
 
 impl Path<repr::Dual> {
-    pub fn as_set(&self) -> BTreeSet<Hex> {
-        self.0.into()
+    pub fn as_set(&self) -> FixedSet<Hex, 2> {
+        self.0
     }
 
     pub fn as_arr(&self) -> [Hex; 2] {
@@ -143,9 +142,8 @@ impl Path<repr::Canon> {
         }
     }
 
-    pub fn as_set(&self) -> BTreeSet<Hex> {
-        let (h1, h2) = self.as_pair();
-        BTreeSet::from([h1, h2])
+    pub fn as_set(&self) -> FixedSet<Hex, 2> {
+        self.0
     }
 
     pub fn as_pair(&self) -> (Hex, Hex) {

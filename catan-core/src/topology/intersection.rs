@@ -1,6 +1,5 @@
 use serde::Deserialize;
 use serde::Serialize;
-use std::collections::BTreeSet;
 use std::fmt;
 
 use crate::common::FixedSet;
@@ -102,8 +101,8 @@ impl Intersection {
         self.0.into()
     }
 
-    pub fn as_set(&self) -> BTreeSet<Hex> {
-        self.0.into()
+    pub fn as_set(&self) -> FixedSet<Hex, 3> {
+        self.0
     }
 
     /// all edges incidential to the vertex
@@ -144,6 +143,7 @@ fn neighbor_across_path(path_a: Hex, path_b: Hex, current_third: Hex) -> Interse
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::collections::BTreeSet;
 
     fn h(q: i32, r: i32) -> Hex {
         Hex::new(q, r)

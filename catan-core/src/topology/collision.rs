@@ -24,10 +24,10 @@ impl<'a, 'b> CollisionChecker<'a, 'b> {
     }
 
     pub fn connected<T: OccupancyGetter>(&self, build: &T) -> bool {
-        build
+        !build
             .occupancy()
             .intersection(&self.this_occupancy.roads_occupancy.occupancy)
-            .any(|_| true)
+            .is_empty()
     }
 
     pub fn building_deadzone(&self, pos: Intersection) -> IntersectionOccupancy {

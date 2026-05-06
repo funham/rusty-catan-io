@@ -1008,7 +1008,7 @@ impl GameController {
             for est in game.builds[pid].establishments.clone() {
                 let coinc = est.pos.as_set();
 
-                for hex in coinc.intersection(&hexes) {
+                for hex in hexes.iter().filter(|hex| coinc.contains(hex)) {
                     if *hex == game.board_state.robber_pos {
                         log::trace!("Hex {:?} is blocked by robber, skipping", hex);
                         continue;

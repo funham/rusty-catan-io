@@ -1,9 +1,8 @@
-use std::collections::BTreeSet;
-
 use serde::{Deserialize, Serialize};
 
 use crate::{
     agent::action::RegularAction,
+    common::SmallSet,
     gameplay::{
         game::view::{PlayerDecisionContext, PublicPlayerResources},
         primitives::{
@@ -723,9 +722,9 @@ pub fn legal_regular_action(context: &PlayerDecisionContext<'_>) -> Vec<RegularA
 
 #[derive(Debug, Default, Clone)]
 pub struct TradeFilter {
-    pub give: BTreeSet<Resource>,
-    pub take: BTreeSet<Resource>,
-    pub kind: BTreeSet<BankTradeKind>,
+    pub give: SmallSet<Resource, 5>,
+    pub take: SmallSet<Resource, 5>,
+    pub kind: SmallSet<BankTradeKind, 3>,
 }
 
 pub fn list_trades(white: Option<TradeFilter>, black: Option<TradeFilter>) -> Vec<BankTrade> {

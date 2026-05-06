@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use crate::{
+    common::SmallSet,
     gameplay::primitives::build::Road,
     topology::{Intersection, Path, collision::CollisionChecker},
 };
@@ -12,8 +13,8 @@ use crate::{
 /// Not oriented graph
 #[derive(Debug, Default, Clone)]
 pub struct RoadGraph {
-    edges: BTreeSet<Path>,
-    out: BTreeMap<Intersection, BTreeSet<Path>>,
+    edges: SmallSet<Path, 15>,
+    out: BTreeMap<Intersection, SmallSet<Path, 3>>,
 }
 
 impl Serialize for RoadGraph {
@@ -30,7 +31,7 @@ impl<'de> Deserialize<'de> for RoadGraph {
     where
         D: serde::Deserializer<'de>,
     {
-        let edges = BTreeSet::<Path>::deserialize(deserializer)?;
+        let edges = SmallSet::<Path, 15>::deserialize(deserializer)?;
         Ok(Self::from_roads(edges))
     }
 }
@@ -48,7 +49,7 @@ impl RoadGraph {
         self.edges.iter().map(|p| Road { pos: p.clone() })
     }
 
-    pub fn edges(&self) -> &BTreeSet<Path> {
+    pub fn edges(&self) -> &SmallSet<Path, 15> {
         &self.edges
     }
 
@@ -61,14 +62,14 @@ impl RoadGraph {
             Some(edges) => edges.insert(edge.clone()),
             None => self
                 .out
-                .insert(v1, BTreeSet::from([edge.clone()]))
+                .insert(v1, SmallSet::from([edge.clone()]))
                 .is_none(),
         };
         let _ = match self.out.get_mut(&v2) {
             Some(edges) => edges.insert(edge.clone()),
             None => self
                 .out
-                .insert(v2, BTreeSet::from([edge.clone()]))
+                .insert(v2, SmallSet::from([edge.clone()]))
                 .is_none(),
         };
         self.edges.insert(edge.clone());
@@ -91,8 +92,8 @@ impl RoadGraph {
         &self,
         checker: &CollisionChecker,
     ) -> impl IntoIterator<Item = Path> {
-        let mut visited = BTreeSet::new();
-        let mut result = BTreeSet::new();
+        let mut visited = SmallSet::<Intersection, 64>::new();
+        let mut result = SmallSet::<Path, 72>::new();
 
         for vertex in self.out.keys() {
             if visited.contains(vertex) {
@@ -108,15 +109,15 @@ impl RoadGraph {
             .iter()
             .filter(|e| checker.can_place(&Road { pos: (*e).clone() }))
             .cloned()
-            .collect::<BTreeSet<_>>()
+            .collect::<SmallSet<_, 72>>()
     }
 
     fn connectable_vertices_dfs(
         &self,
         vertex: Intersection,
-        visited: &mut BTreeSet<Intersection>,
+        visited: &mut SmallSet<Intersection, 64>,
         checker: &CollisionChecker,
-        result: &mut BTreeSet<Path>,
+        result: &mut SmallSet<Path, 72>,
     ) {
         if visited.contains(&vertex) {
             return; // to be extra confident
@@ -159,16 +160,17 @@ impl RoadGraph {
                 checker
                     .full_occupancy()
                     .builds_occupancy
-                    .is_disjoint(&dead_zone.collect())
+                    .is_disjoint(&dead_zone.collect::<SmallSet<_, 4>>())
             })
             .copied()
-            .collect::<BTreeSet<_>>()
+            .collect::<SmallSet<_, 64>>()
     }
 
     /// Find the longest sequence of non-repeating roads (edges can't repeat, vertices can).
     /// This is finding the longest trail in the graph.
     pub fn find_longest_trail_length(&self) -> usize {
-        self.find_longest_trail_length_with_blockers(&BTreeSet::new())
+        let blockers = SmallSet::<Intersection, 32>::new();
+        self.find_longest_trail_length_with_blockers(&blockers)
     }
 
     /// Find the longest trail while treating blocked intersections as endpoints.
@@ -176,9 +178,9 @@ impl RoadGraph {
     /// In Catan, an opponent settlement/city interrupts road continuity at that
     /// intersection. A road may still end at the blocked intersection, but a
     /// longest-road trail cannot pass through it to another road.
-    pub fn find_longest_trail_length_with_blockers(
+    pub fn find_longest_trail_length_with_blockers<const N: usize>(
         &self,
-        blockers: &BTreeSet<Intersection>,
+        blockers: &SmallSet<Intersection, N>,
     ) -> usize {
         if self.edges.is_empty() {
             return 0;
@@ -187,7 +189,10 @@ impl RoadGraph {
         self.longest_trail_length_bitmask(blockers)
     }
 
-    fn longest_trail_length_bitmask(&self, blockers: &BTreeSet<Intersection>) -> usize {
+    fn longest_trail_length_bitmask<const N: usize>(
+        &self,
+        blockers: &SmallSet<Intersection, N>,
+    ) -> usize {
         let edges = self.edges.iter().copied().collect::<Vec<_>>();
         let mut vertices = Vec::new();
         let mut adjacency: Vec<Vec<(usize, usize)>> = Vec::new();
@@ -274,7 +279,7 @@ impl RoadGraph {
 
         // Try starting with each edge
         for start_edge in &self.edges {
-            let mut visited_edges = BTreeSet::new();
+            let mut visited_edges = SmallSet::<Path, 15>::new();
             let mut current_path = Vec::new();
 
             self.dfs_find_longest_trail(
@@ -293,7 +298,7 @@ impl RoadGraph {
     fn dfs_find_longest_trail(
         &self,
         current_edge: Path,
-        visited_edges: &mut BTreeSet<Path>,
+        visited_edges: &mut SmallSet<Path, 15>,
         current_path: &mut Vec<Path>,
         best_path: &mut Vec<Path>,
         max_length: &mut usize,
@@ -349,7 +354,7 @@ impl RoadGraph {
     pub fn collect_component(
         &self,
         start: Intersection,
-        visited: &mut BTreeSet<Intersection>,
+        visited: &mut SmallSet<Intersection, 64>,
     ) -> Vec<Intersection> {
         let mut component = Vec::new();
         let mut stack = Vec::new();
@@ -512,7 +517,7 @@ mod tests {
 
         let blocker = path(h(0, 0), h(1, 0)).intersections()[0];
         assert_eq!(
-            graph.find_longest_trail_length_with_blockers(&BTreeSet::from([blocker])),
+            graph.find_longest_trail_length_with_blockers(&SmallSet::<_, 1>::from([blocker])),
             5
         );
     }
@@ -574,7 +579,7 @@ mod tests {
         // Get any intersection from p2 to start component collection
         let [v2_start, _] = p2.intersections();
 
-        let mut visited = BTreeSet::new();
+        let mut visited = SmallSet::new();
 
         // First component (single road): has 2 intersections
         let component1 = graph.collect_component(v1_start, &mut visited);
@@ -585,8 +590,8 @@ mod tests {
         assert_eq!(component2.len(), 3);
 
         // Verify components don't overlap
-        let set1: BTreeSet<_> = component1.iter().collect();
-        let set2: BTreeSet<_> = component2.iter().collect();
+        let set1: SmallSet<_, 8> = component1.iter().collect();
+        let set2: SmallSet<_, 8> = component2.iter().collect();
         assert!(set1.is_disjoint(&set2));
     }
 
@@ -649,7 +654,7 @@ mod tests {
         let neighbors = v.neighbors();
 
         // All neighbors should be different
-        let unique_neighbors: BTreeSet<_> = neighbors.iter().collect();
+        let unique_neighbors: SmallSet<_, 3> = neighbors.iter().collect();
         assert_eq!(unique_neighbors.len(), 3);
     }
 }

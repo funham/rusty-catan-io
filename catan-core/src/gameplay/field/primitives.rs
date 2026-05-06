@@ -1,11 +1,12 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     ops::{Index, IndexMut},
 };
 
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    common::SmallSet,
     gameplay::primitives::{PortKind, Tile},
     math::dice::DiceVal,
     topology::{Hex, HexIndex, Intersection, Path, SignedAxis},
@@ -81,13 +82,13 @@ impl BoardArrangement {
     pub fn intersections(&self) -> impl IntoIterator<Item = Intersection> {
         self.hex_enum_iter()
             .flat_map(|(hex, _)| hex.vertices_arr())
-            .collect::<BTreeSet<_>>()
+            .collect::<SmallSet<_, 64>>()
     }
 
-    pub fn path_set(&self) -> BTreeSet<Path> {
+    pub fn path_set(&self) -> SmallSet<Path, 72> {
         self.hex_iter()
             .flat_map(|h| h.paths_arr())
-            .collect::<BTreeSet<_>>()
+            .collect::<SmallSet<_, 72>>()
     }
 
     pub fn radius(&self) -> u8 {
@@ -125,11 +126,11 @@ impl Index<Hex> for BoardArrangement {
 
 #[derive(Debug, Clone, Default)]
 pub struct HexesByNum {
-    arr: [BTreeSet<Hex>; 11],
+    arr: [SmallSet<Hex, 4>; 11],
 }
 
 impl Index<DiceVal> for HexesByNum {
-    type Output = BTreeSet<Hex>;
+    type Output = SmallSet<Hex, 4>;
 
     fn index(&self, index: DiceVal) -> &Self::Output {
         let num: u8 = index.into();
