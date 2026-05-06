@@ -523,4 +523,39 @@ mod tests {
         assert_eq!(totals.robber_moves, 122);
         assert_eq!(totals.action_rejections, 0);
     }
+
+    #[test]
+    #[ignore = "100-game deterministic macro guard; run before major optimization stages"]
+    fn greedy_brawl_hundred_game_batch_keeps_golden_summary() {
+        let config = greedy_brawl_config();
+        let mut totals = Totals::default();
+        let mut result_counts = ResultCounts::default();
+
+        for seed in 0..100 {
+            let outcome = run_one_game(&config, seed, None).unwrap();
+            totals.add_stats(outcome.stats);
+            match outcome.result {
+                GameResult::Win(_) => result_counts.wins += 1,
+                GameResult::LimitReached { .. } => result_counts.limits += 1,
+                GameResult::Interrupted { .. } => result_counts.interruptions += 1,
+            }
+        }
+
+        assert_eq!(result_counts.wins, 100);
+        assert_eq!(result_counts.limits, 0);
+        assert_eq!(result_counts.interruptions, 0);
+        assert_eq!(totals.turns_started, 9597);
+        assert_eq!(totals.turns_ended, 9497);
+        assert_eq!(totals.decision_requests, 32798);
+        assert_eq!(totals.regular_actions, 18335);
+        assert_eq!(totals.builds, 4005);
+        assert_eq!(totals.bank_trades, 3046);
+        assert_eq!(totals.dev_cards_bought, 1787);
+        assert_eq!(totals.dev_cards_used, 1335);
+        assert_eq!(totals.dice_rolls, 9573);
+        assert_eq!(totals.resources_distributed, 7987);
+        assert_eq!(totals.player_discards, 472);
+        assert_eq!(totals.robber_moves, 2542);
+        assert_eq!(totals.action_rejections, 0);
+    }
 }
