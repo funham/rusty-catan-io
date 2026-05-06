@@ -1,5 +1,7 @@
 use std::collections::BTreeSet;
 
+use tinyvec::TinyVec;
+
 use crate::{
     algorithm,
     gameplay::{
@@ -90,13 +92,25 @@ pub enum PublicPlayerResources {
     Total(u16),
 }
 
+impl Default for PublicPlayerResources {
+    fn default() -> Self {
+        Self::Total(0)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum PublicVpKnowledge {
     Hidden,
     Exact(u16),
 }
 
-#[derive(Debug, Clone)]
+impl Default for PublicVpKnowledge {
+    fn default() -> Self {
+        Self::Hidden
+    }
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct PublicPlayerDevCards {
     pub queued: u16,
     pub active: u16,
@@ -104,12 +118,14 @@ pub struct PublicPlayerDevCards {
     pub victory_points: PublicVpKnowledge,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct PublicPlayerView {
     pub player_id: PlayerId,
     pub resources: PublicPlayerResources,
     pub dev_cards: PublicPlayerDevCards,
 }
+
+type PublicPlayerViews = TinyVec<[PublicPlayerView; 4]>;
 
 #[derive(Debug, Clone)]
 pub struct PublicGameView<'a> {
@@ -117,7 +133,7 @@ pub struct PublicGameView<'a> {
     pub board: &'a BoardLayout,
     pub board_state: &'a BoardState,
     pub bank: PublicBankView,
-    pub players: Vec<PublicPlayerView>,
+    pub players: PublicPlayerViews,
     pub builds: &'a BoardBuildData,
     pub longest_road_owner: Option<PlayerId>,
     pub largest_army_owner: Option<PlayerId>,
@@ -291,7 +307,7 @@ impl<'a> ContextFactory<'a> {
         }
     }
 
-    fn project_players(&self, policy: VisibilityPolicy) -> Vec<PublicPlayerView> {
+    fn project_players(&self, policy: VisibilityPolicy) -> PublicPlayerViews {
         self.state
             .players
             .iter()
@@ -319,7 +335,17 @@ fn project_bank_resources(bank: &Bank, policy: VisibilityPolicy) -> PublicBankRe
         })
         | VisibilityPolicy::Spectator(SpectatorVisibility {
             counting: CountingMode::Human,
-        }) => PublicBankResources::Approx(bank.public_view().resources),
+        }) => PublicBankResources::Approx(public_bank_resource_levels(bank)),
+    }
+}
+
+fn public_bank_resource_levels(bank: &Bank) -> ResourceMap<DeckFullnessLevel> {
+    ResourceMap {
+        brick: DeckFullnessLevel::new_or_panic(bank.resources.brick),
+        wood: DeckFullnessLevel::new_or_panic(bank.resources.wood),
+        wheat: DeckFullnessLevel::new_or_panic(bank.resources.wheat),
+        sheep: DeckFullnessLevel::new_or_panic(bank.resources.sheep),
+        ore: DeckFullnessLevel::new_or_panic(bank.resources.ore),
     }
 }
 
