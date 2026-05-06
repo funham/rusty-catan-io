@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 use std::collections::BTreeMap;
 
 use crate::{
@@ -193,9 +194,11 @@ impl RoadGraph {
         &self,
         blockers: &SmallSet<Intersection, N>,
     ) -> usize {
-        let edges = self.edges.iter().copied().collect::<Vec<_>>();
-        let mut vertices = Vec::new();
-        let mut adjacency: Vec<Vec<(usize, usize)>> = Vec::new();
+        type RoadAdjacency = SmallVec<[(usize, usize); 3]>;
+
+        let edges = self.edges.iter().copied().collect::<SmallVec<[_; 15]>>();
+        let mut vertices = SmallVec::<[Intersection; 30]>::new();
+        let mut adjacency = SmallVec::<[RoadAdjacency; 30]>::new();
 
         for (edge_index, edge) in edges.iter().enumerate() {
             let [from, to] = edge.intersections();
@@ -208,7 +211,7 @@ impl RoadGraph {
         let blocked = vertices
             .iter()
             .map(|vertex| blockers.contains(vertex))
-            .collect::<Vec<_>>();
+            .collect::<SmallVec<[_; 30]>>();
 
         let mut max_length = 0;
         for start in 0..adjacency.len() {
@@ -232,7 +235,7 @@ impl RoadGraph {
         visited_edges: u32,
         blocked_used: u64,
         current_length: usize,
-        adjacency: &[Vec<(usize, usize)>],
+        adjacency: &[SmallVec<[(usize, usize); 3]>],
         blocked: &[bool],
         max_length: &mut usize,
     ) {
@@ -385,8 +388,8 @@ impl RoadGraph {
 }
 
 fn intern_vertex(
-    vertices: &mut Vec<Intersection>,
-    adjacency: &mut Vec<Vec<(usize, usize)>>,
+    vertices: &mut SmallVec<[Intersection; 30]>,
+    adjacency: &mut SmallVec<[SmallVec<[(usize, usize); 3]>; 30]>,
     vertex: Intersection,
 ) -> usize {
     if let Some(index) = vertices.iter().position(|existing| *existing == vertex) {
@@ -395,7 +398,7 @@ fn intern_vertex(
 
     let index = vertices.len();
     vertices.push(vertex);
-    adjacency.push(Vec::new());
+    adjacency.push(SmallVec::new());
     index
 }
 
