@@ -174,11 +174,13 @@ impl GameController {
         observers: &mut [Box<dyn GameObserver>],
     ) -> GameState {
         log::trace!("Initializing game with {} players", players.len());
-        Self::notify_observers_for_state(
-            &game_init.clone().finish(),
-            observers,
-            &GameEvent::GameStarted,
-        );
+        if !observers.is_empty() {
+            Self::notify_observers_for_state(
+                &game_init.clone().finish(),
+                observers,
+                &GameEvent::GameStarted,
+            );
+        }
 
         while game_init.turn.get_rounds_played() < 2 {
             let player_id = game_init.turn.get_turn_index();
@@ -250,15 +252,17 @@ impl GameController {
                                 establishment,
                             );
                         }
-                        Self::notify_observers_for_state(
-                            &game_init.clone().finish(),
-                            observers,
-                            &GameEvent::InitialPlacementBuilt {
-                                player_id,
-                                settlement: establishment.pos,
-                                road: action.road,
-                            },
-                        );
+                        if !observers.is_empty() {
+                            Self::notify_observers_for_state(
+                                &game_init.clone().finish(),
+                                observers,
+                                &GameEvent::InitialPlacementBuilt {
+                                    player_id,
+                                    settlement: establishment.pos,
+                                    road: action.road,
+                                },
+                            );
+                        }
                         break;
                     }
                 }
@@ -285,6 +289,10 @@ impl GameController {
         observers: &mut [Box<dyn GameObserver>],
         event: &GameEvent,
     ) {
+        if observers.is_empty() {
+            return;
+        }
+
         log::trace!(
             "Notifying {} initialization observers of event: {:?}",
             observers.len(),
