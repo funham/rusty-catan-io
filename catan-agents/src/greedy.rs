@@ -133,8 +133,7 @@ pub fn most_occupied_producing_tile(context: PlayerDecisionContext<'_>) -> Hex {
                 context
                     .public
                     .players_on_hex(hex)
-                    .iter()
-                    .filter(|&&id| id != context.actor)
+                    .filter(|&id| id != context.actor)
                     .count(),
                 match context.public.board.arrangement[hex] {
                     Tile::Resource { number, .. } => number.prob_pts(),

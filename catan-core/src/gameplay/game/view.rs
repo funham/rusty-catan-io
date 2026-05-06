@@ -201,10 +201,8 @@ impl<'a> PublicGameView<'a> {
         algorithm::is_player_on_hex(hex, self.builds.by_player(id))
     }
 
-    pub fn players_on_hex(&self, hex: Hex) -> Vec<PlayerId> {
+    pub fn players_on_hex(&self, hex: Hex) -> impl Iterator<Item = PlayerId> + use<'_> {
         algorithm::players_on_hex(hex, self.builds.players().iter())
-            .into_iter()
-            .collect()
     }
 
     pub fn get_ports_aquired(&self) -> Vec<SmallSet<PortKind, 6>> {

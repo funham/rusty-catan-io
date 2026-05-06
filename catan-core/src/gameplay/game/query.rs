@@ -36,10 +36,8 @@ impl<'a> GameQuery<'a> {
         algorithm::is_player_on_hex(hex, self.state.builds.by_player(player_id))
     }
 
-    pub fn players_on_hex(&self, hex: Hex) -> Vec<PlayerId> {
+    pub fn players_on_hex(&self, hex: Hex) -> impl Iterator<Item = PlayerId> + use<'_> {
         algorithm::players_on_hex(hex, self.state.builds.players().iter())
-            .into_iter()
-            .collect()
     }
 
     pub fn count_max_tract_length(&self, player_id: PlayerId) -> u16 {
