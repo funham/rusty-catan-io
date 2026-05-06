@@ -9,16 +9,15 @@ use crate::{
         primitives::{
             PortKind,
             build::{
-                AggregateOccupancy, BoardBuildData, Build, Establishment, EstablishmentType,
-                PlayerBuildData, Road,
+                BoardBuildData, Build, Establishment, EstablishmentType, PlayerBuildData, Road,
             },
             dev_card::{DevCardUsage, UsableDevCard},
             player::PlayerId,
-            resource::{HasCost, Resource},
+            resource::{HasCost, Resource, ResourceCollection},
             trade::{BankTrade, BankTradeKind},
         },
     },
-    topology::{Hex, Intersection, Path},
+    topology::{Hex, Path},
 };
 
 #[cfg(feature = "bench-counters")]
@@ -173,9 +172,9 @@ pub fn legal_settlement_spots(
     context: &PlayerDecisionContext<'_>,
     player_id: PlayerId,
 ) -> Vec<Build> {
-    let Some((other_occupancy, this_occupancy)) = settlement_occupancy(context, player_id) else {
+    if !can_search_settlement_with_resources(context, player_id, context.private.resources) {
         return Vec::new();
-    };
+    }
 
     context
         .public
@@ -186,7 +185,11 @@ pub fn legal_settlement_spots(
         .filter(|&pos| {
             #[cfg(feature = "bench-counters")]
             counters::settlement_candidate();
-            can_place_settlement_at(pos, &other_occupancy, &this_occupancy)
+            context
+                .public
+                .builds
+                .can_place_settlement(player_id, pos)
+                .is_ok()
         })
         .map(|pos| {
             Build::Establishment(Establishment {
@@ -209,11 +212,9 @@ pub fn legal_settlement_spots_count_with_resources(
     player_id: PlayerId,
     resources: &crate::gameplay::primitives::resource::ResourceCollection,
 ) -> usize {
-    let Some((other_occupancy, this_occupancy)) =
-        settlement_occupancy_with_resources(context, player_id, resources)
-    else {
+    if !can_search_settlement_with_resources(context, player_id, resources) {
         return 0;
-    };
+    }
 
     context
         .public
@@ -224,7 +225,11 @@ pub fn legal_settlement_spots_count_with_resources(
         .filter(|&pos| {
             #[cfg(feature = "bench-counters")]
             counters::settlement_candidate();
-            can_place_settlement_at(pos, &other_occupancy, &this_occupancy)
+            context
+                .public
+                .builds
+                .can_place_settlement(player_id, pos)
+                .is_ok()
         })
         .count()
 }
@@ -235,17 +240,9 @@ pub fn legal_settlement_spots_count_with_extra_road(
     extra_road: Path,
     resources: &crate::gameplay::primitives::resource::ResourceCollection,
 ) -> usize {
-    let Some((other_occupancy, mut this_occupancy)) =
-        settlement_occupancy_with_resources(context, player_id, resources)
-    else {
+    if !can_search_settlement_with_resources(context, player_id, resources) {
         return 0;
-    };
-
-    this_occupancy.roads_occupancy.paths.insert(extra_road);
-    this_occupancy
-        .roads_occupancy
-        .occupancy
-        .extend(extra_road.intersections_iter());
+    }
 
     context
         .public
@@ -256,15 +253,19 @@ pub fn legal_settlement_spots_count_with_extra_road(
         .filter(|&pos| {
             #[cfg(feature = "bench-counters")]
             counters::settlement_candidate();
-            can_place_settlement_at(pos, &other_occupancy, &this_occupancy)
+            context
+                .public
+                .builds
+                .can_place_settlement_with_extra_roads_iter(player_id, pos, [extra_road])
+                .is_ok()
         })
         .count()
 }
 
 pub fn legal_road_spots(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> Vec<Build> {
-    let Some((other_occupancy, this_occupancy)) = road_occupancy(context, player_id) else {
+    if !can_search_road_with_resources(context, player_id, context.private.resources) {
         return Vec::new();
-    };
+    }
 
     context
         .public
@@ -275,7 +276,7 @@ pub fn legal_road_spots(context: &PlayerDecisionContext<'_>, player_id: PlayerId
         .filter(|&pos| {
             #[cfg(feature = "bench-counters")]
             counters::road_candidate();
-            can_place_road_at(pos, &other_occupancy, &this_occupancy)
+            context.public.builds.can_place_road(player_id, pos).is_ok()
         })
         .map(|pos| Build::Road(Road { pos }))
         .collect()
@@ -290,11 +291,9 @@ pub fn legal_road_spots_count_with_resources(
     player_id: PlayerId,
     resources: &crate::gameplay::primitives::resource::ResourceCollection,
 ) -> usize {
-    let Some((other_occupancy, this_occupancy)) =
-        road_occupancy_with_resources(context, player_id, resources)
-    else {
+    if !can_search_road_with_resources(context, player_id, resources) {
         return 0;
-    };
+    }
 
     context
         .public
@@ -305,26 +304,22 @@ pub fn legal_road_spots_count_with_resources(
         .filter(|&pos| {
             #[cfg(feature = "bench-counters")]
             counters::road_candidate();
-            can_place_road_at(pos, &other_occupancy, &this_occupancy)
+            context.public.builds.can_place_road(player_id, pos).is_ok()
         })
         .count()
 }
 
-fn settlement_occupancy(
-    context: &PlayerDecisionContext<'_>,
-    player_id: PlayerId,
-) -> Option<(AggregateOccupancy, AggregateOccupancy)> {
-    settlement_occupancy_with_resources(context, player_id, context.private.resources)
-}
-
-fn settlement_occupancy_with_resources(
+fn can_search_settlement_with_resources(
     context: &PlayerDecisionContext<'_>,
     player_id: PlayerId,
     resources: &crate::gameplay::primitives::resource::ResourceCollection,
-) -> Option<(AggregateOccupancy, AggregateOccupancy)> {
+) -> bool {
     if context.search.is_none() {
         log::debug!("legal settlement spots require search context");
-        return None;
+        return false;
+    }
+    if player_id >= context.public.builds.players().len() {
+        return false;
     }
     if !resources.has_enough(&crate::constants::costs::SETTLEMENT)
         || context
@@ -334,84 +329,29 @@ fn settlement_occupancy_with_resources(
             .settlements_count()
             >= PlayerBuildData::SETTLEMENT_LIMIT
     {
-        return None;
+        return false;
     }
-    build_occupancy_for_player(context, player_id)
+    true
 }
 
-fn road_occupancy(
-    context: &PlayerDecisionContext<'_>,
-    player_id: PlayerId,
-) -> Option<(AggregateOccupancy, AggregateOccupancy)> {
-    road_occupancy_with_resources(context, player_id, context.private.resources)
-}
-
-fn road_occupancy_with_resources(
+fn can_search_road_with_resources(
     context: &PlayerDecisionContext<'_>,
     player_id: PlayerId,
     resources: &crate::gameplay::primitives::resource::ResourceCollection,
-) -> Option<(AggregateOccupancy, AggregateOccupancy)> {
+) -> bool {
     if context.search.is_none() {
         log::debug!("legal road spots require search context");
-        return None;
+        return false;
+    }
+    if player_id >= context.public.builds.players().len() {
+        return false;
     }
     if !resources.has_enough(&crate::constants::costs::ROAD)
         || context.public.builds.by_player(player_id).roads_count() >= PlayerBuildData::ROAD_LIMIT
     {
-        return None;
-    }
-    build_occupancy_for_player(context, player_id)
-}
-
-fn build_occupancy_for_player(
-    context: &PlayerDecisionContext<'_>,
-    player_id: PlayerId,
-) -> Option<(AggregateOccupancy, AggregateOccupancy)> {
-    if player_id >= context.public.builds.players().len() {
-        return None;
-    }
-    let occ = context.public.builds.occupancy();
-    let other_occupancy =
-        occ.occupancy((0..context.public.builds.players().len()).filter(|id| id != &player_id));
-    let this_occupancy = occ.occupancy([player_id]);
-    Some((other_occupancy, this_occupancy))
-}
-
-fn can_place_settlement_at(
-    pos: Intersection,
-    other_occupancy: &AggregateOccupancy,
-    this_occupancy: &AggregateOccupancy,
-) -> bool {
-    if !this_occupancy.roads_occupancy.occupancy.contains(&pos) {
         return false;
     }
-    if other_occupancy.builds_occupancy.contains(&pos)
-        || this_occupancy.builds_occupancy.contains(&pos)
-    {
-        return false;
-    }
-
-    pos.neighbors().into_iter().all(|neighbor| {
-        !other_occupancy.builds_occupancy.contains(&neighbor)
-            && !this_occupancy.builds_occupancy.contains(&neighbor)
-    })
-}
-
-fn can_place_road_at(
-    pos: Path,
-    other_occupancy: &AggregateOccupancy,
-    this_occupancy: &AggregateOccupancy,
-) -> bool {
-    if other_occupancy.roads_occupancy.paths.contains(&pos)
-        || this_occupancy.roads_occupancy.paths.contains(&pos)
-    {
-        return false;
-    }
-
-    pos.intersections_iter().any(|v| {
-        this_occupancy.roads_occupancy.occupancy.contains(&v)
-            && !other_occupancy.builds_occupancy.contains(&v)
-    })
+    true
 }
 
 pub fn can_buy_dev_card(context: &PlayerDecisionContext<'_>) -> bool {
@@ -487,7 +427,7 @@ pub fn legal_dev_card_usages(context: &PlayerDecisionContext<'_>) -> Vec<DevCard
     }
 
     if active.contains(UsableDevCard::RoadBuild) {
-        candidates.extend(legal_roadbuild_usages(context, &state));
+        candidates.extend(legal_roadbuild_usages(context));
     }
 
     candidates
@@ -501,55 +441,161 @@ pub fn legal_dev_card_usages(context: &PlayerDecisionContext<'_>) -> Vec<DevCard
         .collect()
 }
 
-fn legal_roadbuild_usages(
-    context: &PlayerDecisionContext<'_>,
-    state: &crate::gameplay::game::state::GameState,
-) -> Vec<DevCardUsage> {
-    let paths = context
-        .public
-        .board
-        .arrangement
-        .paths()
-        .into_iter()
-        .collect::<Vec<_>>();
-    let mut usages = Vec::new();
+pub fn first_legal_dev_card_usage(context: &PlayerDecisionContext<'_>) -> Option<DevCardUsage> {
+    let search = context.search.as_ref()?;
+    let state = search.state();
+    let active = context.private.dev_cards.active;
 
-    for first in legal_road_paths_from_builds(&state.builds, context.actor, &paths) {
-        let mut builds_after_first = state.builds.clone();
-        if builds_after_first
-            .try_build(context.actor, Build::Road(Road { pos: first }))
-            .is_err()
-        {
-            continue;
+    if active.contains(UsableDevCard::Knight) {
+        for rob_hex in context.public.board.arrangement.hex_iter() {
+            if rob_hex == context.public.board_state.robber_pos {
+                continue;
+            }
+
+            let robbed_candidates = legal_rob_targets(context, rob_hex);
+            return Some(match robbed_candidates.first() {
+                Some(robbed_id) => DevCardUsage::Knight {
+                    rob_hex,
+                    robbed_id: Some(*robbed_id),
+                },
+                None => DevCardUsage::Knight {
+                    rob_hex,
+                    robbed_id: None,
+                },
+            });
         }
-
-        usages.extend(
-            legal_road_paths_from_builds(&builds_after_first, context.actor, &paths)
-                .into_iter()
-                .map(|second| DevCardUsage::RoadBuild([first, second])),
-        );
     }
 
-    usages
+    if active.contains(UsableDevCard::YearOfPlenty) {
+        for first in Resource::iter() {
+            for second in Resource::iter() {
+                let requested = [first, second].into_iter().fold(
+                    ResourceCollection::default(),
+                    |mut acc, resource| {
+                        acc += &resource.into();
+                        acc
+                    },
+                );
+                if state.bank.can_pay(&requested) {
+                    return Some(DevCardUsage::YearOfPlenty([first, second]));
+                }
+            }
+        }
+    }
+
+    if active.contains(UsableDevCard::Monopoly)
+        && let Some(resource) = Resource::iter().into_iter().next()
+    {
+        return Some(DevCardUsage::Monopoly(resource));
+    }
+
+    if active.contains(UsableDevCard::RoadBuild) {
+        return legal_roadbuild_usages_iter(context).next();
+    }
+
+    None
 }
 
-fn legal_road_paths_from_builds(
-    builds: &BoardBuildData,
+fn legal_roadbuild_usages(context: &PlayerDecisionContext<'_>) -> Vec<DevCardUsage> {
+    legal_roadbuild_usages_iter(context).collect()
+}
+
+pub fn legal_roadbuild_usages_iter<'a>(
+    context: &'a PlayerDecisionContext<'_>,
+) -> impl Iterator<Item = DevCardUsage> + 'a {
+    legal_k_road_extensions::<2>(
+        context.public.builds,
+        context.actor,
+        context.public.board.paths(),
+    )
+    .map(DevCardUsage::RoadBuild)
+}
+
+pub fn legal_k_road_extensions<'a, const K: usize>(
+    builds: &'a BoardBuildData,
     player_id: PlayerId,
-    paths: &[Path],
-) -> Vec<Path> {
-    paths
-        .iter()
-        .copied()
-        .filter(|pos| {
+    board_paths: &'a [Path],
+) -> RoadExtensionIter<'a, K> {
+    RoadExtensionIter::new(builds, player_id, board_paths)
+}
+
+pub struct RoadExtensionIter<'a, const K: usize> {
+    builds: &'a BoardBuildData,
+    player_id: PlayerId,
+    board_paths: &'a [Path],
+    chosen: [Option<Path>; K],
+    next_indices: [usize; K],
+    depth: usize,
+    done: bool,
+}
+
+impl<'a, const K: usize> RoadExtensionIter<'a, K> {
+    fn new(builds: &'a BoardBuildData, player_id: PlayerId, board_paths: &'a [Path]) -> Self {
+        Self {
+            builds,
+            player_id,
+            board_paths,
+            chosen: [None; K],
+            next_indices: [0; K],
+            depth: 0,
+            done: false,
+        }
+    }
+}
+
+impl<const K: usize> Iterator for RoadExtensionIter<'_, K> {
+    type Item = [Path; K];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.done {
+            return None;
+        }
+
+        loop {
+            if self.depth == K {
+                let result = std::array::from_fn(|idx| {
+                    self.chosen[idx].expect("complete road extension should have every path")
+                });
+                if self.depth == 0 {
+                    self.done = true;
+                } else {
+                    self.depth -= 1;
+                    self.chosen[self.depth] = None;
+                }
+                return Some(result);
+            }
+
+            if self.next_indices[self.depth] >= self.board_paths.len() {
+                self.next_indices[self.depth] = 0;
+                if self.depth == 0 {
+                    self.done = true;
+                    return None;
+                }
+                self.depth -= 1;
+                self.chosen[self.depth] = None;
+                continue;
+            }
+
+            let candidate = self.board_paths[self.next_indices[self.depth]];
+            self.next_indices[self.depth] += 1;
+
             #[cfg(feature = "bench-counters")]
             counters::roadbuild_candidate();
-            let mut candidate = builds.clone();
-            candidate
-                .try_build(player_id, Build::Road(Road { pos: *pos }))
+
+            let prefix = self.chosen[..self.depth].iter().copied().flatten();
+            if self
+                .builds
+                .can_place_road_with_extra_roads_iter(self.player_id, candidate, prefix)
                 .is_ok()
-        })
-        .collect()
+            {
+                self.chosen[self.depth] = Some(candidate);
+                self.depth += 1;
+                if self.depth < K {
+                    self.next_indices[self.depth] = 0;
+                }
+            }
+        }
+    }
 }
 
 pub fn legal_rob_targets(context: &PlayerDecisionContext<'_>, robber_pos: Hex) -> Vec<PlayerId> {
@@ -1332,5 +1378,46 @@ mod tests {
                 "legal roadbuild usage should be accepted: {usage:?}"
             );
         }
+    }
+
+    #[test]
+    fn lazy_roadbuild_iterator_matches_clone_apply_order() {
+        let state = initialized_state();
+        let index = GameIndex::rebuild(&state);
+        let visibility = VisibilityConfig::default();
+        let factory = ContextFactory {
+            state: &state,
+            index: &index,
+            visibility: &visibility,
+        };
+        let search = Some(SearchFactory::new(&state, visibility.player_policy(0), 0));
+        let context = factory.player_decision_context(0, search);
+        let paths = context.public.board.paths();
+
+        let mut expected = Vec::new();
+        for first in paths.iter().copied() {
+            let mut builds_after_first = state.builds.clone();
+            if builds_after_first
+                .try_build(0, Build::Road(Road { pos: first }))
+                .is_err()
+            {
+                continue;
+            }
+
+            for second in paths.iter().copied() {
+                let mut builds_after_second = builds_after_first.clone();
+                if builds_after_second
+                    .try_build(0, Build::Road(Road { pos: second }))
+                    .is_ok()
+                {
+                    expected.push([first, second]);
+                }
+            }
+        }
+
+        let actual =
+            legal_k_road_extensions::<2>(context.public.builds, 0, paths).collect::<Vec<_>>();
+
+        assert_eq!(actual, expected);
     }
 }

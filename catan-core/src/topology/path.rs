@@ -59,10 +59,7 @@ impl TryFrom<(Hex, Hex)> for Path {
     fn try_from(value: (Hex, Hex)) -> Result<Self, Self::Error> {
         let (h1, h2) = value;
         if h1.distance(&h2) == 1 {
-            Ok(Self {
-                0: FixedSet::try_from([h1, h2]).unwrap(),
-                1: PhantomData::default(),
-            })
+            Ok(Self::from_adjacent_hexes(h1, h2))
         } else {
             Err(EdgeConstructError::NotAdjacentHexes)
         }
@@ -73,16 +70,8 @@ impl TryFrom<(Intersection, Intersection)> for Path {
     type Error = EdgeConstructError;
 
     fn try_from(value: (Intersection, Intersection)) -> Result<Self, Self::Error> {
-        let inter = value
-            .0
-            .as_set()
-            .intersection(&value.1.as_set())
-            .cloned()
-            .collect::<Vec<_>>();
-
-        let inter = match <[Hex; 2] as TryFrom<Vec<Hex>>>::try_from(inter) {
-            Ok(x) => x,
-            Err(_) => return Err(EdgeConstructError::NotNeighboringVertices),
+        let Some(inter) = common_hexes_3(value.0.as_arr(), value.1.as_arr()) else {
+            return Err(EdgeConstructError::NotNeighboringVertices);
         };
 
         Ok(Self {
@@ -102,19 +91,12 @@ impl TryFrom<(Intersection, Intersection)> for Path<repr::Dual> {
     type Error = EdgeDualConstructError;
 
     fn try_from(value: (Intersection, Intersection)) -> Result<Self, Self::Error> {
-        let inter = value
-            .0
-            .as_set()
-            .symmetric_difference(&value.1.as_set())
-            .cloned()
-            .collect::<Vec<_>>();
-
-        match inter.as_slice() {
-            [a, b] => Ok(Self {
-                0: [*a, *b].try_into().unwrap(),
+        match symmetric_difference_hexes_3(value.0.as_arr(), value.1.as_arr()) {
+            Some([a, b]) => Ok(Self {
+                0: [a, b].try_into().unwrap(),
                 1: PhantomData::default(),
             }),
-            _ => Err(EdgeDualConstructError::NotNeighboringVertices),
+            None => Err(EdgeDualConstructError::NotNeighboringVertices),
         }
     }
 }
@@ -125,12 +107,8 @@ impl TryFrom<(Hex, Hex)> for Path<repr::Dual> {
     fn try_from(value: (Hex, Hex)) -> Result<Self, Self::Error> {
         let (h1, h2) = value;
 
-        let nb1 = h1.neighbors_set();
-        let nb2 = h2.neighbors_set();
-        let intersection = nb1.intersection(&nb2).copied().collect::<Vec<_>>();
-
-        match intersection.as_slice() {
-            [_, _] => Ok(Self(
+        match common_neighbors(h1, h2) {
+            Some(_) => Ok(Self(
                 FixedSet::try_from([h1, h2]).unwrap(),
                 PhantomData::default(),
             )),
@@ -150,20 +128,21 @@ impl Path<repr::Dual> {
 
     pub fn canon(&self) -> Path {
         let [h1, h2] = self.0.into();
-        let n0 = h1.neighbors_set();
-        let n1 = h2.neighbors_set();
+        let [c1, c2] = common_neighbors(h1, h2).unwrap();
 
-        let inter = n0.intersection(&n1).cloned().collect::<BTreeSet<Hex>>();
-
-        Path::try_from((
-            inter.first().unwrap().clone(),
-            inter.last().unwrap().clone(),
-        ))
-        .unwrap()
+        Path::from_adjacent_hexes(c1, c2)
     }
 }
 
 impl Path<repr::Canon> {
+    pub(crate) fn from_adjacent_hexes(h1: Hex, h2: Hex) -> Self {
+        debug_assert_eq!(h1.distance(&h2), 1);
+        Self {
+            0: FixedSet::try_from([h1, h2]).expect("adjacent path hexes should be unique"),
+            1: PhantomData::default(),
+        }
+    }
+
     pub fn as_set(&self) -> BTreeSet<Hex> {
         let (h1, h2) = self.as_pair();
         BTreeSet::from([h1, h2])
@@ -183,18 +162,13 @@ impl Path<repr::Canon> {
     }
 
     pub fn dual(&self) -> Path<repr::Dual> {
-        let n0 = self.as_pair().0.neighbors_set();
-        let n1 = self.as_pair().1.neighbors_set();
+        let (h1, h2) = self.as_pair();
+        let [d1, d2] = common_neighbors(h1, h2).unwrap();
 
-        let inter = n0.intersection(&n1).cloned().collect::<BTreeSet<Hex>>();
-
-        assert_eq!(inter.len(), 2);
-
-        Path::<repr::Dual>::try_from((
-            inter.first().unwrap().clone(),
-            inter.last().unwrap().clone(),
-        ))
-        .unwrap()
+        Path::<repr::Dual>(
+            FixedSet::try_from([d1, d2]).expect("path dual hexes should be unique"),
+            PhantomData::default(),
+        )
     }
 
     pub fn intersections(&self) -> [Intersection; 2] {
@@ -202,8 +176,8 @@ impl Path<repr::Canon> {
         let (h1, h2) = self.as_pair();
 
         [
-            Intersection::try_from((d1, h1, h2)).unwrap(),
-            Intersection::try_from((d2, h1, h2)).unwrap(),
+            Intersection::from_adjacent_hexes([d1, h1, h2]),
+            Intersection::from_adjacent_hexes([d2, h1, h2]),
         ]
     }
 
@@ -223,6 +197,66 @@ impl Path<repr::Canon> {
     pub fn opposite_or_panic(&self, v: Intersection) -> Intersection {
         self.opposite(v).expect("too cocky")
     }
+}
+
+fn common_neighbors(h1: Hex, h2: Hex) -> Option<[Hex; 2]> {
+    let mut common = [Hex::new(0, 0); 2];
+    let mut len = 0;
+
+    for candidate in h1.neighbors() {
+        if candidate.are_neighbors(&h2) {
+            if len == common.len() {
+                return None;
+            }
+            common[len] = candidate;
+            len += 1;
+        }
+    }
+
+    (len == common.len()).then_some(common)
+}
+
+fn common_hexes_3(a: [Hex; 3], b: [Hex; 3]) -> Option<[Hex; 2]> {
+    let mut common = [Hex::new(0, 0); 2];
+    let mut len = 0;
+
+    for candidate in a {
+        if b.contains(&candidate) {
+            if len == common.len() {
+                return None;
+            }
+            common[len] = candidate;
+            len += 1;
+        }
+    }
+
+    (len == common.len()).then_some(common)
+}
+
+fn symmetric_difference_hexes_3(a: [Hex; 3], b: [Hex; 3]) -> Option<[Hex; 2]> {
+    let mut diff = [Hex::new(0, 0); 2];
+    let mut len = 0;
+
+    for candidate in a {
+        if !b.contains(&candidate) {
+            if len == diff.len() {
+                return None;
+            }
+            diff[len] = candidate;
+            len += 1;
+        }
+    }
+    for candidate in b {
+        if !a.contains(&candidate) {
+            if len == diff.len() {
+                return None;
+            }
+            diff[len] = candidate;
+            len += 1;
+        }
+    }
+
+    (len == diff.len()).then_some(diff)
 }
 
 #[cfg(test)]

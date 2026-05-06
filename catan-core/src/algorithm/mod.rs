@@ -16,28 +16,23 @@ use crate::{
 };
 
 pub fn is_player_on_hex(hex: Hex, builds: &PlayerBuildData) -> bool {
-    for v in hex.vertices() {
-        let has_build_on_intersection = builds.establishments.iter().any(|est| est.pos == v);
-        if has_build_on_intersection {
-            return true;
-        }
-    }
-
-    false
+    builds
+        .establishments
+        .iter()
+        .any(|establishment| establishment.pos.as_arr().contains(&hex))
 }
 
 pub fn players_on_hex<'a>(
     hex: Hex,
     builds: impl Iterator<Item = &'a PlayerBuildData>,
-) -> impl IntoIterator<Item = PlayerId> {
+) -> impl Iterator<Item = PlayerId> {
     builds
         .enumerate()
-        .filter_map(|(id, builds)| is_player_on_hex(hex, &builds).then_some(id))
-        .collect::<Vec<_>>()
+        .filter_map(move |(id, builds)| is_player_on_hex(hex, builds).then_some(id))
 }
 
 pub fn get_ports_aquired(
-    ports: BTreeMap<Intersection, PortKind>,
+    ports: &BTreeMap<Intersection, PortKind>,
     builds: &BoardBuildData,
 ) -> Vec<BTreeSet<PortKind>> {
     let mut result = Vec::new();

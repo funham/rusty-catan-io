@@ -1,4 +1,3 @@
-use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeSet;
@@ -77,12 +76,8 @@ impl TryFrom<[Hex; 3]> for Intersection {
     type Error = VertexConstructError;
 
     fn try_from(value: [Hex; 3]) -> Result<Self, Self::Error> {
-        let adjacent = (0..value.len())
-            .combinations(2)
-            .all(|i| value[i[0]].are_neighbors(&value[i[1]]));
-
-        if adjacent && let Ok(x) = value.try_into() {
-            Ok(Self { 0: x })
+        if Self::are_adjacent_hexes(value) {
+            Ok(Self::from_adjacent_hexes(value))
         } else {
             Err(VertexConstructError::NotAdjacentHexes)
         }
@@ -90,51 +85,60 @@ impl TryFrom<[Hex; 3]> for Intersection {
 }
 
 impl Intersection {
+    pub(crate) fn from_adjacent_hexes(value: [Hex; 3]) -> Self {
+        debug_assert!(Self::are_adjacent_hexes(value));
+        Self {
+            0: FixedSet::try_from(value).expect("adjacent intersection hexes should be unique"),
+        }
+    }
+
+    fn are_adjacent_hexes(value: [Hex; 3]) -> bool {
+        value[0].are_neighbors(&value[1])
+            && value[0].are_neighbors(&value[2])
+            && value[1].are_neighbors(&value[2])
+    }
+
+    pub fn as_arr(&self) -> [Hex; 3] {
+        self.0.into()
+    }
+
     pub fn as_set(&self) -> BTreeSet<Hex> {
         self.0.into()
     }
 
     /// all edges incidential to the vertex
     pub fn paths(&self) -> FixedSet<Path, 3> {
-        let collected = self
-            .0
-            .into_iter()
-            .combinations(2)
-            .map(|p| Path::try_from((p[0], p[1])).unwrap())
-            .collect::<Vec<_>>();
-
-        match collected.as_slice() {
-            [a, b, c] => FixedSet::try_from([*a, *b, *c]).unwrap(),
-            _ => unreachable!(),
-        }
+        let [a, b, c] = self.as_arr();
+        FixedSet::try_from([
+            Path::try_from((a, b)).unwrap(),
+            Path::try_from((a, c)).unwrap(),
+            Path::try_from((b, c)).unwrap(),
+        ])
+        .unwrap()
     }
 
     pub fn neighbors(&self) -> FixedSet<Intersection, 3> {
-        let collected = self
-            .paths()
-            .into_iter()
-            .map(|p| {
-                let v = p
-                    .dual()
-                    .as_set()
-                    .difference(&self.as_set())
-                    .chain(p.as_arr().each_ref())
-                    .copied()
-                    .collect::<Vec<_>>();
-
-                let a = <[Hex; 3] as TryFrom<Vec<Hex>>>::try_from(v).unwrap();
-                Intersection::try_from(a).unwrap()
-            })
-            .collect::<Vec<_>>();
-
-        match collected.as_slice() {
-            [a, b, c] => [*a, *b, *c].try_into().unwrap(),
-            _ => unreachable!(
-                "somehow wrong amount of neighbors for a vertex (must always be 3; collected: {:?}",
-                collected
-            ),
-        }
+        let [a, b, c] = self.as_arr();
+        FixedSet::try_from([
+            neighbor_across_path(a, b, c),
+            neighbor_across_path(a, c, b),
+            neighbor_across_path(b, c, a),
+        ])
+        .unwrap()
     }
+}
+
+fn neighbor_across_path(path_a: Hex, path_b: Hex, current_third: Hex) -> Intersection {
+    let dual = Path::try_from((path_a, path_b)).unwrap().dual().as_arr();
+    let other = if dual[0] == current_third {
+        dual[1]
+    } else if dual[1] == current_third {
+        dual[0]
+    } else {
+        unreachable!("intersection hex must be one of the path dual hexes")
+    };
+
+    Intersection::from_adjacent_hexes([path_a, path_b, other])
 }
 
 #[cfg(test)]

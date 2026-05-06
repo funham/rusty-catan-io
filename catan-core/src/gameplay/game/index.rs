@@ -39,7 +39,7 @@ impl GameIndex {
     }
 
     fn get_ports_aquired(state: &GameState) -> Vec<BTreeSet<PortKind>> {
-        algorithm::get_ports_aquired(state.board.index().ports_intersection, &state.builds)
+        algorithm::get_ports_aquired(state.board.ports_intersection(), &state.builds)
     }
 
     pub fn refresh_after_build(&mut self, state: &GameState, player_id: PlayerId, build: Build) {
@@ -108,7 +108,9 @@ impl GameIndex {
     }
 
     fn path_contains(path: Path, intersection: Intersection) -> bool {
-        path.intersections().contains(&intersection)
+        let [a, b] = path.as_arr();
+        let intersection_hexes = intersection.as_arr();
+        intersection_hexes.contains(&a) && intersection_hexes.contains(&b)
     }
 
     fn longest_road_owner(

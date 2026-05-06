@@ -1,6 +1,5 @@
 use std::{collections::BTreeSet, hash::Hash, sync::OnceLock};
 
-use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
 use crate::topology::{Intersection, Path};
@@ -142,32 +141,31 @@ impl Hex {
     }
 
     pub fn vertices(&self) -> impl Iterator<Item = Intersection> + use<'_> {
-        // assumptions: neighbors are listed in counter or clockwise order starting with the North-East
-        self.neighbors()
-            .into_iter()
-            .chain(self.neighbors().into_iter().take(1))
-            .tuple_windows()
-            .map(|(h1, h2)| {
-                Intersection::try_from((h1, h2, *self))
-                    .expect("topology::hex::vertices: assumptions broken")
-            })
+        self.vertices_arr().into_iter()
     }
 
     pub fn vertices_arr(&self) -> [Intersection; 6] {
-        self.vertices()
-            .collect::<Vec<_>>()
-            .try_into()
-            .expect("Hexagon has 6 vertices. Duh.")
+        let [h0, h1, h2, h3, h4, h5] = self.neighbors();
+        [
+            Intersection::from_adjacent_hexes([h0, h1, *self]),
+            Intersection::from_adjacent_hexes([h1, h2, *self]),
+            Intersection::from_adjacent_hexes([h2, h3, *self]),
+            Intersection::from_adjacent_hexes([h3, h4, *self]),
+            Intersection::from_adjacent_hexes([h4, h5, *self]),
+            Intersection::from_adjacent_hexes([h5, h0, *self]),
+        ]
     }
 
     pub fn paths_arr(&self) -> [Path; 6] {
-        TryInto::<[Path; 6]>::try_into(
-            self.neighbors()
-                .iter()
-                .map(|h| Path::try_from((*self, *h)).unwrap())
-                .collect::<Vec<_>>(),
-        )
-        .expect("6 paths around a hex. Duh.")
+        let [h0, h1, h2, h3, h4, h5] = self.neighbors();
+        [
+            Path::from_adjacent_hexes(*self, h0),
+            Path::from_adjacent_hexes(*self, h1),
+            Path::from_adjacent_hexes(*self, h2),
+            Path::from_adjacent_hexes(*self, h3),
+            Path::from_adjacent_hexes(*self, h4),
+            Path::from_adjacent_hexes(*self, h5),
+        ]
     }
 
     pub const fn distance(&self, other: &Self) -> usize {
@@ -394,6 +392,8 @@ impl Hash for Hex {
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
+
     use super::*;
 
     fn h(q: i32, r: i32) -> Hex {

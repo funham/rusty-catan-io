@@ -547,6 +547,196 @@ pub mod data {
             }
         }
 
+        pub fn can_build(&self, player_id: PlayerId, build: Build) -> Result<(), BuildingError> {
+            match build {
+                Build::Road(road) => self.can_place_road(player_id, road.pos),
+                Build::Establishment(establishment) => match establishment.stage {
+                    EstablishmentType::Settlement => {
+                        self.can_place_settlement(player_id, establishment.pos)
+                    }
+                    EstablishmentType::City => self.can_place_city(player_id, establishment.pos),
+                },
+            }
+        }
+
+        pub fn can_place_road(&self, player_id: PlayerId, path: Path) -> Result<(), BuildingError> {
+            if self.players[player_id].roads_count() >= PlayerBuildData::ROAD_LIMIT {
+                return Err(BuildingError::RoadLimit());
+            }
+
+            if self.is_road_occupied(path) {
+                return Err(BuildingError::Road(EdgeInsertationError));
+            }
+
+            if self.players[player_id]
+                .roads
+                .edges()
+                .iter()
+                .any(|road| self.roads_touch_at_unblocked_intersection(player_id, path, *road))
+            {
+                Ok(())
+            } else {
+                Err(BuildingError::Road(EdgeInsertationError))
+            }
+        }
+
+        pub fn can_place_road_with_extra_roads(
+            &self,
+            player_id: PlayerId,
+            path: Path,
+            extra_roads: &[Path],
+        ) -> Result<(), BuildingError> {
+            self.can_place_road_with_extra_roads_iter(player_id, path, extra_roads.iter().copied())
+        }
+
+        pub fn can_place_road_with_extra_roads_iter<ExtraRoads>(
+            &self,
+            player_id: PlayerId,
+            path: Path,
+            extra_roads: ExtraRoads,
+        ) -> Result<(), BuildingError>
+        where
+            ExtraRoads: IntoIterator<Item = Path> + Clone,
+        {
+            let extra_count = extra_roads.clone().into_iter().count();
+            if self.players[player_id].roads_count() + extra_count >= PlayerBuildData::ROAD_LIMIT {
+                return Err(BuildingError::RoadLimit());
+            }
+
+            if self.is_road_occupied(path) || extra_roads.clone().into_iter().any(|p| p == path) {
+                return Err(BuildingError::Road(EdgeInsertationError));
+            }
+
+            if self.players[player_id]
+                .roads
+                .edges()
+                .iter()
+                .any(|road| self.roads_touch_at_unblocked_intersection(player_id, path, *road))
+                || extra_roads
+                    .clone()
+                    .into_iter()
+                    .any(|extra| self.roads_touch_at_unblocked_intersection(player_id, path, extra))
+            {
+                Ok(())
+            } else {
+                Err(BuildingError::Road(EdgeInsertationError))
+            }
+        }
+
+        pub fn can_place_settlement(
+            &self,
+            player_id: PlayerId,
+            pos: Intersection,
+        ) -> Result<(), BuildingError> {
+            self.can_place_settlement_with_extra_roads_iter(player_id, pos, [])
+        }
+
+        pub fn can_place_settlement_with_extra_roads_iter<ExtraRoads>(
+            &self,
+            player_id: PlayerId,
+            pos: Intersection,
+            extra_roads: ExtraRoads,
+        ) -> Result<(), BuildingError>
+        where
+            ExtraRoads: IntoIterator<Item = Path>,
+        {
+            if !(self.player_has_road_at_intersection(player_id, pos)
+                || extra_roads
+                    .into_iter()
+                    .any(|path| path_contains_intersection(path, pos)))
+                || self.has_establishment_in_deadzone(pos)
+            {
+                return Err(BuildingError::Settlement());
+            }
+            if self.players[player_id].settlements_count() >= PlayerBuildData::SETTLEMENT_LIMIT {
+                return Err(BuildingError::SettlementLimit());
+            }
+
+            Ok(())
+        }
+
+        pub fn can_place_city(
+            &self,
+            player_id: PlayerId,
+            pos: Intersection,
+        ) -> Result<(), BuildingError> {
+            let settlement = Establishment {
+                pos,
+                stage: EstablishmentType::Settlement,
+            };
+            let city = Establishment {
+                pos,
+                stage: EstablishmentType::City,
+            };
+
+            if !self.players[player_id].establishments.contains(&settlement) {
+                return Err(BuildingError::City());
+            }
+            if self.players[player_id].cities_count() >= PlayerBuildData::CITY_LIMIT {
+                return Err(BuildingError::CityLimit());
+            }
+            if self.players[player_id].establishments.contains(&city) {
+                return Err(BuildingError::City());
+            }
+
+            Ok(())
+        }
+
+        fn is_road_occupied(&self, path: Path) -> bool {
+            self.players
+                .iter()
+                .any(|player| player.roads.edges().contains(&path))
+        }
+
+        fn player_has_road_at_intersection(
+            &self,
+            player_id: PlayerId,
+            intersection: Intersection,
+        ) -> bool {
+            self.players[player_id]
+                .roads
+                .edges()
+                .iter()
+                .any(|path| path_contains_intersection(*path, intersection))
+        }
+
+        fn roads_touch_at_unblocked_intersection(
+            &self,
+            player_id: PlayerId,
+            candidate: Path,
+            connected: Path,
+        ) -> bool {
+            let Some([a, b, c]) = touching_intersection_hexes(candidate, connected) else {
+                return false;
+            };
+
+            !self.opponent_has_establishment_on_hexes(player_id, [a, b, c])
+        }
+
+        fn opponent_has_establishment_on_hexes(
+            &self,
+            player_id: PlayerId,
+            hexes: [Hex; 3],
+        ) -> bool {
+            self.players_indexed()
+                .filter(|(other_id, _)| *other_id != player_id)
+                .any(|(_, player)| {
+                    player.establishments.iter().any(|establishment| {
+                        let establishment_hexes = establishment.pos.as_arr();
+                        hexes.iter().all(|hex| establishment_hexes.contains(hex))
+                    })
+                })
+        }
+
+        fn has_establishment_in_deadzone(&self, pos: Intersection) -> bool {
+            self.players.iter().any(|player| {
+                player
+                    .establishments
+                    .iter()
+                    .any(|establishment| intersections_same_or_adjacent(establishment.pos, pos))
+            })
+        }
+
         fn update_longest_road(&mut self, candidate: PlayerId) {
             let candidate_len = self.players[candidate].roads.find_longest_trail_length();
             if candidate_len < 5 {
@@ -629,6 +819,37 @@ pub mod data {
 
             Ok(())
         }
+    }
+
+    fn path_contains_intersection(path: Path, intersection: Intersection) -> bool {
+        let [a, b] = path.as_arr();
+        let intersection_hexes = intersection.as_arr();
+        intersection_hexes.contains(&a) && intersection_hexes.contains(&b)
+    }
+
+    fn touching_intersection_hexes(candidate: Path, connected: Path) -> Option<[Hex; 3]> {
+        let [a, b] = candidate.as_arr();
+        let [c, d] = connected.as_arr();
+
+        let third = if c == a || c == b {
+            d
+        } else if d == a || d == b {
+            c
+        } else {
+            return None;
+        };
+
+        (third.are_neighbors(&a) && third.are_neighbors(&b)).then_some([a, b, third])
+    }
+
+    fn intersections_same_or_adjacent(a: Intersection, b: Intersection) -> bool {
+        let b_hexes = b.as_arr();
+        a.as_arr()
+            .into_iter()
+            .filter(|hex| b_hexes.contains(hex))
+            .take(2)
+            .count()
+            == 2
     }
 
     impl Index<PlayerId> for BoardBuildData {

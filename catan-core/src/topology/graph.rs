@@ -189,27 +189,19 @@ impl RoadGraph {
 
     fn longest_trail_length_bitmask(&self, blockers: &BTreeSet<Intersection>) -> usize {
         let edges = self.edges.iter().copied().collect::<Vec<_>>();
-        let mut vertex_indices = BTreeMap::new();
+        let mut vertices = Vec::new();
+        let mut adjacency: Vec<Vec<(usize, usize)>> = Vec::new();
 
-        for edge in &edges {
-            for vertex in edge.intersections() {
-                if !vertex_indices.contains_key(&vertex) {
-                    vertex_indices.insert(vertex, vertex_indices.len());
-                }
-            }
-        }
-
-        let mut adjacency = vec![Vec::new(); vertex_indices.len()];
         for (edge_index, edge) in edges.iter().enumerate() {
             let [from, to] = edge.intersections();
-            let from_index = vertex_indices[&from];
-            let to_index = vertex_indices[&to];
+            let from_index = intern_vertex(&mut vertices, &mut adjacency, from);
+            let to_index = intern_vertex(&mut vertices, &mut adjacency, to);
             adjacency[from_index].push((edge_index, to_index));
             adjacency[to_index].push((edge_index, from_index));
         }
 
-        let blocked = vertex_indices
-            .keys()
+        let blocked = vertices
+            .iter()
             .map(|vertex| blockers.contains(vertex))
             .collect::<Vec<_>>();
 
@@ -385,6 +377,21 @@ impl RoadGraph {
 
         component
     }
+}
+
+fn intern_vertex(
+    vertices: &mut Vec<Intersection>,
+    adjacency: &mut Vec<Vec<(usize, usize)>>,
+    vertex: Intersection,
+) -> usize {
+    if let Some(index) = vertices.iter().position(|existing| *existing == vertex) {
+        return index;
+    }
+
+    let index = vertices.len();
+    vertices.push(vertex);
+    adjacency.push(Vec::new());
+    index
 }
 
 #[derive(Debug)]

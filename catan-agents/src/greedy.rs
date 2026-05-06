@@ -24,7 +24,6 @@ use catan_core::{
     },
     topology::Hex,
 };
-use itertools::Itertools;
 
 use crate::{lazy, legal};
 
@@ -129,8 +128,8 @@ pub fn most_occupied_producing_tile(context: PlayerDecisionContext<'_>) -> Hex {
         .arrangement
         .hex_iter()
         .filter(|&h| h != context.public.board_state.robber_pos)
-        .sorted_by_key(|&hex| {
-            std::cmp::Reverse((
+        .fold(None, |best, hex| {
+            let score = (
                 context
                     .public
                     .players_on_hex(hex)
@@ -142,9 +141,14 @@ pub fn most_occupied_producing_tile(context: PlayerDecisionContext<'_>) -> Hex {
                     Tile::River { number } => number.prob_pts() + 3, /* some random *magic* */
                     Tile::Desert => 0,
                 },
-            ))
+            );
+
+            match best {
+                Some((best_hex, best_score)) if best_score >= score => Some((best_hex, best_score)),
+                _ => Some((hex, score)),
+            }
         })
-        .next()
+        .map(|(hex, _)| hex)
         .expect("some hex must be occupied by at least one other player")
 }
 
@@ -152,7 +156,7 @@ pub fn greedy_after_dice_action(
     context: PlayerDecisionContext<'_>,
     player_id: PlayerId,
 ) -> PostDiceAction {
-    if let Some(usage) = legal::legal_dev_card_usages(&context).into_iter().next() {
+    if let Some(usage) = legal::first_legal_dev_card_usage(&context) {
         PostDiceAction::UseDevCard(usage)
     } else {
         PostDiceAction::RegularAction(greedy_regular_action(&context, player_id))
@@ -182,7 +186,7 @@ pub fn greedy_regular_action(
 }
 
 pub fn greedy_init_action(context: PlayerDecisionContext<'_>, _player_id: PlayerId) -> InitAction {
-    if let Some(usage) = legal::legal_dev_card_usages(&context).into_iter().next() {
+    if let Some(usage) = legal::first_legal_dev_card_usage(&context) {
         InitAction::UseDevCard(usage)
     } else {
         InitAction::RollDice
@@ -375,7 +379,7 @@ fn settlement_resource_scores(
 ) -> Vec<(Resource, u16)> {
     establishment
         .pos
-        .as_set()
+        .as_arr()
         .into_iter()
         .filter(|hex| hex.norm() <= board.arrangement.radius() as usize)
         .filter_map(|hex| match board.arrangement[hex] {

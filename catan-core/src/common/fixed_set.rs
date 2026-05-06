@@ -47,16 +47,13 @@ impl<T: Ord, const N: usize> TryFrom<BTreeSet<T>> for FixedSet<T, N> {
 impl<T: Ord, const N: usize> TryFrom<[T; N]> for FixedSet<T, N> {
     type Error = [T; N];
 
-    fn try_from(value: [T; N]) -> Result<Self, Self::Error> {
-        match <BTreeSet<T> as TryInto<FixedSet<T, N>>>::try_into(
-            value.into_iter().collect::<BTreeSet<T>>(),
-        ) {
-            Ok(x) => Ok(x),
-            Err(e) => Err(
-                <[T; N] as TryFrom<Vec<T>>>::try_from(e.into_iter().collect::<Vec<_>>())
-                    .unwrap_or_else(|_| unreachable!()),
-            ),
+    fn try_from(mut value: [T; N]) -> Result<Self, Self::Error> {
+        value.sort_unstable();
+        if value.windows(2).any(|items| items[0] == items[1]) {
+            return Err(value);
         }
+
+        Ok(Self { data_: value })
     }
 }
 
@@ -67,5 +64,22 @@ impl<T: Ord, const N: usize> IntoIterator for FixedSet<T, N> {
 
     fn into_iter(self) -> Self::IntoIter {
         self.data_.into_iter()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn array_constructor_sorts_without_allocation() {
+        let set = FixedSet::<_, 3>::try_from([3, 1, 2]).unwrap();
+
+        assert_eq!(Into::<[i32; 3]>::into(set), [1, 2, 3]);
+    }
+
+    #[test]
+    fn array_constructor_rejects_duplicates() {
+        assert!(FixedSet::<_, 3>::try_from([3, 1, 3]).is_err());
     }
 }

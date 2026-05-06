@@ -216,6 +216,10 @@ impl BoardLayout {
         self.index.clone()
     }
 
+    pub fn ports_intersection(&self) -> &BTreeMap<Intersection, PortKind> {
+        &self.index.ports_intersection
+    }
+
     pub fn intersections(&self) -> &[Intersection] {
         &self.index.intersections
     }

@@ -193,7 +193,7 @@ impl<'a> PublicGameView<'a> {
     }
 
     pub fn get_ports_aquired(&self) -> Vec<BTreeSet<PortKind>> {
-        algorithm::get_ports_aquired(self.board.index().ports_intersection, self.builds)
+        algorithm::get_ports_aquired(self.board.ports_intersection(), self.builds)
     }
 
     pub fn ports_aquired_for(&self, player_id: PlayerId) -> &'a BTreeSet<PortKind> {
