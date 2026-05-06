@@ -327,21 +327,10 @@ impl HexIndex {
     }
 
     pub fn hex_ring(center: Hex, radius: usize) -> Vec<Hex> {
-        if radius == 0 {
-            return vec![center];
-        }
-
-        let mut results = Vec::new();
-        let mut hex = center + Hex::directions()[4] * radius as i32;
-
-        for i in 0..6 {
-            for _ in 0..radius {
-                results.push(hex);
-                hex = hex.neighbors()[i];
-            }
-        }
-
-        results
+        let ring_start = Self::spiral_start_of_ring(radius);
+        (ring_start..ring_start + Self::ring_size(radius))
+            .map(|index| center + Self::spiral_to_hex(index))
+            .collect()
     }
 
     pub fn spiral() -> impl Iterator<Item = Hex> {
@@ -349,23 +338,55 @@ impl HexIndex {
     }
 
     pub fn spiral_to_hex(index: usize) -> Hex {
-        let center = Hex::new(0, 0);
         let radius = Self::spiral_to_radius(index);
-        let ring_start = Self::spiral_start_of_ring(radius);
+        if radius == 0 {
+            return Hex::new(0, 0);
+        }
 
-        Self::hex_ring(center, radius)[index - ring_start]
+        let ring_start = Self::spiral_start_of_ring(radius);
+        let offset = index - ring_start;
+        let side = offset / radius;
+        let step = (offset % radius) as i32;
+        let radius = radius as i32;
+
+        match side {
+            0 => Hex::new(-radius + step, radius),
+            1 => Hex::new(step, radius - step),
+            2 => Hex::new(radius, -step),
+            3 => Hex::new(radius - step, -radius),
+            4 => Hex::new(-step, -radius + step),
+            5 => Hex::new(-radius, step),
+            _ => unreachable!("ring offset must fit one of six sides"),
+        }
     }
 
     pub fn hex_to_spiral(hex: Hex) -> usize {
-        let center = Hex::new(0, 0);
-        let radius = hex.distance(&center) as usize;
-        let ring_hexes = Self::hex_ring(center, radius);
-        for i in 0..ring_hexes.len() {
-            if hex == ring_hexes[i] {
-                return i + Self::spiral_start_of_ring(radius);
-            }
+        let radius = hex.norm();
+        if radius == 0 {
+            return 0;
         }
-        unreachable!("trust me bro")
+
+        let radius = radius as i32;
+        let q = hex.q;
+        let r = hex.r;
+        let offset = if r == radius {
+            q + radius
+        } else if q + r == radius {
+            radius + q
+        } else if q == radius {
+            2 * radius - r
+        } else if r == -radius {
+            4 * radius - q
+        } else if q + r == -radius {
+            4 * radius - q
+        } else if q == -radius {
+            5 * radius + r
+        } else {
+            unreachable!("hex with norm radius must be on its ring boundary")
+        };
+
+        debug_assert!((0..6 * radius).contains(&offset));
+        Self::spiral_start_of_ring(radius as usize) + offset as usize
     }
 
     pub fn to_spiral(&self) -> usize {
@@ -505,6 +526,24 @@ mod tests {
         for i in 0..69 {
             let hex = HexIndex::spiral_to_hex(i);
             assert_eq!(i, HexIndex::hex_to_spiral(hex));
+        }
+    }
+
+    #[test]
+    fn spiral_index_round_trips_larger_range() {
+        for i in 0..500 {
+            let hex = HexIndex::spiral_to_hex(i);
+            assert_eq!(HexIndex::hex_to_spiral(hex), i);
+        }
+
+        for radius in 0..16 {
+            let ring_start = HexIndex::spiral_start_of_ring(radius);
+            let ring = HexIndex::hex_ring(h(0, 0), radius);
+            assert_eq!(ring.len(), HexIndex::ring_size(radius));
+            for (offset, hex) in ring.into_iter().enumerate() {
+                assert_eq!(HexIndex::spiral_to_hex(ring_start + offset), hex);
+                assert_eq!(HexIndex::hex_to_spiral(hex), ring_start + offset);
+            }
         }
     }
 }
