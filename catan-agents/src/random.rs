@@ -219,31 +219,19 @@ fn rand_regular_action_in_category(
             legal::can_buy_dev_card(context).then_some(RegularAction::BuyDevCard)
         }
         RandomRegularActionCategory::BuildRoad => {
-            let count = legal::legal_road_spots_count(context, context.actor);
-            (count > 0).then(|| {
-                legal::legal_road_spots_iter(context, context.actor)
-                    .nth(rng.random_range(0..count))
-                    .map(RegularAction::Build)
-                    .expect("selected road index must be legal")
-            })
+            legal::legal_road_spots_iter(context, context.actor)
+                .choose(rng)
+                .map(RegularAction::Build)
         }
         RandomRegularActionCategory::BuildSettlement => {
-            let count = legal::legal_settlement_spots_count(context, context.actor);
-            (count > 0).then(|| {
-                legal::legal_settlement_spots_iter(context, context.actor)
-                    .nth(rng.random_range(0..count))
-                    .map(RegularAction::Build)
-                    .expect("selected settlement index must be legal")
-            })
+            legal::legal_settlement_spots_iter(context, context.actor)
+                .choose(rng)
+                .map(RegularAction::Build)
         }
         RandomRegularActionCategory::BuildCity => {
-            let count = legal::legal_city_spots_count(context, context.actor);
-            (count > 0).then(|| {
-                legal::legal_city_spots_iter(context, context.actor)
-                    .nth(rng.random_range(0..count))
-                    .map(RegularAction::Build)
-                    .expect("selected city index must be legal")
-            })
+            legal::legal_city_spots_iter(context, context.actor)
+                .choose(rng)
+                .map(RegularAction::Build)
         }
         RandomRegularActionCategory::TradeWithBank => {
             let count = legal::legal_bank_trade_count(context);
@@ -349,26 +337,6 @@ fn rand_road_extension_with_extra_roads<const N: usize>(
     extra_roads: [Path; N],
     rng: &mut impl Rng,
 ) -> Option<Path> {
-    let count = context
-        .public
-        .board
-        .paths()
-        .iter()
-        .copied()
-        .filter(|path| {
-            context
-                .public
-                .builds
-                .can_place_road_with_extra_roads(context.actor, *path, &extra_roads)
-                .is_ok()
-        })
-        .count();
-
-    if count == 0 {
-        return None;
-    }
-
-    let index = rng.random_range(0..count);
     context
         .public
         .board
@@ -382,7 +350,7 @@ fn rand_road_extension_with_extra_roads<const N: usize>(
                 .can_place_road_with_extra_roads(context.actor, *path, &extra_roads)
                 .is_ok()
         })
-        .nth(index)
+        .choose(rng)
 }
 
 pub fn rand_drop_half(context: PlayerDecisionContext<'_>, _rng: &mut impl Rng) -> DropHalfAction {
