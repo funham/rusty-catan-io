@@ -174,7 +174,7 @@ pub enum FieldPromotingError {
     NotEnoughBuilds,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BuildCollection {
     pub establishments: Vec<Establishment>,
     pub roads: Vec<Road>,

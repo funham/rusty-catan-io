@@ -705,7 +705,8 @@ impl GameController {
         match result {
             Ok(()) => {
                 log::trace!("Dev card executed successfully");
-                self.index = GameIndex::rebuild(&self.game);
+                self.index
+                    .refresh_after_dev_card(&self.game, player_id, &usage);
                 self.notify_observers(&GameEvent::DevCardUsed {
                     player_id,
                     usage: usage.clone(),
@@ -1006,10 +1007,9 @@ impl GameController {
         );
         let hexes = game.board.hexes_by_num(num).clone();
 
-        let player_ids = {
-            let index = GameIndex::rebuild(game);
-            GameQuery::new(game, &index).player_ids_starting_from(player)
-        };
+        let player_ids = (player..game.players.count())
+            .chain(0..player)
+            .collect::<Vec<_>>();
         log::trace!("Harvesting order: {:?}", player_ids);
 
         for pid in player_ids {
