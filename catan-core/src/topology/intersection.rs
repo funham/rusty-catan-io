@@ -107,23 +107,37 @@ impl Intersection {
 
     /// all edges incidential to the vertex
     pub fn paths(&self) -> FixedSet<Path, 3> {
+        FixedSet::try_from(self.paths_arr()).unwrap()
+    }
+
+    pub fn paths_arr(&self) -> [Path; 3] {
         let [a, b, c] = self.as_arr();
-        FixedSet::try_from([
+        [
             Path::try_from((a, b)).unwrap(),
             Path::try_from((a, c)).unwrap(),
             Path::try_from((b, c)).unwrap(),
-        ])
-        .unwrap()
+        ]
+    }
+
+    pub fn paths_iter(&self) -> impl Iterator<Item = Path> {
+        self.paths_arr().into_iter()
     }
 
     pub fn neighbors(&self) -> FixedSet<Intersection, 3> {
+        FixedSet::try_from(self.neighbors_arr()).unwrap()
+    }
+
+    pub fn neighbors_arr(&self) -> [Intersection; 3] {
         let [a, b, c] = self.as_arr();
-        FixedSet::try_from([
+        [
             neighbor_across_path(a, b, c),
             neighbor_across_path(a, c, b),
             neighbor_across_path(b, c, a),
-        ])
-        .unwrap()
+        ]
+    }
+
+    pub fn neighbors_iter(&self) -> impl Iterator<Item = Intersection> {
+        self.neighbors_arr().into_iter()
     }
 }
 

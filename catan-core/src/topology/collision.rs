@@ -31,7 +31,7 @@ impl<'a, 'b> CollisionChecker<'a, 'b> {
     }
 
     pub fn building_deadzone(&self, pos: Intersection) -> IntersectionOccupancy {
-        pos.neighbors().into_iter().chain([pos]).collect()
+        pos.neighbors_arr().into_iter().chain([pos]).collect()
     }
 }
 

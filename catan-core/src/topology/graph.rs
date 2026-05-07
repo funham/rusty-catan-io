@@ -154,7 +154,7 @@ impl RoadGraph {
         }
 
         if dead_end {
-            result.extend(vertex.paths());
+            result.extend(vertex.paths_arr());
         }
     }
 
@@ -168,7 +168,7 @@ impl RoadGraph {
             .occupancy
             .iter()
             .filter(|v| {
-                let dead_zone = v.neighbors().into_iter().chain([**v]);
+                let dead_zone = v.neighbors_arr().into_iter().chain([**v]);
 
                 checker
                     .full_occupancy()

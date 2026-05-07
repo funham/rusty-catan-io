@@ -896,7 +896,7 @@ pub mod query {
 
             let possible_placements = available_intersections.flat_map(|v| {
                 let paths = v
-                    .paths()
+                    .paths_arr()
                     .into_iter()
                     .filter(|p| !self.container.is_road_occupied(*p) && valid_paths.contains(p));
                 paths.map(move |p| (v, p))
