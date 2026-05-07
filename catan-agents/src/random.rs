@@ -13,6 +13,7 @@ use catan_core::{
             dev_card::{DevCardUsage, UsableDevCard},
             player::PlayerId,
             resource::{Resource, ResourceCollection},
+            trade::{BankTrade, BankTradeKind},
         },
     },
     topology::{Hex, HexIndex, Path},
@@ -234,12 +235,73 @@ fn rand_regular_action_in_category(
                 .map(RegularAction::Build)
         }
         RandomRegularActionCategory::TradeWithBank => {
-            let count = legal::legal_bank_trade_count(context);
-            (count > 0).then(|| {
-                legal::legal_bank_trade_at(context, rng.random_range(0..count))
-                    .map(RegularAction::TradeWithBank)
-                    .expect("selected bank trade index must be legal")
-            })
+            rand_bank_trade(context, rng).map(RegularAction::TradeWithBank)
+        }
+    }
+}
+
+fn rand_bank_trade(context: &PlayerDecisionContext<'_>, rng: &mut impl Rng) -> Option<BankTrade> {
+    let mut selected = None;
+    let mut seen = 0usize;
+
+    sample_resource_trades_at_rate(
+        context,
+        BankTradeKind::BankGeneric,
+        Resource::iter(),
+        4,
+        &mut selected,
+        &mut seen,
+        rng,
+    );
+
+    for port in context.public.ports_aquired_for(context.actor) {
+        match port {
+            catan_core::gameplay::primitives::PortKind::Special(resource) => {
+                sample_resource_trades_at_rate(
+                    context,
+                    BankTradeKind::PortSpecific,
+                    std::iter::once(*resource),
+                    2,
+                    &mut selected,
+                    &mut seen,
+                    rng,
+                );
+            }
+            catan_core::gameplay::primitives::PortKind::Universal => {
+                sample_resource_trades_at_rate(
+                    context,
+                    BankTradeKind::PortGeneric,
+                    Resource::iter(),
+                    3,
+                    &mut selected,
+                    &mut seen,
+                    rng,
+                );
+            }
+        }
+    }
+
+    selected
+}
+
+fn sample_resource_trades_at_rate(
+    context: &PlayerDecisionContext<'_>,
+    kind: BankTradeKind,
+    give_candidates: impl IntoIterator<Item = Resource>,
+    rate: u16,
+    selected: &mut Option<BankTrade>,
+    seen: &mut usize,
+    rng: &mut impl Rng,
+) {
+    for give in give_candidates
+        .into_iter()
+        .filter(|give| context.private.resources.has_enough(&(*give, rate).into()))
+    {
+        for take in Resource::iter().filter(|take| *take != give) {
+            *seen += 1;
+            if rng.random_range(0..*seen) == 0 {
+                *selected = Some(BankTrade { give, take, kind });
+            }
         }
     }
 }

@@ -678,32 +678,37 @@ fn public_resource_total(context: &PlayerDecisionContext<'_>, player_id: PlayerI
 }
 
 pub fn legal_bank_trades(context: &PlayerDecisionContext<'_>) -> Vec<BankTrade> {
-    let mut result = Vec::new();
+    legal_bank_trades_iter(context).collect()
+}
 
-    result.extend(resource_trades_at_rate(
-        context,
-        BankTradeKind::BankGeneric,
-        Resource::iter(),
-        4,
-    ));
-
-    for port in context.public.ports_aquired_for(context.actor) {
-        let trades = match port {
-            PortKind::Special(resource) => resource_trades_at_rate(
-                context,
-                BankTradeKind::PortSpecific,
-                std::iter::once(*resource),
-                2,
-            ),
-            PortKind::Universal => {
-                resource_trades_at_rate(context, BankTradeKind::PortGeneric, Resource::iter(), 3)
+pub fn legal_bank_trades_iter<'a>(
+    context: &'a PlayerDecisionContext<'_>,
+) -> Box<dyn Iterator<Item = BankTrade> + 'a> {
+    let generic =
+        resource_trades_at_rate_iter(context, BankTradeKind::BankGeneric, Resource::iter(), 4);
+    let port_trades = context
+        .public
+        .ports_aquired_for(context.actor)
+        .iter()
+        .map(move |port| -> Box<dyn Iterator<Item = BankTrade> + 'a> {
+            match port {
+                PortKind::Special(resource) => resource_trades_at_rate_iter(
+                    context,
+                    BankTradeKind::PortSpecific,
+                    std::iter::once(*resource),
+                    2,
+                ),
+                PortKind::Universal => resource_trades_at_rate_iter(
+                    context,
+                    BankTradeKind::PortGeneric,
+                    Resource::iter(),
+                    3,
+                ),
             }
-        };
+        })
+        .flatten();
 
-        result.extend(trades);
-    }
-
-    result
+    Box::new(generic.chain(port_trades))
 }
 
 pub fn legal_bank_trade_count(context: &PlayerDecisionContext<'_>) -> usize {
@@ -760,22 +765,22 @@ pub fn legal_bank_trade_at(
     None
 }
 
-fn resource_trades_at_rate(
-    context: &PlayerDecisionContext<'_>,
+fn resource_trades_at_rate_iter<'a>(
+    context: &'a PlayerDecisionContext<'_>,
     kind: BankTradeKind,
-    give_candidates: impl IntoIterator<Item = Resource>,
+    give_candidates: impl IntoIterator<Item = Resource> + 'a,
     rate: u16,
-) -> Vec<BankTrade> {
-    give_candidates
-        .into_iter()
-        .filter(|give| context.private.resources.has_enough(&(*give, rate).into()))
-        .flat_map(|give| {
-            Resource::iter()
-                .into_iter()
-                .filter(move |take| *take != give)
-                .map(move |take| BankTrade { give, take, kind })
-        })
-        .collect()
+) -> Box<dyn Iterator<Item = BankTrade> + 'a> {
+    Box::new(
+        give_candidates
+            .into_iter()
+            .filter(move |give| context.private.resources.has_enough(&(*give, rate).into()))
+            .flat_map(move |give| {
+                Resource::iter()
+                    .filter(move |take| *take != give)
+                    .map(move |take| BankTrade { give, take, kind })
+            }),
+    )
 }
 
 fn resource_trades_count_at_rate(
@@ -1351,6 +1356,31 @@ mod tests {
                 sorted_dev_usage_debug(legal_dev_card_usages(&context)),
                 sorted_dev_usage_debug(legal_dev_card_usages_iter(&context).collect())
             );
+        });
+    }
+
+    #[test]
+    fn lazy_bank_trade_iterator_matches_eager_trades() {
+        let state = state_with_port_and_resources(
+            PortKind::Universal,
+            ResourceCollection {
+                brick: 4,
+                wood: 3,
+                wheat: 2,
+                ..ResourceCollection::ZERO
+            },
+        );
+
+        with_decision_context(&state, 0, |context| {
+            let eager = legal_bank_trades(&context)
+                .into_iter()
+                .map(|trade| format!("{trade:?}"))
+                .collect::<Vec<_>>();
+            let lazy = legal_bank_trades_iter(&context)
+                .map(|trade| format!("{trade:?}"))
+                .collect::<Vec<_>>();
+
+            assert_eq!(lazy, eager);
         });
     }
 
