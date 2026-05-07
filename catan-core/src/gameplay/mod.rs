@@ -6,6 +6,13 @@ pub mod primitives;
 pub mod constants {
     use crate::gameplay::primitives::resource::ResourceCollection;
 
+    pub mod capacities {
+        pub const PLAYER_VIEW_INLINE: usize = 8;
+        pub const PLAYER_PORTS_INLINE: usize = 12;
+        pub const PLAYER_ESTABLISHMENTS_INLINE: usize = 12;
+        pub const PLAYER_ROADS_INLINE: usize = 30;
+    }
+
     pub mod costs {
         use super::*;
 

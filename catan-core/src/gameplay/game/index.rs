@@ -2,6 +2,7 @@ use crate::{
     algorithm,
     common::SmallSet,
     gameplay::{
+        constants::capacities::PLAYER_PORTS_INLINE,
         field::state::BuildCollection,
         game::state::GameState,
         primitives::{
@@ -20,7 +21,7 @@ pub struct GameIndex {
     pub longest_road_lengths: Vec<u16>,
     pub longest_road_owner: Option<PlayerId>,
     pub largest_army_owner: Option<PlayerId>,
-    pub ports_aquired: Vec<SmallSet<PortKind, 6>>,
+    pub ports_aquired: Vec<SmallSet<PortKind, PLAYER_PORTS_INLINE>>,
 }
 
 impl GameIndex {
@@ -38,7 +39,7 @@ impl GameIndex {
         }
     }
 
-    fn get_ports_aquired(state: &GameState) -> Vec<SmallSet<PortKind, 6>> {
+    fn get_ports_aquired(state: &GameState) -> Vec<SmallSet<PortKind, PLAYER_PORTS_INLINE>> {
         algorithm::get_ports_aquired(state.board.ports_intersection(), &state.builds)
     }
 

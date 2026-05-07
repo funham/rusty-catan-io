@@ -4,6 +4,7 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    constants::costs,
     gameplay::{
         field::state::{BoardLayout, BoardState},
         primitives::{
@@ -161,21 +162,19 @@ impl GameState {
     }
 
     pub fn buy_dev_card(&mut self, player_id: PlayerId) -> Result<(), BuyDevCardError> {
-        const COST: ResourceCollection = ResourceCollection {
-            wheat: 1,
-            sheep: 1,
-            ore: 1,
-            ..ResourceCollection::ZERO
-        };
-
         if self.bank.dev_cards.is_empty() {
             return Err(BuyDevCardError::BankIsShort);
         }
-        if !self.players.get(player_id).resources().has_enough(&COST) {
+        if !self
+            .players
+            .get(player_id)
+            .resources()
+            .has_enough(&costs::DEV_CARD)
+        {
             return Err(BuyDevCardError::AccountIsShort { id: player_id });
         }
 
-        self.transfer_to_bank(COST, player_id)
+        self.transfer_to_bank(costs::DEV_CARD, player_id)
             .map_err(|err| match err {
                 BankResourceExchangeError::BankIsShort => unreachable!(),
                 BankResourceExchangeError::AccountIsShort {

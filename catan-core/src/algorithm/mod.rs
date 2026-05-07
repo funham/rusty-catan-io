@@ -8,10 +8,13 @@ use std::collections::BTreeMap;
 
 use crate::{
     common::SmallSet,
-    gameplay::primitives::{
-        PortKind,
-        build::{BoardBuildData, PlayerBuildData},
-        player::PlayerId,
+    gameplay::{
+        constants::capacities::PLAYER_PORTS_INLINE,
+        primitives::{
+            PortKind,
+            build::{BoardBuildData, PlayerBuildData},
+            player::PlayerId,
+        },
     },
     topology::{Hex, Intersection},
 };
@@ -35,7 +38,7 @@ pub fn players_on_hex<'a>(
 pub fn get_ports_aquired(
     ports: &BTreeMap<Intersection, PortKind>,
     builds: &BoardBuildData,
-) -> Vec<SmallSet<PortKind, 6>> {
+) -> Vec<SmallSet<PortKind, PLAYER_PORTS_INLINE>> {
     let mut result = Vec::new();
     for id in 0..builds.players().len() {
         let mut set = SmallSet::new();

@@ -41,7 +41,7 @@ pub fn run_match(config: MatchConfig) -> Result<(), String> {
     let agents = build_agents(&config.players, &exe)?;
     let mut observers = build_observers(&config.observers, &exe)?;
     let mut dice = build_dice(&config.dice);
-    let init_state = build_initial_state(&config.field);
+    let init_state = build_initial_state(&config.field, config.players.len());
     let mut agents = agents;
     let state = GameController::init_with_observers(init_state, &mut agents, &mut observers);
     let mut controller = GameController::new(state, agents);
@@ -103,9 +103,13 @@ fn build_dice(config: &DiceConfig) -> Box<dyn DiceRoller> {
     }
 }
 
-fn build_initial_state(config: &FieldConfig) -> GameInitializationState {
+fn build_initial_state(config: &FieldConfig, player_count: usize) -> GameInitializationState {
     match config {
-        FieldConfig::Default => GameInitializationState::default(),
+        FieldConfig::Default => {
+            let mut field = catan_core::gameplay::field::state::FieldBuildParam::default();
+            field.n_players = player_count;
+            GameInitializationState::new(field)
+        }
     }
 }
 
@@ -349,8 +353,8 @@ mod tests {
     use catan_core::gameplay::game::event::ObserverKind;
 
     use crate::{
-        config::ObserverConfig,
-        host::{CliChildSpec, unique_socket_path},
+        config::{FieldConfig, ObserverConfig},
+        host::{CliChildSpec, build_initial_state, unique_socket_path},
     };
 
     #[test]
@@ -376,5 +380,16 @@ mod tests {
         assert!(log_name.starts_with("rc-snap-l-"));
         assert!(game_name.len() < 104);
         assert!(log_name.len() < 104);
+    }
+
+    #[test]
+    fn default_field_uses_configured_player_count() {
+        for player_count in [1, 2, 3, 4, 6] {
+            let init = build_initial_state(&FieldConfig::Default, player_count);
+
+            assert_eq!(init.board.n_players, player_count);
+            assert_eq!(init.players.count(), player_count);
+            assert_eq!(init.builds.players().len(), player_count);
+        }
     }
 }

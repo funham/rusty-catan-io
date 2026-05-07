@@ -1,0 +1,9 @@
+{
+  "players": [
+    { "kind": "cli" },
+    { "kind": "cli" }
+  ],
+  "field": { "kind": "default" },
+  "dice": { "kind": "random" },
+  "limits": { "max_turns": 500 }
+}

@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     common::SmallSet,
     gameplay::{
+        constants::capacities::PLAYER_ESTABLISHMENTS_INLINE,
         field::state::{BoardLayout, BuildCollection},
         primitives::{
             player::PlayerId,
@@ -337,7 +338,7 @@ pub mod data {
 
     #[derive(Debug, Default, Clone, Serialize, Deserialize)]
     pub struct PlayerBuildData {
-        pub establishments: SmallSet<Establishment, 10>,
+        pub establishments: SmallSet<Establishment, PLAYER_ESTABLISHMENTS_INLINE>,
         pub roads: graph::RoadGraph,
     }
 
@@ -470,7 +471,7 @@ pub mod data {
 
             match build {
                 Build::Road(road) => {
-                    self.players[player_id].roads.add_edge(&road.pos);
+                    self.players[player_id].roads.add_edge_unsafe(&road.pos);
                     self.update_longest_road(player_id);
                     Ok(())
                 }
@@ -766,7 +767,7 @@ pub mod data {
                 return Err(BuildingError::InitRoad(road.pos));
             }
 
-            self[player_id].roads.add_edge(&road.pos);
+            self[player_id].roads.add_edge_unsafe(&road.pos);
             self.update_longest_road(player_id);
 
             Ok(())

@@ -4,6 +4,7 @@ use smallvec::SmallVec;
 use crate::{
     algorithm,
     gameplay::{
+        constants::capacities::{PLAYER_PORTS_INLINE, PLAYER_VIEW_INLINE},
         field::state::{BoardLayout, BoardState},
         game::{index::GameIndex, query::GameQuery, state::GameState},
         primitives::{
@@ -124,7 +125,7 @@ pub struct PublicPlayerView {
     pub dev_cards: PublicPlayerDevCards,
 }
 
-type PublicPlayerViews = SmallVec<[PublicPlayerView; 4]>;
+type PublicPlayerViews = SmallVec<[PublicPlayerView; PLAYER_VIEW_INLINE]>;
 
 #[derive(Debug, Clone)]
 pub struct PublicGameView<'a> {
@@ -136,7 +137,7 @@ pub struct PublicGameView<'a> {
     pub builds: &'a BoardBuildData,
     pub longest_road_owner: Option<PlayerId>,
     pub largest_army_owner: Option<PlayerId>,
-    ports_aquired: &'a [SmallSet<PortKind, 6>],
+    ports_aquired: &'a [SmallSet<PortKind, PLAYER_PORTS_INLINE>],
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -205,11 +206,14 @@ impl<'a> PublicGameView<'a> {
         algorithm::players_on_hex(hex, self.builds.players().iter())
     }
 
-    pub fn get_ports_aquired(&self) -> Vec<SmallSet<PortKind, 6>> {
+    pub fn get_ports_aquired(&self) -> Vec<SmallSet<PortKind, PLAYER_PORTS_INLINE>> {
         algorithm::get_ports_aquired(self.board.ports_intersection(), self.builds)
     }
 
-    pub fn ports_aquired_for(&self, player_id: PlayerId) -> &'a SmallSet<PortKind, 6> {
+    pub fn ports_aquired_for(
+        &self,
+        player_id: PlayerId,
+    ) -> &'a SmallSet<PortKind, PLAYER_PORTS_INLINE> {
         &self.ports_aquired[player_id]
     }
 }

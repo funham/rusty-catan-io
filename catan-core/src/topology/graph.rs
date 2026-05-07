@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 use crate::{
     common::SmallSet,
+    constants::capacities,
     gameplay::primitives::build::Road,
     topology::{Intersection, Path, collision::CollisionChecker},
 };
@@ -11,10 +12,12 @@ use crate::{
 // neighbors v -> {e | v \in e}
 // (better than v -> {v}, cause edge's invariant enforces correctness of a graph)
 
+type Edges = SmallSet<Path, { capacities::PLAYER_ROADS_INLINE }>;
+
 /// Not oriented graph
 #[derive(Debug, Default, Clone)]
 pub struct RoadGraph {
-    edges: SmallSet<Path, 15>,
+    edges: Edges,
     out: BTreeMap<Intersection, SmallSet<Path, 3>>,
 }
 
@@ -41,7 +44,7 @@ impl RoadGraph {
     pub fn from_roads(roads: impl IntoIterator<Item = Path>) -> Self {
         let mut graph = Self::default();
         for road in roads {
-            graph.add_edge(&road);
+            graph.add_edge_unsafe(&road);
         }
         graph
     }
@@ -50,7 +53,7 @@ impl RoadGraph {
         self.edges.iter().map(|p| Road { pos: p.clone() })
     }
 
-    pub fn edges(&self) -> &SmallSet<Path, 15> {
+    pub fn edges(&self) -> &Edges {
         &self.edges
     }
 
@@ -69,7 +72,7 @@ impl RoadGraph {
     /// add an edge, no questions asked
     /// ---
     /// for inside use only basically
-    pub fn add_edge(&mut self, edge: &Path) {
+    pub fn add_edge_unsafe(&mut self, edge: &Path) {
         let [v1, v2] = edge.intersections();
         let _ = match self.out.get_mut(&v1) {
             Some(edges) => edges.insert(edge.clone()),
@@ -88,14 +91,18 @@ impl RoadGraph {
         self.edges.insert(edge.clone());
     }
 
+    pub fn can_extend(&self, edge: &Path, checker: &CollisionChecker) -> bool {
+        checker.can_place(&Road { pos: edge.clone() })
+    }
+
     /// add new road connected to existing
-    pub fn extend(
+    pub fn try_extend(
         &mut self,
         edge: &Path,
         checker: &CollisionChecker,
     ) -> Result<(), EdgeInsertationError> {
-        match checker.can_place(&Road { pos: edge.clone() }) {
-            true => Ok(self.add_edge(edge)),
+        match self.can_extend(edge, checker) {
+            true => Ok(self.add_edge_unsafe(edge)),
             false => Err(EdgeInsertationError),
         }
     }
@@ -451,7 +458,7 @@ mod tests {
     fn test_single_road() {
         let mut graph = RoadGraph::default();
         let p = path(h(0, 0), h(1, 0));
-        graph.add_edge(&p);
+        graph.add_edge_unsafe(&p);
 
         assert_eq!(graph.find_longest_trail_length(), 1);
         assert_eq!(graph.find_longest_trail(), vec![p]);
@@ -466,8 +473,8 @@ mod tests {
         let p1 = path(h(0, 0), h(1, 0));
         let p2 = path(h(1, -1), h(1, 0));
 
-        graph.add_edge(&p1);
-        graph.add_edge(&p2);
+        graph.add_edge_unsafe(&p1);
+        graph.add_edge_unsafe(&p2);
 
         assert_eq!(graph.find_longest_trail_length(), 2);
         let longest = graph.find_longest_trail();
@@ -485,9 +492,9 @@ mod tests {
         let p2 = path(h(2, 0), h(3, 0));
         let p3 = path(h(3, 0), h(2, 1));
 
-        graph.add_edge(&p1);
-        graph.add_edge(&p2);
-        graph.add_edge(&p3);
+        graph.add_edge_unsafe(&p1);
+        graph.add_edge_unsafe(&p2);
+        graph.add_edge_unsafe(&p3);
 
         // Longest component has 2 roads
         assert_eq!(graph.find_longest_trail_length(), 2);
@@ -503,9 +510,9 @@ mod tests {
         let p2 = path(center, h(-1, 0)); // B-C
         let p3 = path(center, h(0, 1)); // B-D
 
-        graph.add_edge(&p1);
-        graph.add_edge(&p2);
-        graph.add_edge(&p3);
+        graph.add_edge_unsafe(&p1);
+        graph.add_edge_unsafe(&p2);
+        graph.add_edge_unsafe(&p3);
 
         // Can only take 2 roads from a star (enter and exit from different arms)
         assert_eq!(graph.find_longest_trail_length(), 2);
@@ -516,7 +523,7 @@ mod tests {
         let mut graph = RoadGraph::default();
 
         for n in h(0, 0).neighbors() {
-            graph.add_edge(&path(h(0, 0), n));
+            graph.add_edge_unsafe(&path(h(0, 0), n));
         }
 
         assert_eq!(graph.find_longest_trail_length(), 6);
@@ -527,7 +534,7 @@ mod tests {
         let mut graph = RoadGraph::default();
 
         for n in h(0, 0).neighbors() {
-            graph.add_edge(&path(h(0, 0), n));
+            graph.add_edge_unsafe(&path(h(0, 0), n));
         }
 
         let blocker = path(h(0, 0), h(1, 0)).intersections()[0];
@@ -544,9 +551,9 @@ mod tests {
         let p4 = path(h(1, -1), h(1, -2));
 
         for path in intersection(h(0, 0), h(0, -1), h(1, -1)).paths() {
-            graph.add_edge(&path);
+            graph.add_edge_unsafe(&path);
         }
-        graph.add_edge(&p4);
+        graph.add_edge_unsafe(&p4);
 
         // Longest: A-B-C-D or D-C-B-E (length 3)
         assert_eq!(graph.find_longest_trail_length(), 3);
@@ -562,7 +569,7 @@ mod tests {
         ];
 
         for road in roads.iter().cloned() {
-            graph.add_edge(&road);
+            graph.add_edge_unsafe(&road);
         }
 
         let iter_roads: Vec<Path> = graph.iter().map(|r| r.pos).collect();
@@ -584,9 +591,9 @@ mod tests {
         let p2 = path(h(2, 0), h(3, 0));
         let p3 = path(h(3, 0), h(2, 1));
 
-        graph.add_edge(&p1);
-        graph.add_edge(&p2);
-        graph.add_edge(&p3);
+        graph.add_edge_unsafe(&p1);
+        graph.add_edge_unsafe(&p2);
+        graph.add_edge_unsafe(&p3);
 
         // Get any intersection from p1 to start component collection
         let [v1_start, _] = p1.intersections();
@@ -650,7 +657,7 @@ mod tests {
         ];
 
         for road in roads.iter().cloned() {
-            graph.add_edge(&road);
+            graph.add_edge_unsafe(&road);
         }
 
         // Verify internal structure
