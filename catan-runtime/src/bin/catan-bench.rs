@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use catan_agents::{greedy::GreedyAgent, lazy::LazyAgent};
+use catan_agents::{greedy::GreedyAgent, lazy::LazyAgent, random::RandomAgent};
 use catan_core::{
     agent::Agent,
     gameplay::game::{
@@ -262,10 +262,11 @@ fn validate_benchmark_config(config: &MatchConfig) -> Result<(), String> {
     if config
         .players
         .iter()
-        .any(|player| matches!(player, PlayerConfig::Cli | PlayerConfig::Random))
+        .any(|player| matches!(player, PlayerConfig::Cli))
     {
         return Err(
-            "benchmark runner currently supports only lazy and greedy in-process agents".to_owned(),
+            "benchmark runner currently supports only lazy, greedy, and random in-process agents"
+                .to_owned(),
         );
     }
     Ok(())
@@ -276,7 +277,7 @@ fn run_one_game(
     seed: u64,
     max_turns_override: Option<u64>,
 ) -> Result<GameOutcome, String> {
-    let mut agents = build_agents(&config.players);
+    let mut agents = build_agents(&config.players, seed);
     let init_state = build_initial_state(&config.field, seed);
     let state = GameController::init(init_state, &mut agents);
     let mut controller = GameController::new(state, agents);
@@ -296,18 +297,28 @@ fn run_one_game(
     })
 }
 
-fn build_agents(players: &[PlayerConfig]) -> Vec<Box<dyn Agent>> {
+fn build_agents(players: &[PlayerConfig], seed: u64) -> Vec<Box<dyn Agent>> {
     players
         .iter()
         .enumerate()
         .map(|(id, player)| match player {
             PlayerConfig::Lazy => Box::new(LazyAgent::new(id)) as Box<dyn Agent>,
             PlayerConfig::Greedy => Box::new(GreedyAgent::new(id)) as Box<dyn Agent>,
-            PlayerConfig::Cli | PlayerConfig::Random => {
+            PlayerConfig::Random => {
+                Box::new(RandomAgent::with_seed(id, agent_seed(seed, id))) as Box<dyn Agent>
+            }
+            PlayerConfig::Cli => {
                 unreachable!("unsupported agents are rejected during validation")
             }
         })
         .collect()
+}
+
+fn agent_seed(game_seed: u64, player_id: usize) -> u64 {
+    game_seed
+        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        .wrapping_add((player_id as u64).wrapping_mul(0xBF58_476D_1CE4_E5B9))
+        .wrapping_add(0x94D0_49BB_1331_11EB)
 }
 
 fn build_initial_state(config: &FieldConfig, seed: u64) -> GameInitializationState {
@@ -455,6 +466,33 @@ mod tests {
                 .join("data/configurations/greedy_brawl.json"),
         )
         .unwrap()
+    }
+
+    fn random_brawl_config() -> MatchConfig {
+        load_config(
+            &PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("data/configurations/random_brawl.json"),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn benchmark_config_accepts_random_agents() {
+        let config = random_brawl_config();
+
+        validate_benchmark_config(&config).unwrap();
+        assert_eq!(build_agents(&config.players, 0).len(), config.players.len());
+    }
+
+    #[test]
+    fn random_brawl_same_seed_produces_same_short_run_result_and_stats() {
+        let config = random_brawl_config();
+
+        let first = run_one_game(&config, 42, Some(5)).unwrap();
+        let second = run_one_game(&config, 42, Some(5)).unwrap();
+
+        assert_eq!(first.result, second.result);
+        assert_eq!(first.stats, second.stats);
     }
 
     #[test]

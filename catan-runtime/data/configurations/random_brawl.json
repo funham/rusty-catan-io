@@ -1,0 +1,12 @@
+{
+  "players": [
+    { "kind": "random" },
+    { "kind": "random" },
+    { "kind": "random" },
+    { "kind": "random" }
+  ],
+  "observers": [],
+  "field": { "kind": "default" },
+  "dice": { "kind": "random" },
+  "limits": { "max_turns": 500 }
+}

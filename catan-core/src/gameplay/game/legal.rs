@@ -101,9 +101,16 @@ pub fn legal_builds(context: &PlayerDecisionContext<'_>, class: BuildClass) -> V
 }
 
 pub fn legal_city_spots(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> Vec<Build> {
+    legal_city_spots_iter(context, player_id).collect()
+}
+
+pub fn legal_city_spots_iter<'a>(
+    context: &'a PlayerDecisionContext<'_>,
+    player_id: PlayerId,
+) -> Box<dyn Iterator<Item = Build> + 'a> {
     if context.search.is_none() {
         log::debug!("legal city spots require search context");
-        return Vec::new();
+        return Box::new(std::iter::empty());
     }
     if !context
         .private
@@ -111,26 +118,27 @@ pub fn legal_city_spots(context: &PlayerDecisionContext<'_>, player_id: PlayerId
         .has_enough(&EstablishmentType::City.cost())
         || context.public.builds.by_player(player_id).cities_count() >= PlayerBuildData::CITY_LIMIT
     {
-        return Vec::new();
+        return Box::new(std::iter::empty());
     }
 
-    context
-        .public
-        .builds
-        .by_player(player_id)
-        .establishments
-        .iter()
-        .copied()
-        .filter(|est| est.stage == EstablishmentType::Settlement)
-        .map(|est| {
-            #[cfg(feature = "bench-counters")]
-            counters::city_candidate();
-            Build::Establishment(Establishment {
-                pos: est.pos,
-                stage: EstablishmentType::City,
-            })
-        })
-        .collect()
+    Box::new(
+        context
+            .public
+            .builds
+            .by_player(player_id)
+            .establishments
+            .iter()
+            .copied()
+            .filter(|est| est.stage == EstablishmentType::Settlement)
+            .map(|est| {
+                #[cfg(feature = "bench-counters")]
+                counters::city_candidate();
+                Build::Establishment(Establishment {
+                    pos: est.pos,
+                    stage: EstablishmentType::City,
+                })
+            }),
+    )
 }
 
 pub fn legal_city_spots_count(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> usize {
@@ -171,32 +179,40 @@ pub fn legal_settlement_spots(
     context: &PlayerDecisionContext<'_>,
     player_id: PlayerId,
 ) -> Vec<Build> {
+    legal_settlement_spots_iter(context, player_id).collect()
+}
+
+pub fn legal_settlement_spots_iter<'a>(
+    context: &'a PlayerDecisionContext<'_>,
+    player_id: PlayerId,
+) -> Box<dyn Iterator<Item = Build> + 'a> {
     if !can_search_settlement_with_resources(context, player_id, context.private.resources) {
-        return Vec::new();
+        return Box::new(std::iter::empty());
     }
 
-    context
-        .public
-        .board
-        .intersections()
-        .iter()
-        .copied()
-        .filter(|&pos| {
-            #[cfg(feature = "bench-counters")]
-            counters::settlement_candidate();
-            context
-                .public
-                .builds
-                .can_place_settlement(player_id, pos)
-                .is_ok()
-        })
-        .map(|pos| {
-            Build::Establishment(Establishment {
-                pos,
-                stage: EstablishmentType::Settlement,
+    Box::new(
+        context
+            .public
+            .board
+            .intersections()
+            .iter()
+            .copied()
+            .filter(move |&pos| {
+                #[cfg(feature = "bench-counters")]
+                counters::settlement_candidate();
+                context
+                    .public
+                    .builds
+                    .can_place_settlement(player_id, pos)
+                    .is_ok()
             })
-        })
-        .collect()
+            .map(|pos| {
+                Build::Establishment(Establishment {
+                    pos,
+                    stage: EstablishmentType::Settlement,
+                })
+            }),
+    )
 }
 
 pub fn legal_settlement_spots_count(
@@ -221,7 +237,7 @@ pub fn legal_settlement_spots_count_with_resources(
         .intersections()
         .iter()
         .copied()
-        .filter(|&pos| {
+        .filter(move |&pos| {
             #[cfg(feature = "bench-counters")]
             counters::settlement_candidate();
             context
@@ -249,7 +265,7 @@ pub fn legal_settlement_spots_count_with_extra_road(
         .intersections()
         .iter()
         .copied()
-        .filter(|&pos| {
+        .filter(move |&pos| {
             #[cfg(feature = "bench-counters")]
             counters::settlement_candidate();
             context
@@ -262,23 +278,31 @@ pub fn legal_settlement_spots_count_with_extra_road(
 }
 
 pub fn legal_road_spots(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> Vec<Build> {
+    legal_road_spots_iter(context, player_id).collect()
+}
+
+pub fn legal_road_spots_iter<'a>(
+    context: &'a PlayerDecisionContext<'_>,
+    player_id: PlayerId,
+) -> Box<dyn Iterator<Item = Build> + 'a> {
     if !can_search_road_with_resources(context, player_id, context.private.resources) {
-        return Vec::new();
+        return Box::new(std::iter::empty());
     }
 
-    context
-        .public
-        .board
-        .paths()
-        .iter()
-        .copied()
-        .filter(|&pos| {
-            #[cfg(feature = "bench-counters")]
-            counters::road_candidate();
-            context.public.builds.can_place_road(player_id, pos).is_ok()
-        })
-        .map(|pos| Build::Road(Road { pos }))
-        .collect()
+    Box::new(
+        context
+            .public
+            .board
+            .paths()
+            .iter()
+            .copied()
+            .filter(move |&pos| {
+                #[cfg(feature = "bench-counters")]
+                counters::road_candidate();
+                context.public.builds.can_place_road(player_id, pos).is_ok()
+            })
+            .map(|pos| Build::Road(Road { pos })),
+    )
 }
 
 pub fn legal_road_spots_count(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> usize {
@@ -383,61 +407,94 @@ pub fn can_buy_city(context: &PlayerDecisionContext<'_>) -> bool {
 }
 
 pub fn legal_dev_card_usages(context: &PlayerDecisionContext<'_>) -> Vec<DevCardUsage> {
+    legal_dev_card_usages_iter(context).collect()
+}
+
+pub fn legal_dev_card_usages_iter<'a>(
+    context: &'a PlayerDecisionContext<'_>,
+) -> Box<dyn Iterator<Item = DevCardUsage> + 'a> {
     let Some(search) = &context.search else {
         log::debug!("legal development card usages require search context");
-        return Vec::new();
+        return Box::new(std::iter::empty());
     };
 
-    let state = search.make_owned().state;
+    let state = search.state();
     let active = context.private.dev_cards.active;
-    let mut candidates = Vec::new();
 
-    if active.contains(UsableDevCard::Knight) {
-        for rob_hex in context.public.board.arrangement.hex_iter() {
-            if rob_hex == context.public.board_state.robber_pos {
-                continue;
-            }
-
-            let robbed_candidates = legal_rob_targets(context, rob_hex);
-
-            match robbed_candidates.as_slice() {
-                [] => candidates.push(DevCardUsage::Knight {
-                    rob_hex,
-                    robbed_id: None,
-                }),
-                ids => candidates.extend(ids.iter().map(|robbed_id| DevCardUsage::Knight {
-                    rob_hex,
-                    robbed_id: Some(*robbed_id),
-                })),
-            }
-        }
-    }
-
-    if active.contains(UsableDevCard::YearOfPlenty) {
-        for first in Resource::iter() {
-            for second in Resource::iter() {
-                candidates.push(DevCardUsage::YearOfPlenty([first, second]));
-            }
-        }
-    }
-
-    if active.contains(UsableDevCard::Monopoly) {
-        candidates.extend(Resource::iter().into_iter().map(DevCardUsage::Monopoly));
-    }
-
-    if active.contains(UsableDevCard::RoadBuild) {
-        candidates.extend(legal_roadbuild_usages(context));
-    }
-
-    candidates
-        .into_iter()
-        .filter(|usage| {
-            #[cfg(feature = "bench-counters")]
-            counters::dev_card_candidate();
-            let mut state = state.clone();
-            state.use_dev_card(*usage, context.actor).is_ok()
+    let knight = active
+        .contains(UsableDevCard::Knight)
+        .then(move || {
+            context
+                .public
+                .board
+                .arrangement
+                .hex_iter()
+                .filter(|rob_hex| *rob_hex != context.public.board_state.robber_pos)
+                .flat_map(|rob_hex| {
+                    let robbed_candidates = legal_rob_targets(context, rob_hex);
+                    if robbed_candidates.is_empty() {
+                        vec![DevCardUsage::Knight {
+                            rob_hex,
+                            robbed_id: None,
+                        }]
+                    } else {
+                        robbed_candidates
+                            .into_iter()
+                            .map(|robbed_id| DevCardUsage::Knight {
+                                rob_hex,
+                                robbed_id: Some(robbed_id),
+                            })
+                            .collect()
+                    }
+                })
         })
-        .collect()
+        .into_iter()
+        .flatten();
+
+    let year_of_plenty = active
+        .contains(UsableDevCard::YearOfPlenty)
+        .then(move || {
+            Resource::iter().flat_map(move |first| {
+                Resource::iter().filter_map(move |second| {
+                    let requested = [first, second].into_iter().fold(
+                        ResourceCollection::default(),
+                        |mut acc, resource| {
+                            acc += &resource.into();
+                            acc
+                        },
+                    );
+                    state
+                        .bank
+                        .can_pay(&requested)
+                        .then_some(DevCardUsage::YearOfPlenty([first, second]))
+                })
+            })
+        })
+        .into_iter()
+        .flatten();
+
+    let monopoly = active
+        .contains(UsableDevCard::Monopoly)
+        .then(|| Resource::iter().map(DevCardUsage::Monopoly))
+        .into_iter()
+        .flatten();
+
+    let roadbuild = active
+        .contains(UsableDevCard::RoadBuild)
+        .then(|| legal_roadbuild_usages_iter(context))
+        .into_iter()
+        .flatten();
+
+    Box::new(
+        knight
+            .chain(year_of_plenty)
+            .chain(monopoly)
+            .chain(roadbuild)
+            .inspect(|_| {
+                #[cfg(feature = "bench-counters")]
+                counters::dev_card_candidate();
+            }),
+    )
 }
 
 pub fn first_legal_dev_card_usage(context: &PlayerDecisionContext<'_>) -> Option<DevCardUsage> {
@@ -493,10 +550,6 @@ pub fn first_legal_dev_card_usage(context: &PlayerDecisionContext<'_>) -> Option
     }
 
     None
-}
-
-fn legal_roadbuild_usages(context: &PlayerDecisionContext<'_>) -> Vec<DevCardUsage> {
-    legal_roadbuild_usages_iter(context).collect()
 }
 
 pub fn legal_roadbuild_usages_iter<'a>(
@@ -653,6 +706,60 @@ pub fn legal_bank_trades(context: &PlayerDecisionContext<'_>) -> Vec<BankTrade> 
     result
 }
 
+pub fn legal_bank_trade_count(context: &PlayerDecisionContext<'_>) -> usize {
+    let mut count = resource_trades_count_at_rate(context, Resource::iter(), 4);
+
+    for port in context.public.ports_aquired_for(context.actor) {
+        count += match port {
+            PortKind::Special(resource) => {
+                resource_trades_count_at_rate(context, std::iter::once(*resource), 2)
+            }
+            PortKind::Universal => resource_trades_count_at_rate(context, Resource::iter(), 3),
+        };
+    }
+
+    count
+}
+
+pub fn legal_bank_trade_at(
+    context: &PlayerDecisionContext<'_>,
+    mut index: usize,
+) -> Option<BankTrade> {
+    if let Some(trade) = resource_trade_at_rate(
+        context,
+        BankTradeKind::BankGeneric,
+        Resource::iter(),
+        4,
+        &mut index,
+    ) {
+        return Some(trade);
+    }
+
+    for port in context.public.ports_aquired_for(context.actor) {
+        let trade = match port {
+            PortKind::Special(resource) => resource_trade_at_rate(
+                context,
+                BankTradeKind::PortSpecific,
+                std::iter::once(*resource),
+                2,
+                &mut index,
+            ),
+            PortKind::Universal => resource_trade_at_rate(
+                context,
+                BankTradeKind::PortGeneric,
+                Resource::iter(),
+                3,
+                &mut index,
+            ),
+        };
+        if trade.is_some() {
+            return trade;
+        }
+    }
+
+    None
+}
+
 fn resource_trades_at_rate(
     context: &PlayerDecisionContext<'_>,
     kind: BankTradeKind,
@@ -671,49 +778,150 @@ fn resource_trades_at_rate(
         .collect()
 }
 
+fn resource_trades_count_at_rate(
+    context: &PlayerDecisionContext<'_>,
+    give_candidates: impl IntoIterator<Item = Resource>,
+    rate: u16,
+) -> usize {
+    give_candidates
+        .into_iter()
+        .filter(|give| context.private.resources.has_enough(&(*give, rate).into()))
+        .map(|_| Resource::LIST.len() - 1)
+        .sum()
+}
+
+fn resource_trade_at_rate(
+    context: &PlayerDecisionContext<'_>,
+    kind: BankTradeKind,
+    give_candidates: impl IntoIterator<Item = Resource>,
+    rate: u16,
+    index: &mut usize,
+) -> Option<BankTrade> {
+    for give in give_candidates
+        .into_iter()
+        .filter(|give| context.private.resources.has_enough(&(*give, rate).into()))
+    {
+        for take in Resource::iter().filter(|take| *take != give) {
+            if *index == 0 {
+                return Some(BankTrade { give, take, kind });
+            }
+            *index -= 1;
+        }
+    }
+
+    None
+}
+
 pub fn legal_trades(context: &PlayerDecisionContext<'_>) -> impl IntoIterator<Item = BankTrade> {
     legal_bank_trades(context)
 }
 
 pub fn legal_regular_actions(context: &PlayerDecisionContext<'_>) -> Vec<RegularAction> {
-    let mut result = Vec::new();
-    result.push(RegularAction::EndMove);
+    legal_regular_actions_iter(context).collect()
+}
+
+pub fn legal_regular_action_count(context: &PlayerDecisionContext<'_>) -> usize {
+    let mut count = 1;
 
     if can_buy_dev_card(context) {
-        result.push(RegularAction::BuyDevCard);
+        count += 1;
+    }
+    if can_buy_road(context) {
+        count += legal_road_spots_count(context, context.actor);
+    }
+    if can_buy_settlement(context) {
+        count += legal_settlement_spots_count(context, context.actor);
+    }
+    if can_buy_city(context) {
+        count += legal_city_spots_count(context, context.actor);
+    }
+    count += legal_bank_trade_count(context);
+
+    count
+}
+
+pub fn legal_regular_action_at(
+    context: &PlayerDecisionContext<'_>,
+    mut index: usize,
+) -> Option<RegularAction> {
+    if index == 0 {
+        return Some(RegularAction::EndMove);
+    }
+    index -= 1;
+
+    if can_buy_dev_card(context) {
+        if index == 0 {
+            return Some(RegularAction::BuyDevCard);
+        }
+        index -= 1;
     }
 
     if can_buy_road(context) {
-        result.extend(
-            legal_road_spots(context, context.actor)
-                .into_iter()
-                .map(RegularAction::Build),
-        );
+        let count = legal_road_spots_count(context, context.actor);
+        if index < count {
+            return legal_road_spots_iter(context, context.actor)
+                .nth(index)
+                .map(RegularAction::Build);
+        }
+        index -= count;
     }
 
     if can_buy_settlement(context) {
-        result.extend(
-            legal_settlement_spots(context, context.actor)
-                .into_iter()
-                .map(RegularAction::Build),
-        );
+        let count = legal_settlement_spots_count(context, context.actor);
+        if index < count {
+            return legal_settlement_spots_iter(context, context.actor)
+                .nth(index)
+                .map(RegularAction::Build);
+        }
+        index -= count;
     }
 
     if can_buy_city(context) {
-        result.extend(
-            legal_city_spots(context, context.actor)
-                .into_iter()
-                .map(RegularAction::Build),
-        );
+        let count = legal_city_spots_count(context, context.actor);
+        if index < count {
+            return legal_city_spots_iter(context, context.actor)
+                .nth(index)
+                .map(RegularAction::Build);
+        }
+        index -= count;
     }
 
-    result.extend(
-        legal_bank_trades(context)
-            .into_iter()
-            .map(RegularAction::TradeWithBank),
-    );
+    legal_bank_trade_at(context, index).map(RegularAction::TradeWithBank)
+}
 
-    result
+pub fn legal_regular_actions_iter<'a>(
+    context: &'a PlayerDecisionContext<'_>,
+) -> Box<dyn Iterator<Item = RegularAction> + 'a> {
+    let buy_dev = can_buy_dev_card(context)
+        .then_some(RegularAction::BuyDevCard)
+        .into_iter();
+    let roads = can_buy_road(context)
+        .then(|| legal_road_spots_iter(context, context.actor))
+        .into_iter()
+        .flatten()
+        .map(RegularAction::Build);
+    let settlements = can_buy_settlement(context)
+        .then(|| legal_settlement_spots_iter(context, context.actor))
+        .into_iter()
+        .flatten()
+        .map(RegularAction::Build);
+    let cities = can_buy_city(context)
+        .then(|| legal_city_spots_iter(context, context.actor))
+        .into_iter()
+        .flatten()
+        .map(RegularAction::Build);
+    let bank_trades = legal_bank_trades(context)
+        .into_iter()
+        .map(RegularAction::TradeWithBank);
+
+    Box::new(
+        std::iter::once(RegularAction::EndMove)
+            .chain(buy_dev)
+            .chain(roads)
+            .chain(settlements)
+            .chain(cities)
+            .chain(bank_trades),
+    )
 }
 
 pub fn legal_regular_action(context: &PlayerDecisionContext<'_>) -> Vec<RegularAction> {
@@ -1005,6 +1213,24 @@ mod tests {
         values
     }
 
+    fn sorted_regular_debug(actions: Vec<RegularAction>) -> Vec<String> {
+        let mut values = actions
+            .into_iter()
+            .map(|action| format!("{action:?}"))
+            .collect::<Vec<_>>();
+        values.sort();
+        values
+    }
+
+    fn sorted_dev_usage_debug(usages: Vec<DevCardUsage>) -> Vec<String> {
+        let mut values = usages
+            .into_iter()
+            .map(|usage| format!("{usage:?}"))
+            .collect::<Vec<_>>();
+        values.sort();
+        values
+    }
+
     #[test]
     fn direct_legal_build_spots_match_clone_apply_generation() {
         let mut state = initialized_state();
@@ -1045,6 +1271,85 @@ mod tests {
             assert_eq!(
                 legal_road_spots_count(&context, 0),
                 clone_apply_road_spots(&context, 0).len()
+            );
+        });
+    }
+
+    #[test]
+    fn lazy_regular_action_iterator_matches_eager_actions() {
+        let mut state = initialized_state();
+        state
+            .transfer_from_bank(
+                ResourceCollection {
+                    brick: 5,
+                    wood: 5,
+                    wheat: 5,
+                    sheep: 5,
+                    ore: 5,
+                },
+                0,
+            )
+            .expect("bank should fund test player");
+
+        with_decision_context(&state, 0, |context| {
+            assert_eq!(
+                sorted_regular_debug(legal_regular_actions(&context)),
+                sorted_regular_debug(legal_regular_actions_iter(&context).collect())
+            );
+        });
+    }
+
+    #[test]
+    fn indexed_regular_action_lookup_matches_eager_order() {
+        let mut state = initialized_state();
+        state
+            .transfer_from_bank(
+                ResourceCollection {
+                    brick: 5,
+                    wood: 5,
+                    wheat: 5,
+                    sheep: 5,
+                    ore: 5,
+                },
+                0,
+            )
+            .expect("bank should fund test player");
+
+        with_decision_context(&state, 0, |context| {
+            let expected = legal_regular_actions(&context);
+
+            assert_eq!(legal_regular_action_count(&context), expected.len());
+            for (index, expected_action) in expected.into_iter().enumerate() {
+                assert_eq!(
+                    legal_regular_action_at(&context, index).map(|action| format!("{action:?}")),
+                    Some(format!("{expected_action:?}")),
+                    "index {index}"
+                );
+            }
+            assert!(legal_regular_action_at(&context, usize::MAX).is_none());
+        });
+    }
+
+    #[test]
+    fn lazy_dev_card_usage_iterator_matches_eager_usages() {
+        let mut state = initialized_state();
+        for kind in [
+            UsableDevCard::Knight,
+            UsableDevCard::YearOfPlenty,
+            UsableDevCard::RoadBuild,
+            UsableDevCard::Monopoly,
+        ] {
+            state
+                .players
+                .get_mut(0)
+                .dev_cards_add(DevCardKind::Usable(kind));
+        }
+        state.players.get_mut(0).dev_cards_reset_queue();
+
+        with_decision_context(&state, 0, |context| {
+            assert_eq!(
+                sorted_dev_usage_debug(legal_dev_card_usages(&context)),
+                sorted_dev_usage_debug(legal_dev_card_usages_iter(&context).collect())
             );
         });
     }
