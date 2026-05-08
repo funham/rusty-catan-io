@@ -366,7 +366,7 @@ impl CliUi {
         self.overlay.preview = vec![FieldPreview::Establishment {
             player_id: actor,
             establishment: Establishment {
-                pos: settlement_pos,
+                vtx: settlement_pos,
                 stage: EstablishmentType::Settlement,
             },
         }];
@@ -375,9 +375,9 @@ impl CliUi {
         let mut selected = 0;
         loop {
             let road = roads[selected];
-            self.overlay.selected = Some(FieldSelection::Path(road.pos));
+            self.overlay.selected = Some(FieldSelection::Path(road.path));
             self.overlay.status = SelectionStatus::Available;
-            self.draw(Some(model), prompt, &path_label(road.pos))?;
+            self.draw(Some(model), prompt, &path_label(road.path))?;
             if let CrosstermEvent::Key(key) = event::read()?
                 && key.kind == KeyEventKind::Press
             {
@@ -418,9 +418,9 @@ impl CliUi {
         loop {
             let build = builds[selected];
             self.overlay.selected = Some(match build {
-                Build::Road(road) => FieldSelection::Path(road.pos),
+                Build::Road(road) => FieldSelection::Path(road.path),
                 Build::Establishment(establishment) => {
-                    FieldSelection::Intersection(establishment.pos)
+                    FieldSelection::Intersection(establishment.vtx)
                 }
             });
             self.overlay.status = SelectionStatus::Available;

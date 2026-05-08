@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     agent::action::RegularAction,
     common::SmallSet,
+    constants::costs,
     gameplay::{
         game::view::{PlayerDecisionContext, PublicPlayerResources},
         primitives::{
@@ -12,7 +13,7 @@ use crate::{
             },
             dev_card::{DevCardUsage, UsableDevCard},
             player::PlayerId,
-            resource::{HasCost, Resource, ResourceCollection},
+            resource::{Resource, ResourceCollection},
             trade::{BankTrade, BankTradeKind},
         },
     },
@@ -112,10 +113,7 @@ pub fn legal_city_spots_iter<'a>(
         log::debug!("legal city spots require search context");
         return Box::new(std::iter::empty());
     }
-    if !context
-        .private
-        .resources
-        .has_enough(&EstablishmentType::City.cost())
+    if !context.private.resources.has_enough(&costs::CITY)
         || context.public.builds.by_player(player_id).cities_count() >= PlayerBuildData::CITY_LIMIT
     {
         return Box::new(std::iter::empty());
@@ -134,7 +132,7 @@ pub fn legal_city_spots_iter<'a>(
                 #[cfg(feature = "bench-counters")]
                 counters::city_candidate();
                 Build::Establishment(Establishment {
-                    pos: est.pos,
+                    vtx: est.vtx,
                     stage: EstablishmentType::City,
                 })
             }),
@@ -154,7 +152,7 @@ pub fn legal_city_spots_count_with_resources(
         log::debug!("legal city spots require search context");
         return 0;
     }
-    if !resources.has_enough(&EstablishmentType::City.cost())
+    if !resources.has_enough(&costs::CITY)
         || context.public.builds.by_player(player_id).cities_count() >= PlayerBuildData::CITY_LIMIT
     {
         return 0;
@@ -208,7 +206,7 @@ pub fn legal_settlement_spots_iter<'a>(
             })
             .map(|pos| {
                 Build::Establishment(Establishment {
-                    pos,
+                    vtx: pos,
                     stage: EstablishmentType::Settlement,
                 })
             }),
@@ -299,7 +297,7 @@ pub fn legal_road_spots_iter<'a>(
                 #[cfg(feature = "bench-counters")]
                 counters::road_candidate();
             })
-            .map(|pos| Build::Road(Road { pos })),
+            .map(|pos| Build::Road(Road { path: pos })),
     )
 }
 
@@ -1027,7 +1025,10 @@ mod tests {
 
         for pos in init.board.arrangement.paths() {
             let mut candidate = builds.clone();
-            if candidate.try_build(0, Build::Road(Road { pos })).is_err() {
+            if candidate
+                .try_build(0, Build::Road(Road { path: pos }))
+                .is_err()
+            {
                 continue;
             }
             if let Some(found) = find_builds_with_legal_settlement(init, candidate, depth - 1) {
@@ -1049,7 +1050,7 @@ mod tests {
                     .try_build(
                         0,
                         Build::Establishment(Establishment {
-                            pos,
+                            vtx: pos,
                             stage: EstablishmentType::Settlement,
                         }),
                     )
@@ -1151,7 +1152,7 @@ mod tests {
             .filter(|est| est.stage == EstablishmentType::Settlement)
             .map(|est| {
                 Build::Establishment(Establishment {
-                    pos: est.pos,
+                    vtx: est.vtx,
                     stage: EstablishmentType::City,
                 })
             })
@@ -1179,7 +1180,7 @@ mod tests {
             .into_iter()
             .map(|pos| {
                 Build::Establishment(Establishment {
-                    pos,
+                    vtx: pos,
                     stage: EstablishmentType::Settlement,
                 })
             })
@@ -1205,7 +1206,7 @@ mod tests {
             .arrangement
             .paths()
             .into_iter()
-            .map(|pos| Build::Road(Road { pos }))
+            .map(|pos| Build::Road(Road { path: pos }))
             .filter(|build| {
                 let mut state = seed.state.clone();
                 state.build(player_id, *build).is_ok()
@@ -1533,11 +1534,11 @@ mod tests {
         let context = factory.player_decision_context(0, None);
         let legal = legal_initial_placements(&context)
             .into_iter()
-            .map(|(settlement, _)| settlement.pos)
+            .map(|(settlement, _)| settlement.vtx)
             .collect::<std::collections::BTreeSet<_>>();
 
-        assert!(!legal.contains(&settlement.pos));
-        for neighbor in settlement.pos.neighbors() {
+        assert!(!legal.contains(&settlement.vtx));
+        for neighbor in settlement.vtx.neighbors() {
             assert!(!legal.contains(&neighbor));
         }
     }
@@ -1557,9 +1558,9 @@ mod tests {
 
         assert!(!placements.is_empty());
         assert!(placements.iter().all(|(settlement, road)| {
-            road.pos
+            road.path
                 .intersections_iter()
-                .any(|intersection| intersection == settlement.pos)
+                .any(|intersection| intersection == settlement.vtx)
         }));
     }
 
@@ -1586,14 +1587,14 @@ mod tests {
                 path.intersections_iter()
                     .any(|intersection| intersection == settlement_pos)
             })
-            .map(|pos| Road { pos })
+            .map(|pos| Road { path: pos })
             .expect("port settlement should have adjacent road");
         init.builds
             .try_init_place(
                 0,
                 road,
                 Establishment {
-                    pos: settlement_pos,
+                    vtx: settlement_pos,
                     stage: EstablishmentType::Settlement,
                 },
             )
@@ -1738,7 +1739,7 @@ mod tests {
         for first in paths.iter().copied() {
             let mut builds_after_first = state.builds.clone();
             if builds_after_first
-                .try_build(0, Build::Road(Road { pos: first }))
+                .try_build(0, Build::Road(Road { path: first }))
                 .is_err()
             {
                 continue;
@@ -1747,7 +1748,7 @@ mod tests {
             for second in paths.iter().copied() {
                 let mut builds_after_second = builds_after_first.clone();
                 if builds_after_second
-                    .try_build(0, Build::Road(Road { pos: second }))
+                    .try_build(0, Build::Road(Road { path: second }))
                     .is_ok()
                 {
                     expected.push([first, second]);

@@ -189,7 +189,7 @@ mod tests {
             if player_id == 1 {
                 let board_hexes = init.board.arrangement.hex_iter().collect::<Vec<_>>();
                 victim_hex =
-                    settlement.pos.as_set().into_iter().find(|hex| {
+                    settlement.vtx.as_set().into_iter().find(|hex| {
                         *hex != init.board_state.robber_pos && board_hexes.contains(hex)
                     });
             }
@@ -321,7 +321,7 @@ mod tests {
             &HostToCli::Event {
                 event: GameEvent::InitialPlacementBuilt {
                     player_id: 0,
-                    settlement: settlement.pos,
+                    settlement: settlement.vtx,
                     road,
                 },
                 view: model,

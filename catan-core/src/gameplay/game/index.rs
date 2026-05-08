@@ -68,7 +68,7 @@ impl GameIndex {
         roads: [Path; 2],
     ) {
         for pos in roads {
-            self.insert_road(player_id, Road { pos });
+            self.insert_road(player_id, Road { path: pos });
         }
         self.refresh_longest_road_length(state, player_id);
         self.longest_road_owner =
@@ -112,7 +112,7 @@ impl GameIndex {
             .builds
             .players_indexed()
             .filter(|(other_id, _)| *other_id != player_id)
-            .flat_map(|(_, player)| player.establishments.iter().map(|build| build.pos))
+            .flat_map(|(_, player)| player.establishments.iter().map(|build| build.vtx))
             .collect()
     }
 
@@ -135,7 +135,7 @@ impl GameIndex {
         let establishments = &mut self.all_builds[player_id].establishments;
         if let Some(existing) = establishments
             .iter_mut()
-            .find(|existing| existing.pos == establishment.pos)
+            .find(|existing| existing.vtx == establishment.vtx)
         {
             *existing = establishment;
         } else if let Err(index) = establishments.binary_search(&establishment) {
@@ -150,7 +150,7 @@ impl GameIndex {
         player_id: PlayerId,
         settlement: Establishment,
     ) {
-        if let Some(port) = state.board.ports_intersection().get(&settlement.pos) {
+        if let Some(port) = state.board.ports_intersection().get(&settlement.vtx) {
             self.ports_aquired[player_id].insert(*port);
         }
     }
@@ -163,7 +163,7 @@ impl GameIndex {
     ) {
         for opponent in 0..state.players.count() {
             if opponent != player_id
-                && Self::player_has_road_touching(state, opponent, settlement.pos)
+                && Self::player_has_road_touching(state, opponent, settlement.vtx)
             {
                 self.refresh_longest_road_length(state, opponent);
             }
@@ -271,7 +271,7 @@ mod tests {
             .neighbors()
             .into_iter()
             .map(|neighbor| Road {
-                pos: path(h(0, 0), neighbor),
+                path: path(h(0, 0), neighbor),
             })
             .collect();
 
@@ -282,7 +282,7 @@ mod tests {
             },
             BuildCollection {
                 establishments: vec![Establishment {
-                    pos: blocker,
+                    vtx: blocker,
                     stage: EstablishmentType::Settlement,
                 }],
                 roads: vec![],
@@ -311,7 +311,7 @@ mod tests {
             .neighbors()
             .into_iter()
             .map(|neighbor| Road {
-                pos: path(h(0, 0), neighbor),
+                path: path(h(0, 0), neighbor),
             })
             .collect::<Vec<_>>();
 
@@ -336,7 +336,7 @@ mod tests {
         let mut incremental = GameIndex::rebuild(&state);
 
         let settlement = Establishment {
-            pos: blocker,
+            vtx: blocker,
             stage: EstablishmentType::Settlement,
         };
         state.builds = BoardBuildData::from_build_collections(vec![
@@ -374,7 +374,7 @@ mod tests {
         let mut state = GameInitializationState::default().finish();
         let mut incremental = GameIndex::rebuild(&state);
         let road = Road {
-            pos: path(h(0, 0), h(1, 0)),
+            path: path(h(0, 0), h(1, 0)),
         };
         let mut builds = empty_build_collections();
         builds[0].roads.push(road);
@@ -396,7 +396,7 @@ mod tests {
             .next()
             .expect("default board has ports");
         let settlement = Establishment {
-            pos,
+            vtx: pos,
             stage: EstablishmentType::Settlement,
         };
         let mut builds = empty_build_collections();
@@ -414,7 +414,7 @@ mod tests {
         let mut state = GameInitializationState::default().finish();
         let pos = path(h(0, 0), h(1, 0)).intersections()[0];
         let settlement = Establishment {
-            pos,
+            vtx: pos,
             stage: EstablishmentType::Settlement,
         };
         let mut builds = empty_build_collections();
@@ -423,7 +423,7 @@ mod tests {
         let mut incremental = GameIndex::rebuild(&state);
 
         let city = Establishment {
-            pos,
+            vtx: pos,
             stage: EstablishmentType::City,
         };
         let mut builds = empty_build_collections();
@@ -441,7 +441,7 @@ mod tests {
         let mut incremental = GameIndex::rebuild(&state);
         let roads = [path(h(0, 0), h(1, 0)), path(h(1, 0), h(1, -1))];
         let mut builds = empty_build_collections();
-        builds[0].roads = roads.into_iter().map(|pos| Road { pos }).collect();
+        builds[0].roads = roads.into_iter().map(|pos| Road { path: pos }).collect();
         state.builds = BoardBuildData::from_build_collections(builds);
 
         incremental.refresh_after_roadbuild(&state, 0, roads);
@@ -460,7 +460,7 @@ mod tests {
             path(h(0, 0), h(-1, 1)),
         ];
         let mut builds = empty_build_collections();
-        builds[0].roads = roads.into_iter().map(|pos| Road { pos }).collect();
+        builds[0].roads = roads.into_iter().map(|pos| Road { path: pos }).collect();
         state.builds = BoardBuildData::from_build_collections(builds);
 
         let mut incremental = GameIndex::rebuild(&state);
@@ -517,7 +517,7 @@ mod tests {
             .into_iter()
             .take(5)
             .map(|neighbor| Road {
-                pos: path(h(0, 0), neighbor),
+                path: path(h(0, 0), neighbor),
             })
             .collect::<Vec<_>>();
         let player_three_roads = h(2, 0)
@@ -525,7 +525,7 @@ mod tests {
             .into_iter()
             .take(5)
             .map(|neighbor| Road {
-                pos: path(h(2, 0), neighbor),
+                path: path(h(2, 0), neighbor),
             })
             .collect::<Vec<_>>();
         let mut builds = empty_build_collections();

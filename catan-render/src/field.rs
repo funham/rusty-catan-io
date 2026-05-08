@@ -246,7 +246,7 @@ impl FieldRenderer {
         for player in &view.builds {
             for road in &player.roads {
                 self.draw_path_attr(
-                    road.pos,
+                    road.path,
                     PathAttr::Road {
                         color: Self::player_color(player.player_id),
                     },
@@ -257,7 +257,7 @@ impl FieldRenderer {
         for player in &view.builds {
             for est in &player.establishments {
                 self.draw_intersection_attr(
-                    est.pos,
+                    est.vtx,
                     IntersectionAttr::Establishment(
                         est.stage,
                         Self::player_color(player.player_id),
@@ -271,7 +271,7 @@ impl FieldRenderer {
         for preview in &overlay.preview {
             if let FieldPreview::Road { player_id, road } = *preview {
                 self.draw_path_attr(
-                    road.pos,
+                    road.path,
                     PathAttr::Road {
                         color: Self::player_color(player_id),
                     },
@@ -285,7 +285,7 @@ impl FieldRenderer {
                     player_id,
                     establishment,
                 } => self.draw_intersection_attr(
-                    establishment.pos,
+                    establishment.vtx,
                     IntersectionAttr::Establishment(
                         establishment.stage,
                         Self::player_color(player_id),
@@ -508,7 +508,7 @@ impl FieldRenderer {
 
 impl From<Road> for FieldSelection {
     fn from(value: Road) -> Self {
-        Self::Path(value.pos)
+        Self::Path(value.path)
     }
 }
 
@@ -586,7 +586,7 @@ mod tests {
         let mut renderer = FieldRenderer::new();
         renderer.draw_game(&view);
 
-        let pos = utils::centered(utils::intersection_anchor(settlement.pos), "(S)");
+        let pos = utils::centered(utils::intersection_anchor(settlement.vtx), "(S)");
         let chars = [0, 1, 2]
             .into_iter()
             .map(|dx| {

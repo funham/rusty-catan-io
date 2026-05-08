@@ -194,7 +194,7 @@ impl LegalDecisionOptions {
         let initial_placements = legal::legal_initial_placements(context)
             .into_iter()
             .map(|(establishment, road)| InitStageAction {
-                establishment_position: establishment.pos,
+                establishment_position: establishment.vtx,
                 road,
             })
             .collect();

@@ -209,7 +209,7 @@ pub fn greedy_init_stage_action(
         .expect("there must be an initial placement");
 
     InitStageAction {
-        establishment_position: establishment.pos,
+        establishment_position: establishment.vtx,
         road,
     }
 }
@@ -251,7 +251,7 @@ fn best_road_build(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> 
         legal::legal_settlement_spots_count_with_extra_road(
             context,
             player_id,
-            road.pos,
+            road.path,
             &resources_after_road,
         )
     })
@@ -363,7 +363,7 @@ fn initial_settlement_resources(
     settlement_resource_scores(
         board,
         Establishment {
-            pos,
+            vtx: pos,
             stage: catan_core::gameplay::primitives::build::EstablishmentType::Settlement,
         },
     )
@@ -377,7 +377,7 @@ fn settlement_resource_scores(
     establishment: Establishment,
 ) -> Vec<(Resource, u16)> {
     establishment
-        .pos
+        .vtx
         .as_arr()
         .into_iter()
         .filter(|hex| hex.norm() <= board.arrangement.radius() as usize)

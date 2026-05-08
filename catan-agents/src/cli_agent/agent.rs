@@ -67,7 +67,7 @@ impl PlayerRuntime for CliAgent {
         InitStageAction {
             establishment_position: TerminalUi::read_intersection("settlement (h1 h2 h3): "),
             road: Road {
-                pos: TerminalUi::read_path("road (h1 h2): "),
+                path: TerminalUi::read_path("road (h1 h2): "),
             },
         }
     }
@@ -180,7 +180,7 @@ impl TerminalUi {
                     HexIndex::spiral_to_hex(h2.parse().ok()?),
                 ))
                 .ok()?;
-                Some(Build::Road(Road { pos: path }))
+                Some(Build::Road(Road { path }))
             }
             ["build", "settlement", h1, h2, h3] => {
                 let pos = Intersection::try_from([
@@ -190,7 +190,7 @@ impl TerminalUi {
                 ])
                 .ok()?;
                 Some(Build::Establishment(Establishment {
-                    pos,
+                    vtx: pos,
                     stage: EstablishmentType::Settlement,
                 }))
             }
@@ -202,7 +202,7 @@ impl TerminalUi {
                 ])
                 .ok()?;
                 Some(Build::Establishment(Establishment {
-                    pos,
+                    vtx: pos,
                     stage: EstablishmentType::City,
                 }))
             }

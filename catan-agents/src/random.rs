@@ -114,7 +114,7 @@ pub fn rand_init_stage_action(
         .clone();
 
     InitStageAction {
-        establishment_position: establishment.pos,
+        establishment_position: establishment.vtx,
         road,
     }
 }

@@ -19,10 +19,7 @@ use crate::{
     gameplay::{
         constants::capacities::PLAYER_ESTABLISHMENTS_INLINE,
         field::state::{BoardLayout, BuildCollection},
-        primitives::{
-            player::PlayerId,
-            resource::{HasCost, ResourceCollection},
-        },
+        primitives::player::PlayerId,
     },
     topology::{
         HasPos, Hex, Intersection, Path,
@@ -52,16 +49,9 @@ pub mod builds {
 
     /// Trait for objects that occupy intersections on the board.
     /// Used by placement logic.
-    pub trait Occupying {
+    pub trait OccupyIntersection {
         fn occupancy(&self) -> IntersectionOccupancy;
     }
-
-    /// Marker trait for objects that can be built.
-    /// Requires both a position (`HasPos`) and an occupancy definition.
-    // pub trait Buildable: HasPos + Occupying {}
-
-    // TODO: merge Settlement and City in a single type like `Establishment`
-    // with an enum field `stage` or `kind` that can hold either `Settelement` or `City`
 
     #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Serialize, Deserialize)]
     pub enum EstablishmentType {
@@ -80,13 +70,13 @@ pub mod builds {
 
     #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Serialize, Deserialize)]
     pub struct Establishment {
-        pub pos: Intersection,
+        pub vtx: Intersection,
         pub stage: EstablishmentType,
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
     pub struct Road {
-        pub pos: Path,
+        pub path: Path,
     }
 
     /// Enum representing any build action.
@@ -111,81 +101,23 @@ pub mod builds {
 
     /* Occupying impls */
 
-    impl<T: Occupying> Occupying for &T {
+    impl<T: OccupyIntersection> OccupyIntersection for &T {
         fn occupancy(&self) -> IntersectionOccupancy {
-            <T as Occupying>::occupancy(&self)
+            <T as OccupyIntersection>::occupancy(&self)
         }
     }
 
     /// Settlement occupies a single intersection.
-    impl Occupying for Establishment {
+    impl OccupyIntersection for Establishment {
         fn occupancy(&self) -> IntersectionOccupancy {
-            IntersectionOccupancy::from([self.pos()])
+            IntersectionOccupancy::from([self.vtx])
         }
     }
 
     /// Road occupies both intersections of its path.
-    impl Occupying for Road {
+    impl OccupyIntersection for Road {
         fn occupancy(&self) -> IntersectionOccupancy {
-            self.pos().intersections_iter().collect()
-        }
-    }
-
-    /* HasPos impls */
-
-    impl HasPos for Establishment {
-        type Pos = Intersection;
-        fn pos(&self) -> Self::Pos {
-            self.pos
-        }
-    }
-
-    impl HasPos for Road {
-        type Pos = Path;
-        fn pos(&self) -> Self::Pos {
-            self.pos.clone()
-        }
-    }
-
-    /* HasCost impls */
-
-    impl HasCost for Build {
-        fn cost(&self) -> ResourceCollection {
-            match self {
-                Build::Establishment(establishment) => establishment.stage.cost(),
-                Build::Road(road) => road.cost(),
-            }
-        }
-    }
-
-    /// Standard Catan settlement cost.
-    impl HasCost for EstablishmentType {
-        fn cost(&self) -> ResourceCollection {
-            match self {
-                Self::Settlement => ResourceCollection {
-                    brick: 1,
-                    wood: 1,
-                    wheat: 1,
-                    sheep: 1,
-                    ore: 0,
-                },
-                Self::City => ResourceCollection {
-                    ore: 3,
-                    wheat: 2,
-                    ..Default::default()
-                },
-            }
-        }
-    }
-
-    /// Standard Catan road cost.
-    impl HasCost for Road {
-        fn cost(&self) -> ResourceCollection {
-            ResourceCollection {
-                brick: 1,
-                wood: 1,
-                ..Default::default()
-            }
+            self.path.intersections_iter().collect()
         }
     }
 }
@@ -247,7 +179,7 @@ pub mod occupancy {
     }
 
     /// Allows retrieving correct occupancy type depending on build type.
-    pub trait OccupancyGetter: Occupying {
+    pub trait OccupancyGetter: OccupyIntersection {
         type OccupancyType;
         fn get<'a>(x: &'a AggregateOccupancy) -> &'a Self::OccupancyType;
     }
@@ -259,7 +191,7 @@ pub mod occupancy {
         }
     }
 
-    impl<T: Occupying + HasPos<Pos = Intersection>> OccupancyGetter for T {
+    impl<T: OccupyIntersection + HasPos<Pos = Intersection>> OccupancyGetter for T {
         type OccupancyType = IntersectionOccupancy;
         fn get<'a>(x: &'a AggregateOccupancy) -> &'a Self::OccupancyType {
             &x.builds_occupancy
@@ -279,7 +211,7 @@ pub mod occupancy {
                 .flat_map(|id| {
                     let player = &self.container.players()[id];
 
-                    player.establishments.iter().map(|s| s.pos)
+                    player.establishments.iter().map(|s| s.vtx)
                 })
                 .collect()
         }
@@ -342,7 +274,7 @@ pub mod data {
         pub fn generic_occupancy<Builds, BuildItem>(builds: Builds) -> IntersectionOccupancy
         where
             Builds: Iterator<Item = BuildItem>,
-            BuildItem: Occupying,
+            BuildItem: OccupyIntersection,
         {
             builds.map(|b| b.occupancy()).flatten().collect()
         }
@@ -407,7 +339,7 @@ pub mod data {
                     .map(|player| PlayerBuildData {
                         establishments: player.establishments.into_iter().collect(),
                         roads: graph::RoadGraph::from_roads(
-                            player.roads.into_iter().map(|road| road.pos),
+                            player.roads.into_iter().map(|road| road.path),
                         ),
                     })
                     .collect(),
@@ -465,7 +397,7 @@ pub mod data {
                 Build::Road(road) => {
                     self.players[player_id]
                         .roads
-                        .insert_validated_edge(&road.pos);
+                        .insert_validated_edge(&road.path);
                     self.update_longest_road(player_id);
                     Ok(())
                 }
@@ -480,7 +412,7 @@ pub mod data {
                     }
                     EstablishmentType::City => {
                         let settlement = Establishment {
-                            pos: establishment.pos,
+                            vtx: establishment.vtx,
                             stage: EstablishmentType::Settlement,
                         };
 
@@ -500,12 +432,12 @@ pub mod data {
 
         pub fn can_build(&self, player_id: PlayerId, build: Build) -> Result<(), BuildingError> {
             match build {
-                Build::Road(road) => self.can_place_road(player_id, road.pos),
+                Build::Road(road) => self.can_place_road(player_id, road.path),
                 Build::Establishment(establishment) => match establishment.stage {
                     EstablishmentType::Settlement => {
-                        self.can_place_settlement(player_id, establishment.pos)
+                        self.can_place_settlement(player_id, establishment.vtx)
                     }
-                    EstablishmentType::City => self.can_place_city(player_id, establishment.pos),
+                    EstablishmentType::City => self.can_place_city(player_id, establishment.vtx),
                 },
             }
         }
@@ -674,11 +606,11 @@ pub mod data {
             pos: Intersection,
         ) -> Result<(), BuildingError> {
             let settlement = Establishment {
-                pos,
+                vtx: pos,
                 stage: EstablishmentType::Settlement,
             };
             let city = Establishment {
-                pos,
+                vtx: pos,
                 stage: EstablishmentType::City,
             };
 
@@ -744,7 +676,7 @@ pub mod data {
                     player
                         .establishments
                         .iter()
-                        .any(|establishment| establishment.pos == intersection)
+                        .any(|establishment| establishment.vtx == intersection)
                 })
         }
 
@@ -757,7 +689,7 @@ pub mod data {
                 .filter(|(other_id, _)| *other_id != player_id)
                 .any(|(_, player)| {
                     player.establishments.iter().any(|establishment| {
-                        let establishment_hexes = establishment.pos.as_arr();
+                        let establishment_hexes = establishment.vtx.as_arr();
                         hexes.iter().all(|hex| establishment_hexes.contains(hex))
                     })
                 })
@@ -768,7 +700,7 @@ pub mod data {
                 player
                     .establishments
                     .iter()
-                    .any(|establishment| intersections_same_or_adjacent(establishment.pos, pos))
+                    .any(|establishment| intersections_same_or_adjacent(establishment.vtx, pos))
             })
         }
 
@@ -808,8 +740,8 @@ pub mod data {
             road: Road,
             establishment: Establishment,
         ) -> Result<(), BuildingError> {
-            if self.has_establishment_in_deadzone(establishment.pos) {
-                return Err(BuildingError::InitSettlement(establishment.pos));
+            if self.has_establishment_in_deadzone(establishment.vtx) {
+                return Err(BuildingError::InitSettlement(establishment.vtx));
             }
 
             if self.players[player_id].settlements_count() >= PlayerBuildData::SETTLEMENT_LIMIT {
@@ -822,17 +754,17 @@ pub mod data {
             self[player_id].establishments.insert(establishment);
 
             let road_ok = road
-                .pos
+                .path
                 .intersections_iter()
-                .any(|v| v == establishment.pos)
-                && !self.is_road_occupied(road.pos);
+                .any(|v| v == establishment.vtx)
+                && !self.is_road_occupied(road.path);
 
             if !road_ok {
                 log::error!("invalid initial road placement");
-                return Err(BuildingError::InitRoad(road.pos));
+                return Err(BuildingError::InitRoad(road.path));
             }
 
-            self[player_id].roads.insert_validated_edge(&road.pos);
+            self[player_id].roads.insert_validated_edge(&road.path);
             self.update_longest_road(player_id);
 
             Ok(())
@@ -908,13 +840,13 @@ pub mod query {
                         .establishments
                         .iter()
                         .copied()
-                        .filter(|c| c.pos.as_set().contains(&hex))
+                        .filter(|c| c.vtx.as_set().contains(&hex))
                         .collect::<Vec<_>>();
 
                     let roads = player
                         .roads
                         .iter()
-                        .filter(|r| r.pos.as_set().contains(&hex))
+                        .filter(|r| r.path.as_set().contains(&hex))
                         .collect::<Vec<_>>();
 
                     if establishments.is_empty() && roads.is_empty() {
@@ -972,10 +904,10 @@ pub mod query {
                 .map(|(v, p)| {
                     (
                         Establishment {
-                            pos: v,
+                            vtx: v,
                             stage: EstablishmentType::Settlement,
                         },
-                        Road { pos: p },
+                        Road { path: p },
                     )
                 })
                 .collect()
@@ -999,14 +931,14 @@ mod tests {
 
     fn settlement(pos: Intersection) -> Establishment {
         Establishment {
-            pos,
+            vtx: pos,
             stage: EstablishmentType::Settlement,
         }
     }
 
     fn city(pos: Intersection) -> Establishment {
         Establishment {
-            pos,
+            vtx: pos,
             stage: EstablishmentType::City,
         }
     }
@@ -1027,7 +959,7 @@ mod tests {
             .take(PlayerBuildData::ROAD_LIMIT)
             .enumerate()
             .map(|(idx, pos)| Road {
-                pos: if idx < 6 {
+                path: if idx < 6 {
                     pos
                 } else {
                     path(h(idx as i32, 0), h(idx as i32 + 1, 0))
@@ -1043,7 +975,7 @@ mod tests {
             .try_build(
                 0,
                 Build::Road(Road {
-                    pos: center.paths_arr()[0],
+                    path: center.paths_arr()[0],
                 }),
             )
             .expect_err("sixteenth road should exceed player inventory");
@@ -1056,11 +988,11 @@ mod tests {
         let existing = path(h(0, 0), h(1, 0));
         let mut builds = BoardBuildData::from_build_collections(vec![BuildCollection {
             establishments: vec![],
-            roads: vec![Road { pos: existing }],
+            roads: vec![Road { path: existing }],
         }]);
 
         let err = builds
-            .try_build(0, Build::Road(Road { pos: existing }))
+            .try_build(0, Build::Road(Road { path: existing }))
             .expect_err("road path should already be occupied");
 
         assert!(matches!(err, BuildingError::Road(_)));
@@ -1074,16 +1006,16 @@ mod tests {
         let mut builds = BoardBuildData::from_build_collections(vec![
             BuildCollection {
                 establishments: vec![],
-                roads: vec![Road { pos: connecting }],
+                roads: vec![Road { path: connecting }],
             },
             BuildCollection {
                 establishments: vec![],
-                roads: vec![Road { pos: existing }],
+                roads: vec![Road { path: existing }],
             },
         ]);
 
         let err = builds
-            .try_build(0, Build::Road(Road { pos: existing }))
+            .try_build(0, Build::Road(Road { path: existing }))
             .expect_err("opponent road path should already be occupied");
 
         assert!(matches!(err, BuildingError::Road(_)));
@@ -1096,7 +1028,7 @@ mod tests {
         let existing = path(h(0, 0), h(1, 0));
         let builds = BoardBuildData::from_build_collections(vec![BuildCollection {
             establishments: vec![],
-            roads: vec![Road { pos: existing }],
+            roads: vec![Road { path: existing }],
         }]);
         let board_paths = default_board_paths();
 
@@ -1120,7 +1052,7 @@ mod tests {
         let builds = BoardBuildData::from_build_collections(vec![
             BuildCollection {
                 establishments: vec![],
-                roads: vec![Road { pos: existing }],
+                roads: vec![Road { path: existing }],
             },
             BuildCollection {
                 establishments: vec![settlement(blocked)],
@@ -1146,9 +1078,9 @@ mod tests {
     #[test]
     fn settlement_build_is_persisted() {
         let road = Road {
-            pos: path(h(0, 0), h(1, 0)),
+            path: path(h(0, 0), h(1, 0)),
         };
-        let settlement = settlement(road.pos.intersections()[0]);
+        let settlement = settlement(road.path.intersections()[0]);
         let mut builds = BoardBuildData::from_build_collections(vec![BuildCollection {
             establishments: vec![],
             roads: vec![road],
@@ -1239,7 +1171,7 @@ mod tests {
         let roads = paths
             .by_ref()
             .take(4)
-            .map(|pos| Road { pos })
+            .map(|pos| Road { path: pos })
             .collect::<Vec<_>>();
         let fifth = paths.next().unwrap();
         let mut builds = BoardBuildData::from_build_collections(vec![BuildCollection {
@@ -1248,7 +1180,7 @@ mod tests {
         }]);
 
         builds
-            .try_build(0, Build::Road(Road { pos: fifth }))
+            .try_build(0, Build::Road(Road { path: fifth }))
             .expect("fifth connected road should be legal");
 
         assert_eq!(builds.longest_road(), Some(0));

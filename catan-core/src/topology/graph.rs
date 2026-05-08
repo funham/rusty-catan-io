@@ -50,7 +50,7 @@ impl RoadGraph {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = Road> {
-        self.edges.iter().map(|p| Road { pos: p.clone() })
+        self.edges.iter().map(|p| Road { path: p.clone() })
     }
 
     pub fn edges(&self) -> &Edges {
@@ -478,7 +478,7 @@ mod tests {
             graph.insert_validated_edge(&road);
         }
 
-        let iter_roads: Vec<Path> = graph.iter().map(|r| r.pos).collect();
+        let iter_roads: Vec<Path> = graph.iter().map(|r| r.path).collect();
         assert_eq!(iter_roads.len(), 3);
         for road in &roads {
             assert!(iter_roads.contains(road));

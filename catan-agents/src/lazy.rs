@@ -125,7 +125,7 @@ pub fn lazy_init_stage_action(
         .expect("there must be an initial placement");
 
     InitStageAction {
-        establishment_position: establishment.pos,
+        establishment_position: establishment.vtx,
         road,
     }
 }

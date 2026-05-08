@@ -40,12 +40,12 @@ pub(crate) fn intersection_label(intersection: Intersection) -> String {
 
 pub(crate) fn build_label(build: Build) -> String {
     match build {
-        Build::Road(road) => path_label(road.pos),
+        Build::Road(road) => path_label(road.path),
         Build::Establishment(establishment) => match establishment.stage {
             EstablishmentType::Settlement => {
-                format!("settlement {}", intersection_label(establishment.pos))
+                format!("settlement {}", intersection_label(establishment.vtx))
             }
-            EstablishmentType::City => format!("city {}", intersection_label(establishment.pos)),
+            EstablishmentType::City => format!("city {}", intersection_label(establishment.vtx)),
         },
     }
 }

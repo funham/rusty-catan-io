@@ -287,12 +287,12 @@ fn select_roadbuild_usage(
         return Ok(None);
     };
 
-    let second_options = roadbuild_second_options(&envelope.legal, first.pos);
+    let second_options = roadbuild_second_options(&envelope.legal, first.path);
     let Some(Build::Road(second)) = ui.select_build(model, second_options, "roadbuild 2: ")? else {
         return Ok(None);
     };
 
-    Ok(Some(DevCardUsage::RoadBuild([first.pos, second.pos])))
+    Ok(Some(DevCardUsage::RoadBuild([first.path, second.path])))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -465,14 +465,14 @@ fn parse_build(line: &str) -> Option<Build> {
     let parts = line.split_whitespace().collect::<Vec<_>>();
     match parts.as_slice() {
         ["build", "road", h1, h2] => Some(Build::Road(Road {
-            pos: path_from_tokens(h1, h2)?,
+            path: path_from_tokens(h1, h2)?,
         })),
         ["build", "settlement", h1, h2, h3] => Some(Build::Establishment(Establishment {
-            pos: intersection_from_tokens(h1, h2, h3)?,
+            vtx: intersection_from_tokens(h1, h2, h3)?,
             stage: EstablishmentType::Settlement,
         })),
         ["build", "city", h1, h2, h3] => Some(Build::Establishment(Establishment {
-            pos: intersection_from_tokens(h1, h2, h3)?,
+            vtx: intersection_from_tokens(h1, h2, h3)?,
             stage: EstablishmentType::City,
         })),
         _ => None,

@@ -120,7 +120,7 @@ pub(crate) fn roadbuild_first_options(legal: &LegalDecisionOptions) -> Vec<Build
         })
         .collect::<BTreeSet<_>>()
         .into_iter()
-        .map(|pos| Build::Road(Road { pos }))
+        .map(|pos| Build::Road(Road { path: pos }))
         .collect()
 }
 
@@ -139,7 +139,7 @@ pub(crate) fn roadbuild_second_options(
         })
         .collect::<BTreeSet<_>>()
         .into_iter()
-        .map(|pos| Build::Road(Road { pos }))
+        .map(|pos| Build::Road(Road { path: pos }))
         .collect()
 }
 

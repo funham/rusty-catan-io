@@ -12,7 +12,7 @@ use crate::{
             build::{BoardBuildData, Build, BuildingError, EstablishmentType, Road},
             dev_card::DevCardUsage,
             player::{PlayerDataContainer, PlayerId},
-            resource::{HasCost, Resource, ResourceCollection, ResourceCollectionError},
+            resource::{Resource, ResourceCollection, ResourceCollectionError},
             trade::BankTrade,
             turn::GameTurn,
         },
@@ -138,7 +138,13 @@ impl GameState {
             return Err(err);
         }
 
-        let cost = build.cost();
+        let cost = match build {
+            Road(_) => costs::ROAD,
+            Establishment(establishment) => match establishment.stage {
+                Settlement => costs::SETTLEMENT,
+                City => costs::CITY,
+            },
+        };
         if !self.players.get(player_id).resources().has_enough(&cost) {
             return Err(BuildActionError::AccountIsShort { id: player_id });
         }
@@ -448,7 +454,7 @@ impl GameState {
         let mut builds = self.builds.clone();
         for pos in poses {
             builds
-                .try_build(user, Build::Road(Road { pos }))
+                .try_build(user, Build::Road(Road { path: pos }))
                 .map_err(|_| DevCardUsageError::InvalidEdge)?;
         }
 
@@ -514,7 +520,7 @@ mod tests {
             if player_id == 1 {
                 let board_hexes = init.board.arrangement.hex_iter().collect::<Vec<_>>();
                 victim_hex =
-                    establishment.pos.as_set().into_iter().find(|hex| {
+                    establishment.vtx.as_set().into_iter().find(|hex| {
                         *hex != init.board_state.robber_pos && board_hexes.contains(hex)
                     });
             }

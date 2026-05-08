@@ -23,7 +23,7 @@ pub fn is_player_on_hex(hex: Hex, builds: &PlayerBuildData) -> bool {
     builds
         .establishments
         .iter()
-        .any(|establishment| establishment.pos.as_arr().contains(&hex))
+        .any(|establishment| establishment.vtx.as_arr().contains(&hex))
 }
 
 pub fn players_on_hex<'a>(
@@ -44,7 +44,7 @@ pub fn get_ports_aquired(
         let mut set = SmallSet::new();
 
         for est in builds.by_player(id).establishments.iter() {
-            if let Some(port) = ports.get(&est.pos) {
+            if let Some(port) = ports.get(&est.vtx) {
                 set.insert(*port);
             }
         }

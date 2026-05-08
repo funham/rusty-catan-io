@@ -212,7 +212,7 @@ impl GameController {
                 );
 
                 let establishment = Establishment {
-                    pos: action.establishment_position,
+                    vtx: action.establishment_position,
                     stage: EstablishmentType::Settlement,
                 };
 
@@ -259,7 +259,7 @@ impl GameController {
                                 observers,
                                 &GameEvent::InitialPlacementBuilt {
                                     player_id,
-                                    settlement: establishment.pos,
+                                    settlement: establishment.vtx,
                                     road: action.road,
                                 },
                             );
@@ -343,7 +343,7 @@ impl GameController {
     ) {
         let mut resources = ResourceCollection::ZERO;
         for hex in settlement
-            .pos
+            .vtx
             .as_set()
             .into_iter()
             .filter(|hex| hex.norm() <= game_init.board.arrangement.radius() as usize)
@@ -1020,7 +1020,7 @@ impl GameController {
 
         for pid in player_ids {
             for est in game.builds[pid].establishments.clone() {
-                let coinc = est.pos.as_set();
+                let coinc = est.vtx.as_set();
 
                 for hex in hexes.iter().filter(|hex| coinc.contains(hex)) {
                     if *hex == game.board_state.robber_pos {
@@ -1319,7 +1319,7 @@ mod tests {
             .query()
             .possible_initial_placements(&init.board, 0)
             .into_iter()
-            .find(|(settlement, _)| settlement.pos.as_set().contains(&target_hex))
+            .find(|(settlement, _)| settlement.vtx.as_set().contains(&target_hex))
             .expect("target resource hex should have a legal adjacent settlement");
 
         assert_eq!(settlement.stage, EstablishmentType::Settlement);
@@ -1358,14 +1358,14 @@ mod tests {
             .possible_initial_placements(&init.board, 0)
             .into_iter()
             .find(|(settlement, _)| {
-                settlement.pos.as_set().into_iter().any(|hex| {
+                settlement.vtx.as_set().into_iter().any(|hex| {
                     hex.norm() <= init.board.arrangement.radius() as usize
                         && matches!(init.board.arrangement[hex], Tile::Resource { .. })
                 })
             })
             .expect("default board should have a resource-adjacent initial placement");
 
-        let expected = settlement.pos.as_set().into_iter().fold(
+        let expected = settlement.vtx.as_set().into_iter().fold(
             ResourceCollection::ZERO,
             |mut resources, hex| {
                 if hex.norm() <= init.board.arrangement.radius() as usize
@@ -1414,7 +1414,7 @@ mod tests {
             .expect("bank should fund city build");
 
         let city = Build::Establishment(Establishment {
-            pos: settlement.pos,
+            vtx: settlement.vtx,
             stage: EstablishmentType::City,
         });
         let mut controller = GameController::new(state, Vec::new());
@@ -1570,7 +1570,7 @@ mod tests {
                 .next()
                 .expect("default board should have legal initial placements");
             InitStageAction {
-                establishment_position: establishment.pos,
+                establishment_position: establishment.vtx,
                 road,
             }
         }

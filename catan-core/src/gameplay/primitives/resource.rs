@@ -289,7 +289,3 @@ impl From<BTreeMap<Resource, u16>> for ResourceCollection {
         TryFrom::<&[(Resource, u16)]>::try_from(x.as_slice()).unwrap()
     }
 }
-
-pub trait HasCost {
-    fn cost(&self) -> ResourceCollection;
-}
