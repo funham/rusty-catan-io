@@ -795,7 +795,7 @@ fn resource_trades_count_at_rate(
     give_candidates
         .into_iter()
         .filter(|give| context.private.resources.has_enough(&(*give, rate).into()))
-        .map(|_| Resource::LIST.len() - 1)
+        .map(|_| Resource::ALL.len() - 1)
         .sum()
 }
 

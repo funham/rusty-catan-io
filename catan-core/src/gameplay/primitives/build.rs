@@ -109,14 +109,6 @@ pub mod builds {
         InitSettlement(Intersection),
     }
 
-    /* Buildable impls */
-
-    // impl<T: Buildable> Buildable for &T {}
-
-    // impl Buildable for Settlement {}
-    // impl Buildable for Road {}
-    // impl Buildable for City {}
-
     /* Occupying impls */
 
     impl<T: Occupying> Occupying for &T {

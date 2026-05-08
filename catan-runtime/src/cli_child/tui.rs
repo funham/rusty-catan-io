@@ -498,7 +498,7 @@ impl CliUi {
             if let CrosstermEvent::Key(key) = event::read()?
                 && key.kind == KeyEventKind::Press
             {
-                let resource = Resource::LIST[selected_resource];
+                let resource = Resource::ALL[selected_resource];
                 match key.code {
                     KeyCode::Enter => {
                         if selected.total() == required {
@@ -516,10 +516,10 @@ impl CliUi {
                     KeyCode::Left => {
                         selected_resource = selected_resource
                             .checked_sub(1)
-                            .unwrap_or(Resource::LIST.len() - 1);
+                            .unwrap_or(Resource::ALL.len() - 1);
                     }
                     KeyCode::Right => {
-                        selected_resource = (selected_resource + 1) % Resource::LIST.len();
+                        selected_resource = (selected_resource + 1) % Resource::ALL.len();
                     }
                     KeyCode::Up => {
                         adjust_drop_selection(&private.resources, &mut selected, resource, 1);
@@ -584,7 +584,7 @@ impl CliUi {
         self.message = message.to_owned();
         loop {
             self.personal_override = Some(resource_picker_lines(selected));
-            let resource = Resource::LIST[selected];
+            let resource = Resource::ALL[selected];
             self.draw(Some(model), prompt, &format!("{resource:?}"))?;
             if let CrosstermEvent::Key(key) = event::read()?
                 && key.kind == KeyEventKind::Press
@@ -600,10 +600,10 @@ impl CliUi {
                         return Ok(None);
                     }
                     KeyCode::Left => {
-                        selected = selected.checked_sub(1).unwrap_or(Resource::LIST.len() - 1);
+                        selected = selected.checked_sub(1).unwrap_or(Resource::ALL.len() - 1);
                     }
                     KeyCode::Right => {
-                        selected = (selected + 1) % Resource::LIST.len();
+                        selected = (selected + 1) % Resource::ALL.len();
                     }
                     _ => {}
                 }

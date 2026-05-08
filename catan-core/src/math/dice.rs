@@ -131,10 +131,10 @@ impl DiceRoll {
     }
 
     pub fn resolve(self) -> DiceOutcome {
-        match self {
-            seven if seven == Self::seven() => DiceOutcome::Seven,
+        match self.as_u8() {
+            Self::SEVEN_VALUE => DiceOutcome::Seven,
             other => DiceOutcome::Harvest(
-                TileNum::try_from(other.0).expect("non-seven dice roll should be a tile number"),
+                TileNum::try_from(other).expect("non-seven dice roll should be a tile number"),
             ),
         }
     }
@@ -216,7 +216,7 @@ impl TileNum {
         Self::try_from(value).ok()
     }
 
-    pub fn list() -> impl Iterator<Item = TileNum> {
+    pub fn iter() -> impl Iterator<Item = TileNum> {
         Self::ALL.into_iter()
     }
 

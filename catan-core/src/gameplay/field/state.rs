@@ -48,7 +48,7 @@ impl BoardIndex {
 
     fn get_hex_by_num(arrangement: &BoardArrangement) -> HexesByNum {
         let mut hex_by_num = HexesByNum::default();
-        for num in TileNum::list() {
+        for num in TileNum::iter() {
             hex_by_num[num] = arrangement
                 .hex_enum_iter()
                 .filter_map(|(pos, hex)| {

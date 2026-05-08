@@ -431,7 +431,7 @@ pub fn rand_drop_half(context: PlayerDecisionContext<'_>, rng: &mut impl Rng) ->
 
             for _ in 0..number_to_drop {
                 let card = res
-                    .pop_random_with_rng(rng)
+                    .pop_random(rng)
                     .expect(&format!("must contain {} cards", number_to_drop));
                 to_drop[card] += 1;
             }

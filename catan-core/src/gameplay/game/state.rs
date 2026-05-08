@@ -401,7 +401,7 @@ impl GameState {
     ) {
         log::trace!("steal");
         let robbed_account = self.players.get(robbed_id).resources();
-        let stolen = robbed_account.peek_random_with_rng(rng);
+        let stolen = robbed_account.peek_random(rng);
         log::trace!("peek random success");
         if let Some(card) = stolen {
             if let Err(e) = self.players_resource_transfer(robbed_id, robber_id, card.into()) {

@@ -14,17 +14,21 @@ pub enum UsableDevCard {
 }
 
 impl UsableDevCard {
-    const LIST: [UsableDevCard; 4] = [
+    pub const ALL: [UsableDevCard; 4] = [
         Self::Knight,
         Self::YearOfPlenty,
         Self::RoadBuild,
         Self::Monopoly,
     ];
 
+    pub fn iter() -> impl Iterator<Item = UsableDevCard> {
+        Self::ALL.into_iter()
+    }
+
     pub fn abbrev(&self) -> &'static str {
         match self {
             UsableDevCard::Knight => "KN",
-            UsableDevCard::YearOfPlenty => "YOP",
+            UsableDevCard::YearOfPlenty => "YP",
             UsableDevCard::RoadBuild => "RB",
             UsableDevCard::Monopoly => "M",
         }
@@ -97,7 +101,7 @@ impl std::fmt::Display for DevCardData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "VP: {};", self.victory_pts)?;
 
-        for x in UsableDevCard::LIST {
+        for x in UsableDevCard::ALL {
             write!(
                 f,
                 " {}: {}|{}|{};",

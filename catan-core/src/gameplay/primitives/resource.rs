@@ -29,7 +29,7 @@ pub enum Resource {
 }
 
 impl Resource {
-    pub const LIST: [Resource; 5] = [
+    pub const ALL: [Resource; 5] = [
         Resource::Brick,
         Resource::Wood,
         Resource::Wheat,
@@ -38,7 +38,7 @@ impl Resource {
     ];
 
     pub fn iter() -> impl Iterator<Item = Resource> {
-        Self::LIST.iter().cloned()
+        Self::ALL.iter().cloned()
     }
 }
 
@@ -195,7 +195,7 @@ impl ResourceCollection {
         Ok(())
     }
 
-    pub fn peek_random_with_rng<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<Resource> {
+    pub fn peek_random<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<Resource> {
         // Calculate total and return None if empty
         if self.is_empty() {
             return None;
@@ -218,8 +218,8 @@ impl ResourceCollection {
         unreachable!("peek random: total == 0?")
     }
 
-    pub fn pop_random_with_rng<R: Rng + ?Sized>(&mut self, rng: &mut R) -> Option<Resource> {
-        match self.peek_random_with_rng(rng) {
+    pub fn pop_random<R: Rng + ?Sized>(&mut self, rng: &mut R) -> Option<Resource> {
+        match self.peek_random(rng) {
             Some(resource) => {
                 self.subtract_in_place(&resource.into()).ok()?;
                 Some(resource)
