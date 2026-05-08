@@ -415,7 +415,7 @@ fn rand_road_extension_with_extra_roads<const N: usize>(
         .choose(rng)
 }
 
-pub fn rand_drop_half(context: PlayerDecisionContext<'_>, _rng: &mut impl Rng) -> DropHalfAction {
+pub fn rand_drop_half(context: PlayerDecisionContext<'_>, rng: &mut impl Rng) -> DropHalfAction {
     let number_to_drop = context.private.resources.total() / 2;
 
     match context.search {
@@ -431,7 +431,7 @@ pub fn rand_drop_half(context: PlayerDecisionContext<'_>, _rng: &mut impl Rng) -
 
             for _ in 0..number_to_drop {
                 let card = res
-                    .pop_random()
+                    .pop_random_with_rng(rng)
                     .expect(&format!("must contain {} cards", number_to_drop));
                 to_drop[card] += 1;
             }

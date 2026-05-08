@@ -13,7 +13,7 @@ use crate::{
             resource::ResourceCollection,
         },
     },
-    math::dice::DiceVal,
+    math::dice::DiceRoll,
     topology::{Hex, Intersection},
 };
 
@@ -82,7 +82,7 @@ pub enum GameEvent {
     },
     DiceRolled {
         player_id: PlayerId,
-        value: DiceVal,
+        value: DiceRoll,
     },
     ResourcesDistributed,
     DevCardBought {

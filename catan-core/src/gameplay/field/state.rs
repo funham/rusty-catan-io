@@ -8,7 +8,7 @@ use crate::gameplay::primitives::{
     PortKind, Tile,
     build::{Establishment, Road},
 };
-use crate::math::dice::DiceVal;
+use crate::math::dice::TileNum;
 use crate::topology::*;
 
 // TODO: move to FieldIndex maybe?
@@ -48,7 +48,7 @@ impl BoardIndex {
 
     fn get_hex_by_num(arrangement: &BoardArrangement) -> HexesByNum {
         let mut hex_by_num = HexesByNum::default();
-        for num in DiceVal::list() {
+        for num in TileNum::list() {
             hex_by_num[num] = arrangement
                 .hex_enum_iter()
                 .filter_map(|(pos, hex)| {
@@ -64,11 +64,6 @@ impl BoardIndex {
                 })
                 .collect()
         }
-
-        assert!(
-            hex_by_num[DiceVal::seven()].is_empty(),
-            "no hexes should be assigned with 7"
-        );
 
         hex_by_num
     }
@@ -206,7 +201,7 @@ impl BoardLayout {
         self.index.desert_pos
     }
 
-    pub fn hexes_by_num(&self, num: DiceVal) -> &SmallSet<Hex, 4> {
+    pub fn hexes_by_num(&self, num: TileNum) -> &SmallSet<Hex, 4> {
         &self.index.hex_by_num[num]
     }
 

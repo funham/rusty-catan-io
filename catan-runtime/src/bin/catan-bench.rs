@@ -12,6 +12,7 @@ use catan_core::{
         controller::{GameController, GameResult, GameRunStats, RunOptions},
         init::GameInitializationState,
     },
+    gameplay::random::GameRandom,
     math::dice::RandomDiceRoller,
 };
 use catan_runtime::config::{FieldConfig, MatchConfig, PlayerConfig};
@@ -281,13 +282,13 @@ fn run_one_game(
     let init_state = build_initial_state(&config.field, seed);
     let state = GameController::init(init_state, &mut agents);
     let mut controller = GameController::new(state, agents);
-    controller.use_seeded_randomness(seed);
     let mut dice = RandomDiceRoller::with_seed(seed);
     let result = controller.run_with_options(
         &mut dice,
         RunOptions {
             max_turns: max_turns_override.or(config.limits.max_turns),
             max_invalid_actions: config.limits.max_invalid_actions,
+            random: GameRandom::seeded(seed),
         },
     );
 

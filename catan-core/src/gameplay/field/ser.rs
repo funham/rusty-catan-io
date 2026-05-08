@@ -8,7 +8,7 @@ use crate::{
         field::{BoardArrangement, PortMap},
         primitives::{Tile, resource::Resource},
     },
-    math::dice::DiceVal,
+    math::dice::TileNum,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -65,8 +65,8 @@ impl<'de> Deserialize<'de> for BoardArrangement {
             match hex {
                 HexTypeJsonVal::Desert(_) => tile_info.push(Tile::Desert),
                 HexTypeJsonVal::Resource((resource, number)) => {
-                    let number = DiceVal::try_from(number)
-                        .map_err(|_| serde::de::Error::custom("invalid dice value"))?;
+                    let number = TileNum::try_from(number)
+                        .map_err(|_| serde::de::Error::custom("invalid tile number"))?;
                     tile_info.push(Tile::Resource { resource, number });
                 }
             }
@@ -96,12 +96,30 @@ impl From<FieldArrangementJsonVal> for BoardArrangement {
                     HexTypeJsonVal::Desert(_) => Tile::Desert,
                     HexTypeJsonVal::Resource((resource, tilenum)) => Tile::Resource {
                         resource,
-                        number: DiceVal::try_from(tilenum).unwrap(),
+                        number: TileNum::try_from(tilenum).unwrap(),
                     },
                 })
                 .collect(),
             json.port_map,
         )
         .unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn arrangement_deserialization_rejects_seven_tile_number() {
+        let json = r#"{
+            "field_radius": 0,
+            "tile_info": [["brick", 7]],
+            "port_map": []
+        }"#;
+
+        let result = serde_json::from_str::<BoardArrangement>(json);
+
+        assert!(result.is_err());
     }
 }

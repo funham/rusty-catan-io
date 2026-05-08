@@ -7,7 +7,7 @@ pub mod trade;
 pub mod turn;
 
 use self::resource::Resource;
-use crate::math::dice::DiceVal;
+use crate::math::dice::TileNum;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -18,7 +18,7 @@ pub enum PortKind {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum Tile {
-    Resource { resource: Resource, number: DiceVal },
-    River { number: DiceVal },
+    Resource { resource: Resource, number: TileNum },
+    River { number: TileNum },
     Desert,
 }

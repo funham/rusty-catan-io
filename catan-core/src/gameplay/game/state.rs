@@ -274,16 +274,6 @@ impl GameState {
             .collect::<Vec<_>>()
     }
 
-    pub fn use_robbers(
-        &mut self,
-        rob_hex: Hex,
-        robber_id: PlayerId,
-        robbed_id: Option<PlayerId>,
-    ) -> Result<(), DevCardUsageError> {
-        let mut rng = rand::rng();
-        self.use_robbers_with_rng(rob_hex, robber_id, robbed_id, &mut rng)
-    }
-
     pub fn use_robbers_with_rng<R: Rng + ?Sized>(
         &mut self,
         rob_hex: Hex,
@@ -331,15 +321,6 @@ impl GameState {
             })
             .map(|(id, _)| id)
             .collect()
-    }
-
-    pub fn use_dev_card(
-        &mut self,
-        usage: DevCardUsage,
-        user: PlayerId,
-    ) -> Result<(), DevCardUsageError> {
-        let mut rng = rand::rng();
-        self.use_dev_card_with_rng(usage, user, &mut rng)
     }
 
     pub fn use_dev_card_with_rng<R: Rng + ?Sized>(
@@ -515,6 +496,7 @@ mod tests {
         },
     };
     use crate::topology::Hex;
+    use rand::SeedableRng;
 
     fn state_with_two_initial_settlements() -> (GameState, Hex) {
         let mut init = GameInitializationState::default();
@@ -631,13 +613,15 @@ mod tests {
             .transfer_from_bank(Resource::Brick.into(), 1)
             .expect("bank should fund test player");
 
+        let mut rng = rand::rngs::SmallRng::seed_from_u64(42);
         state
-            .use_dev_card(
+            .use_dev_card_with_rng(
                 DevCardUsage::Knight {
                     rob_hex: victim_hex,
                     robbed_id: Some(1),
                 },
                 0,
+                &mut rng,
             )
             .expect("knight usage should be legal");
 
@@ -663,13 +647,15 @@ mod tests {
             .transfer_from_bank(ResourceCollection::from(Resource::Brick), 1)
             .expect("bank should fund test player");
 
+        let mut rng = rand::rngs::SmallRng::seed_from_u64(42);
         let err = state
-            .use_dev_card(
+            .use_dev_card_with_rng(
                 DevCardUsage::Knight {
                     rob_hex: victim_hex,
                     robbed_id: None,
                 },
                 0,
+                &mut rng,
             )
             .expect_err("target must be provided when a player can be robbed");
 

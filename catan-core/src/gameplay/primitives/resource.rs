@@ -195,12 +195,6 @@ impl ResourceCollection {
         Ok(())
     }
 
-    // None if empty, weighted random otherwise
-    pub fn peek_random(&self) -> Option<Resource> {
-        let mut rng = rand::rng();
-        self.peek_random_with_rng(&mut rng)
-    }
-
     pub fn peek_random_with_rng<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<Resource> {
         // Calculate total and return None if empty
         if self.is_empty() {
@@ -222,11 +216,6 @@ impl ResourceCollection {
         }
 
         unreachable!("peek random: total == 0?")
-    }
-
-    pub fn pop_random(&mut self) -> Option<Resource> {
-        let mut rng = rand::rng();
-        self.pop_random_with_rng(&mut rng)
     }
 
     pub fn pop_random_with_rng<R: Rng + ?Sized>(&mut self, rng: &mut R) -> Option<Resource> {

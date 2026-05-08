@@ -42,7 +42,7 @@ pub use query::*;
 /// Primitive build structures and traits.
 ///
 /// These represent the atomic pieces placed on the board and the traits
-/// required for collision checking and build placement logic.
+/// required for placement logic.
 pub mod builds {
     use super::*;
 
@@ -51,7 +51,7 @@ pub mod builds {
     pub type IntersectionOccupancy = SmallSet<Intersection, 64>;
 
     /// Trait for objects that occupy intersections on the board.
-    /// Used by collision and placement logic.
+    /// Used by placement logic.
     pub trait Occupying {
         fn occupancy(&self) -> IntersectionOccupancy;
     }
@@ -202,7 +202,7 @@ pub mod builds {
 // Occupancy
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-/// Structures representing board occupancy used during collision checking.
+/// Structures representing board occupancy used during placement checks.
 pub mod occupancy {
     use super::*;
 
@@ -224,7 +224,7 @@ pub mod occupancy {
         }
     }
 
-    /// Combined occupancy structure used in collision checking.
+    /// Combined occupancy structure used in placement checks.
     pub struct AggregateOccupancy {
         pub builds_occupancy: IntersectionOccupancy,
         pub roads_occupancy: PathOccupancy,
@@ -471,7 +471,9 @@ pub mod data {
 
             match build {
                 Build::Road(road) => {
-                    self.players[player_id].roads.add_edge_unsafe(&road.pos);
+                    self.players[player_id]
+                        .roads
+                        .insert_validated_edge(&road.pos);
                     self.update_longest_road(player_id);
                     Ok(())
                 }
@@ -569,6 +571,77 @@ pub mod data {
             } else {
                 Err(BuildingError::Road(EdgeInsertationError))
             }
+        }
+
+        pub fn road_extension_candidates(
+            &self,
+            player_id: PlayerId,
+            board_paths: &[Path],
+        ) -> PathSet {
+            self.road_extension_candidates_with_extra_roads(player_id, [], board_paths)
+        }
+
+        pub fn road_extension_candidates_with_extra_roads<ExtraRoads>(
+            &self,
+            player_id: PlayerId,
+            extra_roads: ExtraRoads,
+            board_paths: &[Path],
+        ) -> PathSet
+        where
+            ExtraRoads: IntoIterator<Item = Path> + Clone,
+        {
+            if player_id >= self.players.len()
+                || self.players[player_id].roads_count() + extra_roads.clone().into_iter().count()
+                    >= PlayerBuildData::ROAD_LIMIT
+            {
+                return PathSet::new();
+            }
+
+            let extra_roads_set = extra_roads.clone().into_iter().collect::<PathSet>();
+            let mut frontier = SmallSet::<Intersection, 64>::new();
+
+            for road in self.players[player_id].roads.edges().iter().copied() {
+                for intersection in road.intersections() {
+                    if !self.opponent_has_establishment_at(player_id, intersection) {
+                        frontier.insert(intersection);
+                    }
+                }
+            }
+
+            for road in extra_roads_set.iter().copied() {
+                for intersection in road.intersections() {
+                    if !self.opponent_has_establishment_at(player_id, intersection) {
+                        frontier.insert(intersection);
+                    }
+                }
+            }
+
+            let board_paths = board_paths.iter().copied().collect::<PathSet>();
+            let mut candidates = PathSet::new();
+
+            for intersection in frontier {
+                for candidate in intersection.paths_arr() {
+                    if !board_paths.contains(&candidate)
+                        || self.is_road_occupied(candidate)
+                        || extra_roads_set.contains(&candidate)
+                    {
+                        continue;
+                    }
+
+                    if self
+                        .can_place_road_with_extra_roads_iter(
+                            player_id,
+                            candidate,
+                            extra_roads_set.clone(),
+                        )
+                        .is_ok()
+                    {
+                        candidates.insert(candidate);
+                    }
+                }
+            }
+
+            candidates
         }
 
         pub fn can_place_settlement(
@@ -767,7 +840,7 @@ pub mod data {
                 return Err(BuildingError::InitRoad(road.pos));
             }
 
-            self[player_id].roads.add_edge_unsafe(&road.pos);
+            self[player_id].roads.insert_validated_edge(&road.pos);
             self.update_longest_road(player_id);
 
             Ok(())
@@ -921,6 +994,7 @@ pub mod query {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gameplay::field::state::{BoardLayout, FieldBuildParam};
     use crate::topology::Hex;
 
     fn h(q: i32, r: i32) -> Hex {
@@ -943,6 +1017,12 @@ mod tests {
             pos,
             stage: EstablishmentType::City,
         }
+    }
+
+    fn default_board_paths() -> Vec<Path> {
+        BoardLayout::new(FieldBuildParam::default())
+            .paths()
+            .to_vec()
     }
 
     #[test]
@@ -1017,6 +1097,58 @@ mod tests {
         assert!(matches!(err, BuildingError::Road(_)));
         assert_eq!(builds[0].roads_count(), 1);
         assert_eq!(builds[1].roads_count(), 1);
+    }
+
+    #[test]
+    fn road_extension_candidates_are_limited_to_unblocked_frontier() {
+        let existing = path(h(0, 0), h(1, 0));
+        let builds = BoardBuildData::from_build_collections(vec![BuildCollection {
+            establishments: vec![],
+            roads: vec![Road { pos: existing }],
+        }]);
+        let board_paths = default_board_paths();
+
+        let candidates = builds.road_extension_candidates(0, &board_paths);
+
+        assert!(!candidates.contains(&existing));
+        for intersection in existing.intersections() {
+            for candidate in intersection.paths_arr() {
+                if candidate != existing && board_paths.contains(&candidate) {
+                    assert!(candidates.contains(&candidate));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn road_extension_candidates_do_not_extend_through_opponent_establishment() {
+        let existing = path(h(0, 0), h(1, 0));
+        let blocked = existing.intersections()[0];
+        let open = existing.intersections()[1];
+        let builds = BoardBuildData::from_build_collections(vec![
+            BuildCollection {
+                establishments: vec![],
+                roads: vec![Road { pos: existing }],
+            },
+            BuildCollection {
+                establishments: vec![settlement(blocked)],
+                roads: vec![],
+            },
+        ]);
+        let board_paths = default_board_paths();
+
+        let candidates = builds.road_extension_candidates(0, &board_paths);
+
+        for candidate in blocked.paths_arr() {
+            if candidate != existing {
+                assert!(!candidates.contains(&candidate));
+            }
+        }
+        assert!(
+            open.paths_arr()
+                .into_iter()
+                .any(|candidate| candidate != existing && candidates.contains(&candidate))
+        );
     }
 
     #[test]

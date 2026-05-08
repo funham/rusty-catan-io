@@ -1,4 +1,3 @@
-pub mod collision;
 pub mod graph;
 pub mod hex;
 pub mod intersection;

@@ -19,9 +19,9 @@ use crate::gameplay::primitives::resource::ResourceCollection;
 use crate::gameplay::primitives::trade::{BankTrade, BankTradeKind};
 use crate::gameplay::primitives::turn::GameTurn;
 use crate::gameplay::primitives::{PortKind, Tile};
+use crate::gameplay::random::GameRandom;
+use crate::math::dice::{DiceOutcome, DiceRoller, TileNum};
 use crate::topology::Hex;
-use crate::{math::dice::DiceRoller, math::dice::DiceVal};
-use rand::{SeedableRng, rngs::SmallRng};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GameResult {
@@ -30,17 +30,22 @@ pub enum GameResult {
     LimitReached { turns: u64 },
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct RunOptions {
     pub max_turns: Option<u64>,
     pub max_invalid_actions: Option<u64>,
+    pub random: GameRandom,
 }
+
+const DEFAULT_MAX_TURNS: u64 = 500;
+const DEFAULT_MAX_INVALID_ACTIONS: u64 = 10;
 
 impl Default for RunOptions {
     fn default() -> Self {
         Self {
-            max_turns: Some(500),
-            max_invalid_actions: Some(10),
+            max_turns: Some(DEFAULT_MAX_TURNS),
+            max_invalid_actions: Some(DEFAULT_MAX_INVALID_ACTIONS),
+            random: GameRandom::default(),
         }
     }
 }
@@ -118,7 +123,7 @@ pub struct GameController {
     invalid_actions: u64,
     max_invalid_actions: Option<u64>,
     stats: GameRunStats,
-    random: Option<SmallRng>,
+    random: GameRandom,
 }
 
 impl GameController {
@@ -142,9 +147,9 @@ impl GameController {
             players,
             visibility,
             invalid_actions: 0,
-            max_invalid_actions: RunOptions::default().max_invalid_actions,
+            max_invalid_actions: Some(DEFAULT_MAX_INVALID_ACTIONS),
             stats: GameRunStats::default(),
-            random: None,
+            random: GameRandom::default(),
         }
     }
 
@@ -155,10 +160,6 @@ impl GameController {
 
     pub fn run_stats(&self) -> GameRunStats {
         self.stats
-    }
-
-    pub fn use_seeded_randomness(&mut self, seed: u64) {
-        self.random = Some(SmallRng::seed_from_u64(seed));
     }
 
     pub fn init(
@@ -503,15 +504,22 @@ impl GameController {
         options: RunOptions,
     ) -> GameResult {
         log::trace!("Starting game run with options: {:?}", options);
+        let RunOptions {
+            max_turns,
+            max_invalid_actions,
+            random,
+        } = options;
+
         self.invalid_actions = 0;
-        self.max_invalid_actions = options.max_invalid_actions;
+        self.max_invalid_actions = max_invalid_actions;
+        self.random = random;
         self.stats = GameRunStats::default();
         self.notify_observers(&GameEvent::GameStarted);
         loop {
             let turn_no = self.game.turn.get_turns_played();
             log::trace!("Starting turn {}", turn_no);
 
-            if let Some(max_turns) = options.max_turns
+            if let Some(max_turns) = max_turns
                 && turn_no >= max_turns
             {
                 log::warn!("Turn limit reached ({}), stopping game", max_turns);
@@ -695,12 +703,10 @@ impl GameController {
         let player_id = self.curr_player();
         log::trace!("Executing dev card for player {}: {:?}", player_id, usage);
 
-        let result = match self.random.as_mut() {
-            Some(rng) => self
-                .game
-                .use_dev_card_with_rng(usage.clone(), player_id, rng),
-            None => self.game.use_dev_card(usage.clone(), player_id),
-        };
+        let result = self.random.with_rng(|rng| {
+            self.game
+                .use_dev_card_with_rng(usage.clone(), player_id, rng)
+        });
 
         match result {
             Ok(()) => {
@@ -986,21 +992,21 @@ impl GameController {
             value: roll,
         });
 
-        match roll {
-            seven if seven == DiceVal::seven() => {
+        match roll.resolve() {
+            DiceOutcome::Seven => {
                 log::trace!("Rolled a 7, executing seven handling");
                 self.execute_seven(current_player)
             }
-            other => {
-                log::trace!("Rolled {}, executing harvesting", Into::<u8>::into(other));
-                Self::execute_harvesting(&mut self.game, current_player, other);
+            DiceOutcome::Harvest(num) => {
+                log::trace!("Rolled {}, executing harvesting", Into::<u8>::into(num));
+                Self::execute_harvesting(&mut self.game, current_player, num);
                 self.notify_observers(&GameEvent::ResourcesDistributed);
                 TurnFlow::Continue
             }
         }
     }
 
-    fn execute_harvesting(game: &mut GameState, player: PlayerId, num: DiceVal) {
+    fn execute_harvesting(game: &mut GameState, player: PlayerId, num: TileNum) {
         log::trace!(
             "Executing harvesting for dice roll {}",
             Into::<u8>::into(num)
@@ -1182,12 +1188,10 @@ impl GameController {
                 },
             };
 
-            let result = match self.random.as_mut() {
-                Some(rng) => self
-                    .game
-                    .use_robbers_with_rng(target_hex, player, robbed_id, rng),
-                None => self.game.use_robbers(target_hex, player, robbed_id),
-            };
+            let result = self.random.with_rng(|rng| {
+                self.game
+                    .use_robbers_with_rng(target_hex, player, robbed_id, rng)
+            });
 
             match result {
                 Ok(()) => {
@@ -1294,10 +1298,10 @@ mod tests {
             resource::ResourceCollection,
         },
     };
-    use crate::math::dice::{DiceRoller, DiceVal};
+    use crate::math::dice::{DiceRoll, DiceRoller, TileNum};
     use crate::topology::Hex;
 
-    fn game_with_settlement_on_numbered_hex() -> (GameState, Hex, crate::math::dice::DiceVal) {
+    fn game_with_settlement_on_numbered_hex() -> (GameState, Hex, TileNum) {
         let mut init = GameInitializationState::default();
         let (target_hex, target_num) = init
             .board
@@ -1421,10 +1425,10 @@ mod tests {
     }
 
     #[derive(Debug)]
-    struct FixedDice(DiceVal);
+    struct FixedDice(DiceRoll);
 
     impl DiceRoller for FixedDice {
-        fn roll(&mut self) -> DiceVal {
+        fn roll(&mut self) -> DiceRoll {
             self.0
         }
     }
@@ -1706,10 +1710,11 @@ mod tests {
         }));
 
         let result = controller.run_with_options(
-            &mut FixedDice(target_num),
+            &mut FixedDice(target_num.into()),
             RunOptions {
                 max_turns: Some(1),
                 max_invalid_actions: Some(10),
+                ..RunOptions::default()
             },
         );
         let records = records.borrow();
@@ -1736,13 +1741,14 @@ mod tests {
         controller.add_observer(Box::new(RecordingObserver {
             events: events.clone(),
         }));
-        let mut dice = FixedDice(DiceVal::try_from(8).unwrap());
+        let mut dice = FixedDice(DiceRoll::try_from(8).unwrap());
 
         let result = controller.run_with_options(
             &mut dice,
             RunOptions {
                 max_turns: Some(10),
                 max_invalid_actions: Some(10),
+                ..RunOptions::default()
             },
         );
 
@@ -1765,13 +1771,14 @@ mod tests {
     fn invalid_actions_below_limit_do_not_interrupt() {
         let state = GameInitializationState::default().finish();
         let mut controller = GameController::new(state, invalid_agents(Some(9)));
-        let mut dice = FixedDice(DiceVal::try_from(8).unwrap());
+        let mut dice = FixedDice(DiceRoll::try_from(8).unwrap());
 
         let result = controller.run_with_options(
             &mut dice,
             RunOptions {
                 max_turns: Some(1),
                 max_invalid_actions: Some(10),
+                ..RunOptions::default()
             },
         );
 

@@ -292,14 +292,12 @@ pub fn legal_road_spots_iter<'a>(
     Box::new(
         context
             .public
-            .board
-            .paths()
-            .iter()
-            .copied()
-            .filter(move |&pos| {
+            .builds
+            .road_extension_candidates(player_id, context.public.board.paths())
+            .into_iter()
+            .inspect(move |_| {
                 #[cfg(feature = "bench-counters")]
                 counters::road_candidate();
-                context.public.builds.can_place_road(player_id, pos).is_ok()
             })
             .map(|pos| Build::Road(Road { pos })),
     )
@@ -320,14 +318,12 @@ pub fn legal_road_spots_count_with_resources(
 
     context
         .public
-        .board
-        .paths()
-        .iter()
-        .copied()
-        .filter(|&pos| {
+        .builds
+        .road_extension_candidates(player_id, context.public.board.paths())
+        .into_iter()
+        .inspect(|_| {
             #[cfg(feature = "bench-counters")]
             counters::road_candidate();
-            context.public.builds.can_place_road(player_id, pos).is_ok()
         })
         .count()
 }
@@ -617,7 +613,22 @@ impl<const K: usize> Iterator for RoadExtensionIter<'_, K> {
                 return Some(result);
             }
 
-            if self.next_indices[self.depth] >= self.board_paths.len() {
+            let prefix = self.chosen[..self.depth]
+                .iter()
+                .copied()
+                .flatten()
+                .collect::<Vec<_>>();
+            let candidates = self
+                .builds
+                .road_extension_candidates_with_extra_roads(
+                    self.player_id,
+                    prefix.clone(),
+                    self.board_paths,
+                )
+                .into_iter()
+                .collect::<Vec<_>>();
+
+            if self.next_indices[self.depth] >= candidates.len() {
                 self.next_indices[self.depth] = 0;
                 if self.depth == 0 {
                     self.done = true;
@@ -628,23 +639,16 @@ impl<const K: usize> Iterator for RoadExtensionIter<'_, K> {
                 continue;
             }
 
-            let candidate = self.board_paths[self.next_indices[self.depth]];
+            let candidate = candidates[self.next_indices[self.depth]];
             self.next_indices[self.depth] += 1;
 
             #[cfg(feature = "bench-counters")]
             counters::roadbuild_candidate();
 
-            let prefix = self.chosen[..self.depth].iter().copied().flatten();
-            if self
-                .builds
-                .can_place_road_with_extra_roads_iter(self.player_id, candidate, prefix)
-                .is_ok()
-            {
-                self.chosen[self.depth] = Some(candidate);
-                self.depth += 1;
-                if self.depth < K {
-                    self.next_indices[self.depth] = 0;
-                }
+            self.chosen[self.depth] = Some(candidate);
+            self.depth += 1;
+            if self.depth < K {
+                self.next_indices[self.depth] = 0;
             }
         }
     }
@@ -1707,8 +1711,10 @@ mod tests {
                 assert_ne!(first, second);
             }
             let mut candidate = state.clone();
+            let mut rng = crate::gameplay::random::GameRandom::seeded(42);
             assert!(
-                candidate.use_dev_card(usage, 0).is_ok(),
+                rng.with_rng(|rng| candidate.use_dev_card_with_rng(usage, 0, rng))
+                    .is_ok(),
                 "legal roadbuild usage should be accepted: {usage:?}"
             );
         }

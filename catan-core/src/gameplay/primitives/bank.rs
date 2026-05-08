@@ -1,4 +1,4 @@
-use rand::{Rng, SeedableRng, rngs::SmallRng, seq::SliceRandom};
+use rand::{Rng, seq::SliceRandom};
 use serde::{Deserialize, Serialize};
 
 use crate::gameplay::primitives::{
@@ -33,16 +33,6 @@ impl Bank {
 
     pub fn draw_dev_card(&mut self) -> Option<DevCardKind> {
         self.dev_cards.pop()
-    }
-
-    pub fn shuffle_dev_cards(&mut self) {
-        let mut rng = rand::rng();
-        self.shuffle_dev_cards_with_rng(&mut rng);
-    }
-
-    pub fn shuffle_dev_cards_with_seed(&mut self, seed: u64) {
-        let mut rng = SmallRng::seed_from_u64(seed);
-        self.shuffle_dev_cards_with_rng(&mut rng);
     }
 
     pub fn shuffle_dev_cards_with_rng<R: Rng + ?Sized>(&mut self, rng: &mut R) {
@@ -168,6 +158,7 @@ pub enum PlayerResourceExchangeError {
 #[cfg(test)]
 mod tests {
     use super::Bank;
+    use rand::{SeedableRng, rngs::SmallRng};
 
     #[test]
     fn seeded_dev_card_shuffle_is_reproducible() {
@@ -175,9 +166,9 @@ mod tests {
         let mut second = Bank::default();
         let mut different = Bank::default();
 
-        first.shuffle_dev_cards_with_seed(42);
-        second.shuffle_dev_cards_with_seed(42);
-        different.shuffle_dev_cards_with_seed(43);
+        first.shuffle_dev_cards_with_rng(&mut SmallRng::seed_from_u64(42));
+        second.shuffle_dev_cards_with_rng(&mut SmallRng::seed_from_u64(42));
+        different.shuffle_dev_cards_with_rng(&mut SmallRng::seed_from_u64(43));
 
         assert_eq!(first.dev_cards, second.dev_cards);
         assert_ne!(first.dev_cards, different.dev_cards);

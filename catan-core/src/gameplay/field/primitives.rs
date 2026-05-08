@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     common::SmallSet,
     gameplay::primitives::{PortKind, Tile},
-    math::dice::DiceVal,
+    math::dice::{DiceRoll, TileNum},
     topology::{Hex, HexIndex, Intersection, Path, SignedAxis},
 };
 
@@ -126,25 +126,33 @@ impl Index<Hex> for BoardArrangement {
 
 #[derive(Debug, Clone, Default)]
 pub struct HexesByNum {
-    arr: [SmallSet<Hex, 4>; 11],
+    arr: [SmallSet<Hex, 4>; 10],
 }
 
-impl Index<DiceVal> for HexesByNum {
+impl Index<TileNum> for HexesByNum {
     type Output = SmallSet<Hex, 4>;
 
-    fn index(&self, index: DiceVal) -> &Self::Output {
+    fn index(&self, index: TileNum) -> &Self::Output {
         let num: u8 = index.into();
-        let min: u8 = DiceVal::min().into();
+        let min = DiceRoll::MIN_VALUE;
         let index = num - min;
-        &self.arr[index as usize]
+        &self.arr[if num < DiceRoll::SEVEN_VALUE {
+            index as usize
+        } else {
+            index as usize - 1
+        }]
     }
 }
 
-impl IndexMut<DiceVal> for HexesByNum {
-    fn index_mut(&mut self, index: DiceVal) -> &mut Self::Output {
+impl IndexMut<TileNum> for HexesByNum {
+    fn index_mut(&mut self, index: TileNum) -> &mut Self::Output {
         let num: u8 = index.into();
-        let min: u8 = DiceVal::min().into();
+        let min = DiceRoll::MIN_VALUE;
         let index = num - min;
-        &mut self.arr[index as usize]
+        &mut self.arr[if num < DiceRoll::SEVEN_VALUE {
+            index as usize
+        } else {
+            index as usize - 1
+        }]
     }
 }
