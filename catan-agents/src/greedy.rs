@@ -16,13 +16,13 @@ use catan_core::{
         },
         primitives::{
             Tile,
-            build::{Build, Establishment},
+            build::Build,
             player::PlayerId,
             resource::{Resource, ResourceCollection},
             trade::BankTrade,
         },
     },
-    topology::Hex,
+    topology::{Hex, Intersection},
 };
 
 use crate::{lazy, legal};
@@ -53,8 +53,8 @@ impl PlayerRuntime for GreedyAgent {
         let action =
             greedy_init_stage_action(&context, self.id, self.first_initial_resources.as_ref());
         if self.first_initial_resources.is_none() {
-            self.first_initial_resources = Some(initial_settlement_resources(
-                action.establishment_position,
+            self.first_initial_resources = Some(intersection_resources(
+                action.settlement_pos(),
                 context.public.board,
             ));
         }
@@ -197,21 +197,20 @@ pub fn greedy_init_stage_action(
     player_id: PlayerId,
     already_acquired: Option<&BTreeSet<Resource>>,
 ) -> InitStageAction {
-    let (establishment, road) = context
+    context
         .public
         .builds
         .query()
         .possible_initial_placements(context.public.board, player_id)
         .into_iter()
-        .max_by_key(|(establishment, _)| {
-            initial_settlement_score(context.public.board, *establishment, already_acquired)
+        .max_by_key(|action| {
+            initial_settlement_score(
+                context.public.board,
+                action.settlement_pos(),
+                already_acquired,
+            )
         })
-        .expect("there must be an initial placement");
-
-    InitStageAction {
-        establishment_position: establishment.vtx,
-        road,
-    }
+        .expect("there must be an initial placement")
 }
 
 fn best_city_build(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> Option<Build> {
@@ -228,7 +227,7 @@ fn best_settlement_build(
         .into_iter()
         .max_by_key(|build| match build {
             Build::Establishment(establishment) => {
-                production_score_for_settlement(context.public.board, *establishment)
+                settlement_production_score(context.public.board, establishment.vtx)
             }
             Build::Road(_) => 0,
         })
@@ -325,10 +324,10 @@ fn next_objective_score_for_resources(
 
 fn initial_settlement_score(
     board: &catan_core::gameplay::field::state::BoardLayout,
-    establishment: Establishment,
+    pos: Intersection,
     already_acquired: Option<&BTreeSet<Resource>>,
 ) -> (usize, u16, usize, u16) {
-    let resources = settlement_resource_scores(board, establishment);
+    let resources = intersection_resource_scores(board, pos);
     let new_resources = resources
         .iter()
         .filter(|(resource, _)| {
@@ -346,38 +345,31 @@ fn initial_settlement_score(
     )
 }
 
-fn production_score_for_settlement(
+fn settlement_production_score(
     board: &catan_core::gameplay::field::state::BoardLayout,
-    establishment: Establishment,
+    pos: Intersection,
 ) -> u16 {
-    settlement_resource_scores(board, establishment)
+    intersection_resource_scores(board, pos)
         .into_iter()
         .map(|(_, pts)| pts)
         .sum()
 }
 
-fn initial_settlement_resources(
-    pos: catan_core::topology::Intersection,
+fn intersection_resources(
+    intersection: catan_core::topology::Intersection,
     board: &catan_core::gameplay::field::state::BoardLayout,
 ) -> BTreeSet<Resource> {
-    settlement_resource_scores(
-        board,
-        Establishment {
-            vtx: pos,
-            stage: catan_core::gameplay::primitives::build::EstablishmentType::Settlement,
-        },
-    )
-    .into_iter()
-    .map(|(resource, _)| resource)
-    .collect()
+    intersection_resource_scores(board, intersection)
+        .into_iter()
+        .map(|(resource, _)| resource)
+        .collect()
 }
 
-fn settlement_resource_scores(
+fn intersection_resource_scores(
     board: &catan_core::gameplay::field::state::BoardLayout,
-    establishment: Establishment,
+    intersection: Intersection,
 ) -> Vec<(Resource, u16)> {
-    establishment
-        .vtx
+    intersection
         .as_arr()
         .into_iter()
         .filter(|hex| hex.norm() <= board.arrangement.radius() as usize)

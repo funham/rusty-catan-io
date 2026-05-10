@@ -19,16 +19,19 @@ mod tests {
         CliRole, CliToHost, HostToCli, LegalDecisionOptions, NonblockingFrameReader,
         RemoteCliObserver, RemoteLogLevel, UiBoard, UiModel, read_frame, write_frame,
     };
-    use catan_core::gameplay::{
-        game::{
-            event::{GameEvent, GameObserver, ObserverKind, ObserverNotificationContext},
-            index::GameIndex,
-            init::GameInitializationState,
-            view::{ContextFactory, SearchFactory, VisibilityConfig},
-        },
-        primitives::{
-            dev_card::{DevCardKind, DevCardUsage, UsableDevCard},
-            resource::{Resource, ResourceCollection},
+    use catan_core::{
+        agent::action::InitStageAction,
+        gameplay::{
+            game::{
+                event::{GameEvent, GameObserver, ObserverKind, ObserverNotificationContext},
+                index::GameIndex,
+                init::GameInitializationState,
+                view::{ContextFactory, SearchFactory, VisibilityConfig},
+            },
+            primitives::{
+                dev_card::{DevCardKind, DevCardUsage, UsableDevCard},
+                resource::{Resource, ResourceCollection},
+            },
         },
     };
 
@@ -183,7 +186,8 @@ mod tests {
                 .builds
                 .query()
                 .possible_initial_placements(&init.board, player_id)
-                .into_iter()
+                .iter()
+                .map(InitStageAction::as_builds)
                 .next()
                 .expect("default board should have initial placements");
             if player_id == 1 {
@@ -292,7 +296,8 @@ mod tests {
             .builds
             .query()
             .possible_initial_placements(&init.board, 0)
-            .into_iter()
+            .iter()
+            .map(InitStageAction::as_builds)
             .next()
             .expect("default board should have an initial placement");
         init.builds

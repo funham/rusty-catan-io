@@ -191,13 +191,7 @@ impl DecisionRequestFrame {
 
 impl LegalDecisionOptions {
     pub fn from_context(context: &PlayerDecisionContext<'_>, robber_pos: Option<Hex>) -> Self {
-        let initial_placements = legal::legal_initial_placements(context)
-            .into_iter()
-            .map(|(establishment, road)| InitStageAction {
-                establishment_position: establishment.vtx,
-                road,
-            })
-            .collect();
+        let initial_placements = legal::legal_initial_placements(context);
 
         let robber_hexes = context
             .public

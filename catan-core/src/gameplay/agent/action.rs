@@ -5,20 +5,47 @@ use crate::{
         agent::agent::PlayerRuntime,
         game::view::PlayerDecisionContext,
         primitives::{
-            build::{Build, Road},
+            build::{Build, Establishment, EstablishmentType, Road},
             dev_card::DevCardUsage,
             player::PlayerId,
             resource::ResourceCollection,
             trade::{BankTrade, PersonalTradeOffer, PublicTradeOffer},
         },
     },
-    topology::{Hex, Intersection},
+    topology::{Hex, Intersection, Path},
 };
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct InitStageAction {
-    pub establishment_position: Intersection,
-    pub road: Road,
+    settlement: Intersection,
+    road: Path,
+}
+
+impl InitStageAction {
+    pub fn try_new(settlement: Intersection, road: Path) -> Option<Self> {
+        match settlement.paths().contains(&road) {
+            true => Some(Self { settlement, road }),
+            false => None,
+        }
+    }
+
+    pub fn as_builds(&self) -> (Establishment, Road) {
+        (
+            Establishment {
+                vtx: self.settlement,
+                stage: EstablishmentType::Settlement,
+            },
+            Road { path: self.road },
+        )
+    }
+
+    pub fn settlement_pos(&self) -> Intersection {
+        self.settlement
+    }
+
+    pub fn road_pos(&self) -> Path {
+        self.road
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

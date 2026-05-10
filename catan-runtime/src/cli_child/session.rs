@@ -354,7 +354,7 @@ fn handle_decision(
         request.kind()
     );
     match request {
-        DecisionRequestFrame::InitStage(envelope) => {
+        DecisionRequestFrame::InitStage(envelope) => loop {
             log::trace!(
                 target: "catan_runtime::cli_child::session",
                 "processing InitStage decision id={}",
@@ -364,11 +364,16 @@ fn handle_decision(
             log::trace!("Selected settlement: {:?}", settlement);
             let road = read_initial_road(ui, &envelope, settlement, "road: ")?;
             log::trace!("Selected road: {:?}", road);
-            Ok(DecisionResponseFrame::InitStage(InitStageAction {
-                establishment_position: settlement,
-                road,
-            }))
-        }
+            if let Some(action) = InitStageAction::try_new(settlement, road.path) {
+                break Ok(DecisionResponseFrame::InitStage(action));
+            }
+
+            log::warn!(
+                target: "catan_runtime::cli_child::session",
+                "incorrect InitStage decision id={}",
+                envelope.request_id
+            );
+        },
         DecisionRequestFrame::InitAction(envelope) => {
             log::trace!(
                 target: "catan_runtime::cli_child::session",

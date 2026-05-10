@@ -494,14 +494,17 @@ impl GameState {
 #[cfg(test)]
 mod tests {
     use super::{DevCardUsageError, GameState};
-    use crate::gameplay::{
-        game::init::GameInitializationState,
-        primitives::{
-            dev_card::{DevCardKind, DevCardUsage, UsableDevCard},
-            resource::{Resource, ResourceCollection},
+    use crate::topology::Hex;
+    use crate::{
+        agent::action::InitStageAction,
+        gameplay::{
+            game::init::GameInitializationState,
+            primitives::{
+                dev_card::{DevCardKind, DevCardUsage, UsableDevCard},
+                resource::{Resource, ResourceCollection},
+            },
         },
     };
-    use crate::topology::Hex;
     use rand::SeedableRng;
 
     fn state_with_two_initial_settlements() -> (GameState, Hex) {
@@ -513,7 +516,8 @@ mod tests {
                 .builds
                 .query()
                 .possible_initial_placements(&init.board, player_id)
-                .into_iter()
+                .iter()
+                .map(InitStageAction::as_builds)
                 .next()
                 .expect("default board should have initial placements");
 

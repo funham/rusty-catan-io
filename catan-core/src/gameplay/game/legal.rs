@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    agent::action::RegularAction,
+    agent::action::{InitStageAction, RegularAction},
     common::SmallSet,
     constants::costs,
     gameplay::{
@@ -85,7 +85,7 @@ pub enum BuildClass {
     City,
 }
 
-pub fn legal_initial_placements(context: &PlayerDecisionContext<'_>) -> Vec<(Establishment, Road)> {
+pub fn legal_initial_placements(context: &PlayerDecisionContext<'_>) -> Vec<InitStageAction> {
     context
         .public
         .builds
@@ -931,10 +931,6 @@ pub fn legal_regular_actions_iter<'a>(
     )
 }
 
-pub fn legal_regular_action(context: &PlayerDecisionContext<'_>) -> Vec<RegularAction> {
-    legal_regular_actions(context)
-}
-
 #[derive(Debug, Default, Clone)]
 pub struct TradeFilter {
     pub give: SmallSet<Resource, 5>,
@@ -942,35 +938,104 @@ pub struct TradeFilter {
     pub kind: SmallSet<BankTradeKind, 3>,
 }
 
-pub fn list_trades(white: Option<TradeFilter>, black: Option<TradeFilter>) -> Vec<BankTrade> {
-    let mut result = vec![];
-    for give in Resource::iter()
-        .filter(|give| {
-            !matches!(white.clone(), Some(white) if !white.give.is_empty() && !white.give.contains(give))
-        })
-        .filter(|give| !matches!(black.clone(), Some(black) if black.give.contains(give)))
-    {
-        for take in Resource::iter()
-            .filter(|take| *take != give)
-            .filter(|take| {
-                !matches!(white.clone(), Some(white) if !white.take.is_empty() && !white.take.contains(take))
-            })
-            .filter(|take| !matches!(black.clone(), Some(black) if black.take.contains(take)))
-        {
-            use BankTradeKind::*;
-            for kind in [BankGeneric, PortGeneric, PortSpecific]
-                .into_iter()
-                .filter(|k| {
-                    !matches!(white.clone(), Some(white) if !white.kind.is_empty() && !white.kind.contains(k))
-                })
-                .filter(|k| !matches!(black.clone(), Some(black) if black.kind.contains(k)))
-            {
-                result.push(BankTrade { give, take, kind });
-            }
-        }
+pub fn list_trades(
+    show: Option<TradeFilter>,
+    hide: Option<TradeFilter>,
+) -> impl Iterator<Item = BankTrade> {
+    use BankTradeKind::*;
+
+    fn allowed_give(
+        give: Resource,
+        show: Option<&TradeFilter>,
+        hide: Option<&TradeFilter>,
+    ) -> bool {
+        !matches!(
+            show,
+            Some(white) if !white.give.is_empty() && !white.give.contains(&give)
+        ) && !matches!(
+            hide,
+            Some(black) if black.give.contains(&give)
+        )
     }
 
-    result
+    fn allowed_take(
+        take: Resource,
+        give: Resource,
+        show: Option<&TradeFilter>,
+        hide: Option<&TradeFilter>,
+    ) -> bool {
+        take != give
+            && !matches!(
+                show,
+                Some(white) if !white.take.is_empty() && !white.take.contains(&take)
+            )
+            && !matches!(
+                hide,
+                Some(black) if black.take.contains(&take)
+            )
+    }
+
+    fn allowed_kind(
+        kind: BankTradeKind,
+        white: Option<&TradeFilter>,
+        black: Option<&TradeFilter>,
+    ) -> bool {
+        !matches!(
+            white,
+            Some(white) if !white.kind.is_empty() && !white.kind.contains(&kind)
+        ) && !matches!(
+            black,
+            Some(black) if black.kind.contains(&kind)
+        )
+    }
+
+    let mut give_iter = Resource::iter();
+    let mut take_iter = Resource::iter();
+    let mut kind_iter = [BankGeneric, PortGeneric, PortSpecific].into_iter();
+
+    let mut give = None;
+    let mut take = None;
+
+    std::iter::from_fn(move || {
+        loop {
+            if let (Some(g), Some(t)) = (give, take) {
+                for kind in kind_iter.by_ref() {
+                    if allowed_kind(kind, show.as_ref(), hide.as_ref()) {
+                        return Some(BankTrade {
+                            give: g,
+                            take: t,
+                            kind,
+                        });
+                    }
+                }
+            }
+
+            loop {
+                if let Some(g) = give {
+                    for t in take_iter.by_ref() {
+                        if allowed_take(t, g, show.as_ref(), hide.as_ref()) {
+                            take = Some(t);
+                            kind_iter = [BankGeneric, PortGeneric, PortSpecific].into_iter();
+                            break;
+                        }
+                    }
+
+                    if take.is_some() {
+                        break;
+                    }
+                }
+
+                give = give_iter
+                    .by_ref()
+                    .find(|&g| allowed_give(g, show.as_ref(), hide.as_ref()));
+
+                give?;
+
+                take_iter = Resource::iter();
+                take = None;
+            }
+        }
+    })
 }
 
 #[cfg(test)]
@@ -1002,7 +1067,8 @@ mod tests {
             .possible_initial_placements(&init.board, 0)
             .into_iter()
             .next()
-            .expect("default board should have initial placements");
+            .expect("default board should have initial placements")
+            .as_builds();
         init.builds
             .try_init_place(0, road, settlement)
             .expect("generated initial placement should be valid");
@@ -1518,7 +1584,8 @@ mod tests {
             .possible_initial_placements(&init.board, 0)
             .into_iter()
             .next()
-            .expect("default board should have an initial placement");
+            .expect("default board should have an initial placement")
+            .as_builds();
         init.builds
             .try_init_place(0, road, settlement)
             .expect("generated initial placement should be valid");
@@ -1534,7 +1601,7 @@ mod tests {
         let context = factory.player_decision_context(0, None);
         let legal = legal_initial_placements(&context)
             .into_iter()
-            .map(|(settlement, _)| settlement.vtx)
+            .map(|action| action.settlement_pos())
             .collect::<std::collections::BTreeSet<_>>();
 
         assert!(!legal.contains(&settlement.vtx));
@@ -1557,11 +1624,16 @@ mod tests {
         let placements = legal_initial_placements(&context);
 
         assert!(!placements.is_empty());
-        assert!(placements.iter().all(|(settlement, road)| {
-            road.path
-                .intersections_iter()
-                .any(|intersection| intersection == settlement.vtx)
-        }));
+        assert!(
+            placements
+                .iter()
+                .map(InitStageAction::as_builds)
+                .all(|(settlement, road)| {
+                    road.path
+                        .intersections_iter()
+                        .any(|intersection| intersection == settlement.vtx)
+                })
+        );
     }
 
     fn state_with_port_and_resources(

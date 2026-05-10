@@ -104,19 +104,13 @@ pub fn rand_init_stage_action(
     context: PlayerDecisionContext<'_>,
     rng: &mut impl Rng,
 ) -> InitStageAction {
-    let (establishment, road) = context
+    *context
         .public
         .builds
         .query()
         .possible_initial_placements(context.public.board, context.actor)
         .choose(rng)
         .unwrap()
-        .clone();
-
-    InitStageAction {
-        establishment_position: establishment.vtx,
-        road,
-    }
 }
 
 pub fn rand_init_action(context: PlayerDecisionContext<'_>, rng: &mut impl Rng) -> InitAction {

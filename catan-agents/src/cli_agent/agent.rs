@@ -64,11 +64,15 @@ impl PlayerRuntime for CliAgent {
     fn init_stage_action(&mut self, context: PlayerDecisionContext<'_>) -> InitStageAction {
         let _guard = self.terminal.inner.lock().expect("terminal mutex poisoned");
         TerminalUi::print_decision_context("Initial placement", &context);
-        InitStageAction {
-            establishment_position: TerminalUi::read_intersection("settlement (h1 h2 h3): "),
-            road: Road {
-                path: TerminalUi::read_path("road (h1 h2): "),
-            },
+        loop {
+            if let Some(action) = InitStageAction::try_new(
+                TerminalUi::read_intersection("settlement (h1 h2 h3): "),
+                TerminalUi::read_path("road (h1 h2): "),
+            ) {
+                break action;
+            }
+
+            log::warn!("incorrect initial stage placement")
         }
     }
 

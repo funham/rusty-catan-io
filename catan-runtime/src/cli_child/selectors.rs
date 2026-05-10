@@ -35,11 +35,10 @@ pub(crate) fn move_hex_by_key(current: Hex, key: KeyCode, board_hexes: &BTreeSet
         _ => current,
     };
 
-    if board_hexes.contains(&next) {
-        next
-    } else {
-        current
-    }
+    board_hexes
+        .contains(&next)
+        .then_some(next)
+        .unwrap_or(current)
 }
 
 fn board_hexes(model: &UiModel) -> Vec<Hex> {
@@ -56,7 +55,7 @@ pub(crate) fn legal_initial_settlements(legal: &LegalDecisionOptions) -> BTreeSe
     legal
         .initial_placements
         .iter()
-        .map(|placement| placement.establishment_position)
+        .map(|placement| placement.settlement_pos())
         .collect()
 }
 
@@ -67,8 +66,10 @@ pub(crate) fn initial_roads_for_settlement(
     legal
         .initial_placements
         .iter()
-        .filter(|placement| placement.establishment_position == settlement)
-        .map(|placement| placement.road)
+        .filter_map(|placement| match placement.as_builds() {
+            (v, r) if v.vtx == settlement => Some(r),
+            _ => None,
+        })
         .collect()
 }
 

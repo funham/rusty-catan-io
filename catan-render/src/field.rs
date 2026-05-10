@@ -514,7 +514,9 @@ impl From<Road> for FieldSelection {
 
 #[cfg(test)]
 mod tests {
-    use catan_core::gameplay::game::init::GameInitializationState;
+    use catan_core::{
+        agent::action::InitStageAction, gameplay::game::init::GameInitializationState,
+    };
 
     use super::*;
     use crate::model::{RenderBoard, RenderPlayerBuilds};
@@ -563,7 +565,8 @@ mod tests {
             .builds
             .query()
             .possible_initial_placements(&init.board, 0)
-            .into_iter()
+            .iter()
+            .map(InitStageAction::as_builds)
             .next()
             .expect("default board should have initial placements");
         let view = RenderGameView {

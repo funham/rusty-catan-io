@@ -115,17 +115,12 @@ pub fn lazy_init_stage_action(
     context: PlayerDecisionContext<'_>,
     player_id: PlayerId,
 ) -> InitStageAction {
-    let (establishment, road) = context
+    context
         .public
         .builds
         .query()
         .possible_initial_placements(context.public.board, player_id)
         .into_iter()
         .next()
-        .expect("there must be an initial placement");
-
-    InitStageAction {
-        establishment_position: establishment.vtx,
-        road,
-    }
+        .expect("there must be an initial placement")
 }

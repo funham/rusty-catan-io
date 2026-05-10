@@ -12,7 +12,7 @@ use crate::gameplay::game::init::GameInitializationState;
 use crate::gameplay::game::query::GameQuery;
 use crate::gameplay::game::view::{ContextFactory, SearchFactory, VisibilityConfig};
 use crate::gameplay::primitives::bank::BankResourceExchangeError;
-use crate::gameplay::primitives::build::{BuildingError, Establishment, EstablishmentType};
+use crate::gameplay::primitives::build::{BuildingError, Establishment};
 use crate::gameplay::primitives::dev_card::{DevCardUsage, UsableDevCard};
 use crate::gameplay::primitives::player::PlayerId;
 use crate::gameplay::primitives::resource::ResourceCollection;
@@ -200,25 +200,21 @@ impl GameController {
                     visibility: &VisibilityConfig::default(),
                 };
 
-                let action = InitStageAction::request(
+                let (establishment, road) = InitStageAction::request(
                     players[player_id].as_mut(),
                     factory.player_decision_context(player_id, None),
-                );
+                )
+                .as_builds();
                 log::trace!(
-                    "Player {} requested init placement: road={:?}, settlement={:?}",
+                    "Player {} requested init placement: {:?}, {:?}",
                     player_id,
-                    action.road,
-                    action.establishment_position
+                    road,
+                    establishment
                 );
-
-                let establishment = Establishment {
-                    vtx: action.establishment_position,
-                    stage: EstablishmentType::Settlement,
-                };
 
                 match game_init
                     .builds
-                    .try_init_place(player_id, action.road, establishment)
+                    .try_init_place(player_id, road, establishment)
                 {
                     Err(err) => {
                         match err {
@@ -260,7 +256,7 @@ impl GameController {
                                 &GameEvent::InitialPlacementBuilt {
                                     player_id,
                                     settlement: establishment.vtx,
-                                    road: action.road,
+                                    road,
                                 },
                             );
                         }
@@ -1318,7 +1314,8 @@ mod tests {
             .builds
             .query()
             .possible_initial_placements(&init.board, 0)
-            .into_iter()
+            .iter()
+            .map(InitStageAction::as_builds)
             .find(|(settlement, _)| settlement.vtx.as_set().contains(&target_hex))
             .expect("target resource hex should have a legal adjacent settlement");
 
@@ -1356,7 +1353,8 @@ mod tests {
             .builds
             .query()
             .possible_initial_placements(&init.board, 0)
-            .into_iter()
+            .iter()
+            .map(InitStageAction::as_builds)
             .find(|(settlement, _)| {
                 settlement.vtx.as_set().into_iter().any(|hex| {
                     hex.norm() <= init.board.arrangement.radius() as usize
@@ -1391,7 +1389,8 @@ mod tests {
             .possible_initial_placements(&init.board, 0)
             .into_iter()
             .next()
-            .expect("default board should have initial placements");
+            .expect("default board should have initial placements")
+            .as_builds();
         init.builds
             .try_init_place(0, road, settlement)
             .expect("generated initial placement should be valid");
@@ -1565,14 +1564,10 @@ mod tests {
         }
 
         fn init_stage_action(&mut self, context: PlayerDecisionContext<'_>) -> InitStageAction {
-            let (establishment, road) = legal::legal_initial_placements(&context)
+            legal::legal_initial_placements(&context)
                 .into_iter()
                 .next()
-                .expect("default board should have legal initial placements");
-            InitStageAction {
-                establishment_position: establishment.vtx,
-                road,
-            }
+                .expect("default board should have legal initial placements")
         }
 
         fn init_action(&mut self, _context: PlayerDecisionContext<'_>) -> InitAction {

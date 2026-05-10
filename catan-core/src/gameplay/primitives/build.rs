@@ -823,6 +823,8 @@ pub mod data {
 
 /// Read-only query utilities over the build data.
 pub mod query {
+    use crate::agent::action::InitStageAction;
+
     use super::*;
 
     pub struct BuildDataQuery<'a> {
@@ -879,7 +881,7 @@ pub mod query {
             &self,
             field: &BoardLayout,
             _player_id: PlayerId,
-        ) -> Vec<(Establishment, Road)> {
+        ) -> Vec<InitStageAction> {
             let intersections = field
                 .arrangement
                 .intersections()
@@ -901,15 +903,7 @@ pub mod query {
             });
 
             possible_placements
-                .map(|(v, p)| {
-                    (
-                        Establishment {
-                            vtx: v,
-                            stage: EstablishmentType::Settlement,
-                        },
-                        Road { path: p },
-                    )
-                })
+                .flat_map(|(v, p)| InitStageAction::try_new(v, p))
                 .collect()
         }
     }
