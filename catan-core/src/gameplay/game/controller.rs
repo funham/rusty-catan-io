@@ -3,6 +3,7 @@ use crate::agent::action::{
     self, ChoosePlayerToRobAction, DecisionRequest, DropHalfAction, InitAction, InitStageAction,
     MoveRobbersAction, PostDevCardAction, PostDiceAction, RegularAction,
 };
+use crate::constants;
 use crate::gameplay::agent::agent::Agent;
 use crate::gameplay::game::event::{
     GameEndPlayerStats, GameEvent, GameObserver, ObserverKind, ObserverNotificationContext,
@@ -1224,7 +1225,8 @@ impl GameController {
                 let build_and_dev_card_vp = query.count_dev_card_build_vp(player_id);
                 let has_longest_road = query.longest_road_owner() == Some(player_id);
                 let has_largest_army = query.largest_army_owner() == Some(player_id);
-                let award_vp = u16::from(has_longest_road) * 2 + u16::from(has_largest_army) * 3;
+                let award_vp = u16::from(has_longest_road) * constants::LONGEST_ROAD_VP
+                    + u16::from(has_largest_army) * constants::LARGEST_ARMY_VP;
                 let builds = self.game.builds.by_player(player_id);
                 GameEndPlayerStats {
                     player_id,

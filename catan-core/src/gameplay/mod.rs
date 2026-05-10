@@ -41,4 +41,7 @@ pub mod constants {
             ..ResourceCollection::ZERO
         };
     }
+
+    pub const LONGEST_ROAD_VP: u16 = 2;
+    pub const LARGEST_ARMY_VP: u16 = 2;
 }
