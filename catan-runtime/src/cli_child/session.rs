@@ -9,7 +9,7 @@ use catan_agents::remote_agent::{
     CliRole, CliToHost, DecisionRequestFrame, DecisionResponseFrame, HostToCli,
     NonblockingFrameReader, UiModel, read_frame, ui_model_summary, write_frame,
 };
-use catan_core::agent::action::{
+use catan_core::gameplay::game::action::{
     ChoosePlayerToRobAction, DropHalfAction, InitStageAction, MoveRobbersAction, PostDevCardAction,
     TradeAnswer,
 };
@@ -631,7 +631,7 @@ fn handle_decision(
 mod tests {
     use catan_agents::remote_agent::{DecisionResponseFrame, LegalDecisionOptions, UiModel};
     use catan_core::{
-        agent::action::RegularAction,
+        gameplay::game::action::RegularAction,
         gameplay::game::{
             decision::{DecisionId, DecisionKind, DecisionLifetime, OpenDecision},
             input::PlayerCommand,

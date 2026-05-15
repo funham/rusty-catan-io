@@ -1,15 +1,11 @@
 use catan_core::{
-    agent::{
-        action::{
-            ChoosePlayerToRobAction, DropHalfAction, InitAction, InitStageAction,
-            MoveRobbersAction, PostDevCardAction, PostDiceAction, RegularAction, TradeAnswer,
-        },
-        agent::PlayerRuntime,
-    },
     gameplay::{
         game::{
+            action::{
+                ChoosePlayerToRobAction, DropHalfAction, InitAction, InitStageAction,
+                MoveRobbersAction, PostDevCardAction, PostDiceAction, RegularAction,
+            },
             decision::{DecisionKind, OpenDecision},
-            event::PlayerNotification,
             input::PlayerCommand,
             view::PlayerDecisionContext,
         },
@@ -34,13 +30,7 @@ impl LazyAgent {
     }
 }
 
-impl PlayerNotification for LazyAgent {}
-
-impl PlayerRuntime for LazyAgent {
-    fn player_id(&self) -> PlayerId {
-        self.id
-    }
-
+impl LazyAgent {
     fn init_stage_action(&mut self, context: PlayerDecisionContext<'_>) -> InitStageAction {
         lazy_init_stage_action(context, self.id)
     }
@@ -71,10 +61,6 @@ impl PlayerRuntime for LazyAgent {
         robber_pos: Hex,
     ) -> ChoosePlayerToRobAction {
         lazy_choose_player_to_rob(context, robber_pos)
-    }
-
-    fn answer_trade(&mut self, _context: PlayerDecisionContext<'_>) -> TradeAnswer {
-        TradeAnswer::Decline
     }
 
     fn drop_half(&mut self, context: PlayerDecisionContext<'_>) -> DropHalfAction {

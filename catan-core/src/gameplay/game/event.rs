@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    agent::action::RegularAction,
+    gameplay::game::action::RegularAction,
     gameplay::{
         game::trade::{TradeOfferId, TradeResponseState, TradeScope, TradeSessionId},
         game::view::{

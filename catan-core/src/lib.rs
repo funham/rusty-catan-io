@@ -4,7 +4,6 @@ pub mod gameplay;
 pub mod math;
 pub mod topology;
 
-pub use gameplay::agent;
 pub use gameplay::constants;
 pub use gameplay::game::{
     engine::GameEngine,

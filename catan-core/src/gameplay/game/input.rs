@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    agent::action::{
+    gameplay::game::action::{
         ChoosePlayerToRobAction, DropHalfAction, InitAction, InitStageAction, MoveRobbersAction,
         PostDevCardAction, PostDiceAction, RegularAction,
     },

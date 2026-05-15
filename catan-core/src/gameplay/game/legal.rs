@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    agent::action::{InitStageAction, RegularAction},
     common::SmallSet,
     constants::costs,
+    gameplay::game::action::{InitStageAction, RegularAction},
     gameplay::{
         game::view::{PlayerDecisionContext, PublicPlayerResources},
         primitives::{

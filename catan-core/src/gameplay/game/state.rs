@@ -496,7 +496,7 @@ mod tests {
     use super::{DevCardUsageError, GameState};
     use crate::topology::Hex;
     use crate::{
-        agent::action::InitStageAction,
+        gameplay::game::action::InitStageAction,
         gameplay::{
             game::init::GameInitializationState,
             primitives::{

@@ -4,7 +4,7 @@ use std::{
 };
 
 use catan_core::{
-    agent::action::{
+    gameplay::game::action::{
         ChoosePlayerToRobAction, DropHalfAction, InitAction, InitStageAction, MoveRobbersAction,
         PostDevCardAction, PostDiceAction, RegularAction, TradeAnswer,
     },

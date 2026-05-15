@@ -515,7 +515,7 @@ impl From<Road> for FieldSelection {
 #[cfg(test)]
 mod tests {
     use catan_core::{
-        agent::action::InitStageAction, gameplay::game::init::GameInitializationState,
+        gameplay::game::action::InitStageAction, gameplay::game::init::GameInitializationState,
     };
 
     use super::*;

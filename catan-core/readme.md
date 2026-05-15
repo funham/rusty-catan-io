@@ -48,7 +48,7 @@ This framework implements the complete logic of Settlers of Catan, exposing a cl
   - Validates and executes player commands, including live p2p trade sessions
 - **Runtime seats and bot policies**: Bot and player integration lives outside `catan-core`
   - The core opens decisions; hosts deliver outputs and submit later commands
-  - Network and UI DTOs stay in runtime/agent crates
+  - Network and UI DTOs stay in runtime/player-facing crates
 
 ## Key Features
 

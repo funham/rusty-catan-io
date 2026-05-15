@@ -238,7 +238,7 @@ mod tests {
                     player_id: decision.player_id,
                     decision_id: decision.id,
                     command: catan_core::gameplay::game::input::PlayerCommand::Regular(
-                        catan_core::agent::action::RegularAction::EndMove,
+                        catan_core::gameplay::game::action::RegularAction::EndMove,
                     ),
                 },
             )

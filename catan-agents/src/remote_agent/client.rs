@@ -1,19 +1,18 @@
 use std::{io, os::unix::net::UnixStream};
 
 use catan_core::{
-    agent::{
-        action::{
-            ChoosePlayerToRobAction, DropHalfAction, InitAction, InitStageAction,
-            MoveRobbersAction, PostDevCardAction, PostDiceAction, RegularAction, TradeAnswer,
-        },
-        agent::PlayerRuntime,
-    },
     gameplay::{
         game::{
+            action::{
+                ChoosePlayerToRobAction, DropHalfAction, InitAction, InitStageAction,
+                MoveRobbersAction, PostDevCardAction, PostDiceAction, RegularAction, TradeAnswer,
+            },
+            decision::{DecisionKind, OpenDecision},
             event::{
                 GameEvent, GameObserver, ObserverKind, ObserverNotificationContext,
                 PlayerNotification,
             },
+            input::{PlayerCommand, TradeCommand, TradeResponseCommand},
             view::{PlayerDecisionContext, PlayerNotificationContext},
         },
         primitives::player::PlayerId,
@@ -28,6 +27,8 @@ use super::{
         HostToCli, LegalDecisionOptions, read_frame, write_frame,
     },
 };
+
+use crate::bot::{BotPolicy, unsupported_decision_command};
 
 pub struct RemoteCliAgent {
     player_id: PlayerId,
@@ -103,8 +104,8 @@ impl PlayerNotification for RemoteCliAgent {
     }
 }
 
-impl PlayerRuntime for RemoteCliAgent {
-    fn player_id(&self) -> PlayerId {
+impl RemoteCliAgent {
+    pub fn player_id(&self) -> PlayerId {
         self.player_id
     }
 
@@ -181,6 +182,48 @@ impl PlayerRuntime for RemoteCliAgent {
         match self.request(DecisionRequestFrame::DropHalf(envelope)) {
             DecisionResponseFrame::DropHalf(action) => action,
             other => panic!("unexpected CLI response: {other:?}"),
+        }
+    }
+}
+
+impl BotPolicy for RemoteCliAgent {
+    fn player_id(&self) -> PlayerId {
+        self.player_id
+    }
+
+    fn command_for(
+        &mut self,
+        decision: &OpenDecision,
+        context: PlayerDecisionContext<'_>,
+    ) -> Option<PlayerCommand> {
+        match decision.kind {
+            DecisionKind::InitPlacement => Some(PlayerCommand::InitialPlacement(
+                self.init_stage_action(context),
+            )),
+            DecisionKind::InitAction => Some(PlayerCommand::InitAction(self.init_action(context))),
+            DecisionKind::PostDiceAction => {
+                Some(PlayerCommand::PostDice(self.after_dice_action(context)))
+            }
+            DecisionKind::PostDevCardAction => Some(PlayerCommand::PostDevCard(
+                self.after_dev_card_action(context),
+            )),
+            DecisionKind::RegularAction => {
+                Some(PlayerCommand::Regular(self.regular_action(context)))
+            }
+            DecisionKind::MoveRobber => {
+                Some(PlayerCommand::MoveRobbers(self.move_robbers(context)))
+            }
+            DecisionKind::ChooseRobbedPlayer { robber_pos } => Some(
+                PlayerCommand::ChooseRobbedPlayer(self.choose_player_to_rob(context, robber_pos)),
+            ),
+            DecisionKind::DropHalf { .. } => Some(PlayerCommand::DropHalf(self.drop_half(context))),
+            DecisionKind::TradeResponse { .. } => {
+                Some(PlayerCommand::Trade(match self.answer_trade(context) {
+                    TradeAnswer::Accept => return None,
+                    TradeAnswer::Decline => TradeCommand::Respond(TradeResponseCommand::Reject),
+                }))
+            }
+            DecisionKind::TradeOwnerAction { .. } => unsupported_decision_command(decision.kind),
         }
     }
 }

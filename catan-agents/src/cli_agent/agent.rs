@@ -4,16 +4,15 @@ use std::{
 };
 
 use catan_core::{
-    agent::{
-        action::{
-            ChoosePlayerToRobAction, DropHalfAction, InitAction, InitStageAction,
-            MoveRobbersAction, PostDevCardAction, PostDiceAction, RegularAction, TradeAnswer,
-        },
-        agent::PlayerRuntime,
-    },
     gameplay::{
         game::{
+            action::{
+                ChoosePlayerToRobAction, DropHalfAction, InitAction, InitStageAction,
+                MoveRobbersAction, PostDevCardAction, PostDiceAction, RegularAction, TradeAnswer,
+            },
+            decision::{DecisionKind, OpenDecision},
             event::{GameEvent, PlayerNotification},
+            input::{PlayerCommand, TradeCommand, TradeResponseCommand},
             view::{PlayerDecisionContext, PlayerNotificationContext},
         },
         primitives::{
@@ -25,6 +24,8 @@ use catan_core::{
     },
     topology::{Hex, HexIndex, Intersection, Path, repr::Dual},
 };
+
+use crate::bot::{BotPolicy, unsupported_decision_command};
 
 #[derive(Debug, Default)]
 struct TerminalUi;
@@ -56,8 +57,8 @@ impl PlayerNotification for CliAgent {
     }
 }
 
-impl PlayerRuntime for CliAgent {
-    fn player_id(&self) -> PlayerId {
+impl CliAgent {
+    pub fn player_id(&self) -> PlayerId {
         self.player_id
     }
 
@@ -124,6 +125,48 @@ impl PlayerRuntime for CliAgent {
         DropHalfAction(TerminalUi::read_resource_collection(
             "drop brick wood wheat sheep ore: ",
         ))
+    }
+}
+
+impl BotPolicy for CliAgent {
+    fn player_id(&self) -> PlayerId {
+        self.player_id
+    }
+
+    fn command_for(
+        &mut self,
+        decision: &OpenDecision,
+        context: PlayerDecisionContext<'_>,
+    ) -> Option<PlayerCommand> {
+        match decision.kind {
+            DecisionKind::InitPlacement => Some(PlayerCommand::InitialPlacement(
+                self.init_stage_action(context),
+            )),
+            DecisionKind::InitAction => Some(PlayerCommand::InitAction(self.init_action(context))),
+            DecisionKind::PostDiceAction => {
+                Some(PlayerCommand::PostDice(self.after_dice_action(context)))
+            }
+            DecisionKind::PostDevCardAction => Some(PlayerCommand::PostDevCard(
+                self.after_dev_card_action(context),
+            )),
+            DecisionKind::RegularAction => {
+                Some(PlayerCommand::Regular(self.regular_action(context)))
+            }
+            DecisionKind::MoveRobber => {
+                Some(PlayerCommand::MoveRobbers(self.move_robbers(context)))
+            }
+            DecisionKind::ChooseRobbedPlayer { robber_pos } => Some(
+                PlayerCommand::ChooseRobbedPlayer(self.choose_player_to_rob(context, robber_pos)),
+            ),
+            DecisionKind::DropHalf { .. } => Some(PlayerCommand::DropHalf(self.drop_half(context))),
+            DecisionKind::TradeResponse { .. } => {
+                Some(PlayerCommand::Trade(match self.answer_trade(context) {
+                    TradeAnswer::Accept => return None,
+                    TradeAnswer::Decline => TradeCommand::Respond(TradeResponseCommand::Reject),
+                }))
+            }
+            DecisionKind::TradeOwnerAction { .. } => unsupported_decision_command(decision.kind),
+        }
     }
 }
 

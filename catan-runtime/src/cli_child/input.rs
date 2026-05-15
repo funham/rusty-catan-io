@@ -7,8 +7,8 @@ use std::io;
 
 use catan_agents::remote_agent::{DecisionRequestEnvelope, UiModel};
 use catan_core::{
-    agent::action::{InitAction, PostDiceAction, RegularAction},
     constants,
+    gameplay::game::action::{InitAction, PostDiceAction, RegularAction},
     gameplay::primitives::{
         build::{Build, Establishment, EstablishmentType, Road},
         dev_card::{DevCardUsage, UsableDevCard},
@@ -659,7 +659,7 @@ pub(crate) fn read_robbed_player(
 
 #[cfg(test)]
 mod tests {
-    use catan_core::agent::action::RegularAction;
+    use catan_core::gameplay::game::action::RegularAction;
 
     use super::{
         PartialBuildMode, PartialDevCardMode, parse_regular_action, partial_build_command,

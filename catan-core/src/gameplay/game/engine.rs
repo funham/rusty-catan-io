@@ -1,9 +1,9 @@
 use crate::{
-    agent::action::{
+    constants,
+    gameplay::game::action::{
         ChoosePlayerToRobAction, DropHalfAction, InitAction, InitStageAction, MoveRobbersAction,
         PostDevCardAction, PostDiceAction, RegularAction,
     },
-    constants,
     gameplay::{
         game::{
             event::{GameEndPlayerStats, GameEvent},

@@ -71,9 +71,9 @@ fn wrong_player_is_rejected_without_closing_decision() {
         GameInput::Submit {
             player_id: 1,
             decision_id: decision.id,
-            command: PlayerCommand::MoveRobbers(crate::agent::action::MoveRobbersAction(Hex::new(
-                0, 0,
-            ))),
+            command: PlayerCommand::MoveRobbers(crate::gameplay::game::action::MoveRobbersAction(
+                Hex::new(0, 0),
+            )),
         },
         &mut sink,
     );
@@ -565,7 +565,7 @@ fn submit_after_game_end_is_rejected_without_mutation() {
         GameInput::Submit {
             player_id: 0,
             decision_id: decision.id,
-            command: PlayerCommand::Regular(crate::agent::action::RegularAction::EndMove),
+            command: PlayerCommand::Regular(crate::gameplay::game::action::RegularAction::EndMove),
         },
         &mut sink,
     );

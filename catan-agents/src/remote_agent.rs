@@ -20,7 +20,7 @@ mod tests {
         RemoteCliObserver, RemoteLogLevel, UiBoard, UiModel, read_frame, write_frame,
     };
     use catan_core::{
-        agent::action::InitStageAction,
+        gameplay::game::action::InitStageAction,
         gameplay::{
             game::{
                 event::{GameEvent, GameObserver, ObserverKind, ObserverNotificationContext},

@@ -3,17 +3,13 @@ use crate::{
     lazy, legal,
 };
 use catan_core::{
-    agent::{
-        action::{
-            ChoosePlayerToRobAction, DropHalfAction, InitAction, InitStageAction,
-            MoveRobbersAction, PostDevCardAction, PostDiceAction, RegularAction, TradeAnswer,
-        },
-        agent::PlayerRuntime,
-    },
     gameplay::{
         game::{
+            action::{
+                ChoosePlayerToRobAction, DropHalfAction, InitAction, InitStageAction,
+                MoveRobbersAction, PostDevCardAction, PostDiceAction, RegularAction,
+            },
             decision::{DecisionKind, OpenDecision},
-            event::PlayerNotification,
             input::PlayerCommand,
             view::PlayerDecisionContext,
         },
@@ -60,13 +56,7 @@ impl<R> RandomAgent<R> {
     }
 }
 
-impl<R> PlayerNotification for RandomAgent<R> {}
-
-impl<R: Rng> PlayerRuntime for RandomAgent<R> {
-    fn player_id(&self) -> PlayerId {
-        self.id
-    }
-
+impl<R: Rng> RandomAgent<R> {
     fn init_stage_action(&mut self, context: PlayerDecisionContext<'_>) -> InitStageAction {
         rand_init_stage_action(context, &mut self.rng)
     }
@@ -97,10 +87,6 @@ impl<R: Rng> PlayerRuntime for RandomAgent<R> {
         robber_pos: Hex,
     ) -> ChoosePlayerToRobAction {
         rand_choose_player_to_rob(context, robber_pos, &mut self.rng)
-    }
-
-    fn answer_trade(&mut self, _context: PlayerDecisionContext<'_>) -> TradeAnswer {
-        TradeAnswer::Decline
     }
 
     fn drop_half(&mut self, context: PlayerDecisionContext<'_>) -> DropHalfAction {
@@ -233,10 +219,6 @@ pub fn rand_choose_player_to_rob(
         .expect("controller must forbid this case");
 
     ChoosePlayerToRobAction(id)
-}
-
-pub fn rand_answer_trade(_context: PlayerDecisionContext<'_>) -> TradeAnswer {
-    TradeAnswer::Decline
 }
 
 #[derive(Debug, Clone, Copy)]

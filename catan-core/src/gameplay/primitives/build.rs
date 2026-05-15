@@ -823,7 +823,7 @@ pub mod data {
 
 /// Read-only query utilities over the build data.
 pub mod query {
-    use crate::agent::action::InitStageAction;
+    use crate::gameplay::game::action::InitStageAction;
 
     use super::*;
 
