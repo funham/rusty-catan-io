@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 
 use crate::gameplay::primitives::player::PlayerId;
 
@@ -37,7 +38,7 @@ pub enum DecisionKind {
 
 #[derive(Debug, Default, Clone)]
 pub struct PendingDecisions {
-    decisions: Vec<OpenDecision>,
+    decisions: SmallVec<[OpenDecision; 31]>,
 }
 
 impl PendingDecisions {
@@ -70,7 +71,7 @@ impl PendingDecisions {
         closed
     }
 
-    pub fn close_all(&mut self) -> Vec<OpenDecision> {
+    pub fn close_all(&mut self) -> impl IntoIterator<Item = OpenDecision> {
         std::mem::take(&mut self.decisions)
     }
 }
