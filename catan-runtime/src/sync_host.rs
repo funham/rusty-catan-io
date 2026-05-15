@@ -37,6 +37,14 @@ impl SeatCommandBuffer {
         self.commands.push(command);
     }
 
+    pub fn len(&self) -> usize {
+        self.commands.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.commands.is_empty()
+    }
+
     fn drain_into(self, queue: &mut VecDeque<SeatCommand>) {
         queue.extend(self.commands);
     }
@@ -45,6 +53,15 @@ impl SeatCommandBuffer {
 pub trait Seat {
     fn player_id(&self) -> PlayerId;
     fn on_frame(&mut self, frame: SeatFrame<'_>, commands: &mut SeatCommandBuffer);
+}
+
+pub struct ObserverFrame<'a> {
+    pub output: &'a GameOutput,
+    pub factory: &'a ContextFactory<'a>,
+}
+
+pub trait OutputObserver {
+    fn on_output(&mut self, frame: ObserverFrame<'_>);
 }
 
 pub struct BotSeat {
@@ -82,6 +99,7 @@ impl Seat for BotSeat {
 pub struct SyncGameHost {
     engine: GameEngine,
     seats: Vec<Box<dyn Seat>>,
+    observers: Vec<Box<dyn OutputObserver>>,
     visibility: VisibilityConfig,
     outputs: VecDeque<GameOutput>,
     inputs: VecDeque<SeatCommand>,
@@ -96,6 +114,7 @@ impl SyncGameHost {
         Self {
             engine: GameEngine::from_init(init, options),
             seats,
+            observers: Vec::new(),
             visibility: VisibilityConfig::default(),
             outputs: VecDeque::new(),
             inputs: VecDeque::new(),
@@ -105,6 +124,10 @@ impl SyncGameHost {
     pub fn with_dice_seed(mut self, seed: u64) -> Self {
         self.engine.set_dice_seed(seed);
         self
+    }
+
+    pub fn add_observer(&mut self, observer: Box<dyn OutputObserver>) {
+        self.observers.push(observer);
     }
 
     pub fn start(&mut self) {
@@ -119,12 +142,12 @@ impl SyncGameHost {
 
     pub fn run_until_waiting(&mut self) -> Option<GameResult> {
         loop {
-            if let Some(result) = self.engine.result().cloned() {
-                return Some(result);
-            }
             if let Some(output) = self.outputs.pop_front() {
                 self.deliver_output(&output);
                 continue;
+            }
+            if let Some(result) = self.engine.result().cloned() {
+                return Some(result);
             }
             if let Some(input) = self.inputs.pop_front() {
                 let mut sink = VecOutputSink::default();
@@ -155,14 +178,21 @@ impl SyncGameHost {
     }
 
     fn deliver_output(&mut self, output: &GameOutput) {
+        let factory = ContextFactory {
+            state: self.engine.state(),
+            index: self.engine.index(),
+            visibility: &self.visibility,
+        };
+        for observer in &mut self.observers {
+            observer.on_output(ObserverFrame {
+                output,
+                factory: &factory,
+            });
+        }
+
         for index in 0..self.seats.len() {
             let player_id = self.seats[index].player_id();
             let policy = self.visibility.player_policy(player_id);
-            let factory = ContextFactory {
-                state: self.engine.state(),
-                index: self.engine.index(),
-                visibility: &self.visibility,
-            };
             let search = Some(SearchFactory::new(self.engine.state(), policy, player_id));
             let frame = SeatFrame {
                 player_id,
@@ -188,7 +218,10 @@ pub fn bot_seat(policy: Box<dyn BotPolicy>) -> Box<dyn Seat> {
 mod tests {
     use super::*;
     use catan_agents::{bot::decline_trade_command, lazy::LazyAgent};
-    use catan_core::gameplay::game::decision::{DecisionKind, OpenDecision};
+    use catan_core::gameplay::game::{
+        decision::{DecisionKind, OpenDecision},
+        event::GameEvent,
+    };
 
     #[test]
     fn bot_seat_responds_immediately() {
@@ -251,5 +284,78 @@ mod tests {
         let _ = DecisionKind::TradeResponse {
             session: catan_core::gameplay::game::trade::TradeSessionId(0),
         };
+    }
+
+    struct CountingObserver {
+        outputs: std::rc::Rc<std::cell::Cell<usize>>,
+    }
+
+    impl OutputObserver for CountingObserver {
+        fn on_output(&mut self, _frame: ObserverFrame<'_>) {
+            self.outputs.set(self.outputs.get() + 1);
+        }
+    }
+
+    #[test]
+    fn output_observer_receives_engine_outputs() {
+        let init = GameInitializationState::default();
+        let seats = (0..init.board.n_players)
+            .map(|id| bot_seat(Box::new(LazyAgent::new(id))))
+            .collect();
+        let output_count = std::rc::Rc::new(std::cell::Cell::new(0));
+        let observer = Box::new(CountingObserver {
+            outputs: output_count.clone(),
+        });
+        let mut host = SyncGameHost::new(init, seats, RunOptions::default()).with_dice_seed(0);
+
+        host.add_observer(observer);
+        host.start();
+        let _ = host.run_until_waiting();
+
+        assert!(output_count.get() > 0);
+    }
+
+    struct EventRecordingObserver {
+        events: std::rc::Rc<std::cell::RefCell<Vec<GameEvent>>>,
+    }
+
+    impl OutputObserver for EventRecordingObserver {
+        fn on_output(&mut self, frame: ObserverFrame<'_>) {
+            if let GameOutput::Event(event) = frame.output {
+                self.events.borrow_mut().push(event.clone());
+            }
+        }
+    }
+
+    #[test]
+    fn terminal_outputs_are_delivered_before_host_returns_result() {
+        let init = GameInitializationState::default();
+        let seats = (0..init.board.n_players)
+            .map(|id| bot_seat(Box::new(LazyAgent::new(id))))
+            .collect();
+        let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let observer = Box::new(EventRecordingObserver {
+            events: events.clone(),
+        });
+        let mut host = SyncGameHost::new(
+            init,
+            seats,
+            RunOptions {
+                max_turns: Some(0),
+                ..RunOptions::default()
+            },
+        )
+        .with_dice_seed(0);
+
+        host.add_observer(observer);
+        host.start();
+        let _ = host.run_to_result();
+
+        assert!(
+            events
+                .borrow()
+                .iter()
+                .any(|event| matches!(event, GameEvent::GameInterrupted { .. }))
+        );
     }
 }

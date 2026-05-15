@@ -14,6 +14,10 @@ use catan_core::agent::action::{
     TradeAnswer,
 };
 use catan_core::gameplay::game::output::GameOutput;
+use catan_core::gameplay::game::{
+    decision::{DecisionKind, OpenDecision},
+    input::{PlayerCommand, TradeCommand, TradeResponseCommand},
+};
 
 use super::{
     input::{
@@ -64,7 +68,11 @@ pub fn run(socket: &FsPath, log_socket: &FsPath, _role: &str) -> Result<(), Stri
         return run_observer_session(stream, ui, snapshot_writer);
     }
 
-    run_player_session(stream, ui, view_mode)
+    let player_id = match role {
+        CliRole::Player { player_id } => player_id,
+        _ => return Err(format!("non-observer CLI role is not a player: {role:?}")),
+    };
+    run_player_session(stream, ui, view_mode, player_id)
 }
 
 fn view_mode_for_role(role: &CliRole) -> CliViewMode {
@@ -79,6 +87,7 @@ fn run_player_session(
     mut stream: UnixStream,
     mut ui: CliUi,
     view_mode: CliViewMode,
+    player_id: catan_core::gameplay::primitives::player::PlayerId,
 ) -> Result<(), String> {
     loop {
         let msg = match read_frame::<HostToCli>(&mut stream) {
@@ -108,22 +117,53 @@ fn run_player_session(
                     return Ok(());
                 }
             }
-            HostToCli::Output { output, view, .. } => match output {
+            HostToCli::Output {
+                output,
+                view,
+                legal,
+            } => match output {
                 GameOutput::Event(event) => {
                     if process_host_event(&mut ui, view_mode, &event, &view, None)? {
                         return Ok(());
                     }
                 }
                 GameOutput::DecisionOpened(decision) => {
-                    let message = format!(
-                        "event protocol decision received but interactive command submission is not wired yet: {:?}",
-                        decision.kind
-                    );
-                    ui.set_message(message)
-                        .map_err(|err| format!("failed to draw TUI: {err}"))?;
+                    if decision.player_id != player_id {
+                        ui.show_model(&view, format!("waiting for player {}", decision.player_id))
+                            .map_err(|err| format!("failed to draw TUI: {err}"))?;
+                        continue;
+                    }
+                    let Some(request) = decision_request_from_output(&decision, view, legal) else {
+                        let message =
+                            format!("unsupported event protocol decision: {:?}", decision.kind);
+                        ui.set_message(message)
+                            .map_err(|err| format!("failed to draw TUI: {err}"))?;
+                        continue;
+                    };
+                    let response = handle_decision(&mut ui, request)
+                        .map_err(|err| format!("failed to handle decision: {err}"))?;
+                    let Some(command) = command_from_decision_response(decision.kind, response)
+                    else {
+                        let message =
+                            format!("unsupported response for decision: {:?}", decision.kind);
+                        write_frame(&mut stream, &CliToHost::Error { message })
+                            .map_err(|err| format!("failed to send decision error: {err}"))?;
+                        continue;
+                    };
+                    write_frame(
+                        &mut stream,
+                        &CliToHost::SubmitCommand {
+                            player_id: decision.player_id,
+                            decision_id: decision.id,
+                            command,
+                        },
+                    )
+                    .map_err(|err| format!("failed to submit command: {err}"))?;
                 }
                 GameOutput::DecisionClosed { .. } | GameOutput::CommandRejected { .. } => {
-                    ui.set_message(format!("engine output: {output:?}"))
+                    let message = player_engine_output_message(&output)
+                        .expect("status output should have a display message");
+                    ui.show_model(&view, message)
                         .map_err(|err| format!("failed to draw TUI: {err}"))?;
                 }
             },
@@ -150,6 +190,82 @@ fn run_player_session(
                     .map_err(|err| format!("failed to send decision response: {err}"))?;
             }
         }
+    }
+}
+
+fn player_engine_output_message(output: &GameOutput) -> Option<String> {
+    match output {
+        GameOutput::DecisionClosed { .. } | GameOutput::CommandRejected { .. } => {
+            Some(format!("engine output: {output:?}"))
+        }
+        GameOutput::Event(_) | GameOutput::DecisionOpened(_) => None,
+    }
+}
+
+fn decision_request_from_output(
+    decision: &OpenDecision,
+    view: UiModel,
+    legal: catan_agents::remote_agent::LegalDecisionOptions,
+) -> Option<DecisionRequestFrame> {
+    let envelope = catan_agents::remote_agent::DecisionRequestEnvelope {
+        request_id: decision.id.0,
+        view,
+        legal,
+    };
+    Some(match decision.kind {
+        DecisionKind::InitPlacement => DecisionRequestFrame::InitStage(envelope),
+        DecisionKind::InitAction => DecisionRequestFrame::InitAction(envelope),
+        DecisionKind::PostDiceAction => DecisionRequestFrame::PostDice(envelope),
+        DecisionKind::PostDevCardAction => DecisionRequestFrame::PostDevCard(envelope),
+        DecisionKind::RegularAction => DecisionRequestFrame::Regular(envelope),
+        DecisionKind::MoveRobber => DecisionRequestFrame::MoveRobbers(envelope),
+        DecisionKind::ChooseRobbedPlayer { .. } => {
+            DecisionRequestFrame::ChoosePlayerToRob(envelope)
+        }
+        DecisionKind::DropHalf { .. } => DecisionRequestFrame::DropHalf(envelope),
+        DecisionKind::TradeResponse { .. } => DecisionRequestFrame::AnswerTrade(envelope),
+        DecisionKind::TradeOwnerAction { .. } => return None,
+    })
+}
+
+fn command_from_decision_response(
+    kind: DecisionKind,
+    response: DecisionResponseFrame,
+) -> Option<PlayerCommand> {
+    match (kind, response) {
+        (DecisionKind::InitPlacement, DecisionResponseFrame::InitStage(action)) => {
+            Some(PlayerCommand::InitialPlacement(action))
+        }
+        (DecisionKind::InitAction, DecisionResponseFrame::InitAction(action)) => {
+            Some(PlayerCommand::InitAction(action))
+        }
+        (DecisionKind::PostDiceAction, DecisionResponseFrame::PostDice(action)) => {
+            Some(PlayerCommand::PostDice(action))
+        }
+        (DecisionKind::PostDevCardAction, DecisionResponseFrame::PostDevCard(action)) => {
+            Some(PlayerCommand::PostDevCard(action))
+        }
+        (DecisionKind::RegularAction, DecisionResponseFrame::Regular(action)) => {
+            Some(PlayerCommand::Regular(action))
+        }
+        (DecisionKind::MoveRobber, DecisionResponseFrame::MoveRobbers(action)) => {
+            Some(PlayerCommand::MoveRobbers(action))
+        }
+        (
+            DecisionKind::ChooseRobbedPlayer { .. },
+            DecisionResponseFrame::ChoosePlayerToRob(action),
+        ) => Some(PlayerCommand::ChooseRobbedPlayer(action)),
+        (DecisionKind::DropHalf { .. }, DecisionResponseFrame::DropHalf(action)) => {
+            Some(PlayerCommand::DropHalf(action))
+        }
+        (DecisionKind::TradeResponse { .. }, DecisionResponseFrame::AnswerTrade(answer)) => {
+            let response = match answer {
+                TradeAnswer::Decline => TradeResponseCommand::Reject,
+                TradeAnswer::Accept => return None,
+            };
+            Some(PlayerCommand::Trade(TradeCommand::Respond(response)))
+        }
+        _ => None,
     }
 }
 
@@ -508,5 +624,68 @@ fn handle_decision(
             log::trace!("Resources to drop: {:?}", resources);
             Ok(DecisionResponseFrame::DropHalf(DropHalfAction(resources)))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use catan_agents::remote_agent::{DecisionResponseFrame, LegalDecisionOptions, UiModel};
+    use catan_core::{
+        agent::action::RegularAction,
+        gameplay::game::{
+            decision::{DecisionId, DecisionKind, DecisionLifetime, OpenDecision},
+            input::PlayerCommand,
+            view::{ContextFactory, VisibilityConfig},
+        },
+    };
+
+    use super::{command_from_decision_response, decision_request_from_output};
+
+    fn test_model() -> UiModel {
+        let init = catan_core::gameplay::game::init::GameInitializationState::default();
+        let state = init.finish();
+        let index = catan_core::gameplay::game::index::GameIndex::rebuild(&state);
+        let visibility = VisibilityConfig::default();
+        let factory = ContextFactory {
+            state: &state,
+            index: &index,
+            visibility: &visibility,
+        };
+        UiModel::from_decision(&factory.player_decision_context(0, None))
+    }
+
+    #[test]
+    fn event_decision_regular_response_maps_to_submit_command_payload() {
+        let decision = OpenDecision {
+            id: DecisionId(9),
+            player_id: 0,
+            kind: DecisionKind::RegularAction,
+            lifetime: DecisionLifetime::OneShot,
+        };
+
+        let request =
+            decision_request_from_output(&decision, test_model(), LegalDecisionOptions::default())
+                .expect("regular decision should map to a request");
+        assert_eq!(request.request_id(), 9);
+
+        let command = command_from_decision_response(
+            decision.kind,
+            DecisionResponseFrame::Regular(RegularAction::EndMove),
+        );
+        assert!(matches!(
+            command,
+            Some(PlayerCommand::Regular(RegularAction::EndMove))
+        ));
+    }
+
+    #[test]
+    fn player_engine_status_outputs_keep_the_current_model_visible() {
+        let output = catan_core::gameplay::game::output::GameOutput::DecisionClosed {
+            decision_id: DecisionId(3),
+        };
+
+        let message = super::player_engine_output_message(&output);
+
+        assert!(message.is_some());
     }
 }
