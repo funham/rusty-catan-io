@@ -1,7 +1,7 @@
 mod cli_child;
-mod config;
-mod host;
 mod logging;
+
+use catan_runtime::host;
 
 use std::path::PathBuf;
 

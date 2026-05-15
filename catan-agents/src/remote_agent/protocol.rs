@@ -10,8 +10,11 @@ use catan_core::{
     },
     gameplay::{
         game::{
+            decision::DecisionId,
             event::{GameEvent, ObserverKind},
+            input::PlayerCommand,
             legal::{self, BuildClass},
+            output::GameOutput,
             view::PlayerDecisionContext,
         },
         primitives::{build::Build, dev_card::DevCardUsage, player::PlayerId, trade::BankTrade},
@@ -74,16 +77,33 @@ impl CliRole {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum HostToCli {
-    Hello { role: CliRole },
+    Hello {
+        role: CliRole,
+    },
     DecisionRequest(DecisionRequestFrame),
-    Event { event: GameEvent, view: UiModel },
-    Shutdown { reason: String },
+    Output {
+        output: GameOutput,
+        view: UiModel,
+        legal: LegalDecisionOptions,
+    },
+    Event {
+        event: GameEvent,
+        view: UiModel,
+    },
+    Shutdown {
+        reason: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CliToHost {
     Ready,
     DecisionResponse(DecisionResponseFrame),
+    SubmitCommand {
+        player_id: PlayerId,
+        decision_id: DecisionId,
+        command: PlayerCommand,
+    },
     Error {
         message: String,
     },

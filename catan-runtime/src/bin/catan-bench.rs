@@ -5,17 +5,19 @@ use std::{
     time::{Duration, Instant},
 };
 
+use catan_agents::bot::BotPolicy;
 use catan_agents::{greedy::GreedyAgent, lazy::LazyAgent, random::RandomAgent};
 use catan_core::{
-    agent::Agent,
     gameplay::game::{
-        controller::{GameController, GameResult, GameRunStats, RunOptions},
         init::GameInitializationState,
+        run::{GameResult, GameRunStats, RunOptions},
     },
     gameplay::random::GameRandom,
-    math::dice::RandomDiceRoller,
 };
-use catan_runtime::config::{FieldConfig, MatchConfig, PlayerConfig};
+use catan_runtime::{
+    config::{FieldConfig, MatchConfig, PlayerConfig},
+    simulation::SimulationHost,
+};
 use serde::Serialize;
 
 #[derive(Debug)]
@@ -278,35 +280,35 @@ fn run_one_game(
     seed: u64,
     max_turns_override: Option<u64>,
 ) -> Result<GameOutcome, String> {
-    let mut agents = build_agents(&config.players, seed);
+    let agents = build_agents(&config.players, seed);
     let init_state = build_initial_state(&config.field, seed);
-    let state = GameController::init(init_state, &mut agents);
-    let mut controller = GameController::new(state, agents);
-    let mut dice = RandomDiceRoller::with_seed(seed);
-    let result = controller.run_with_options(
-        &mut dice,
+    let mut host = SimulationHost::new(
+        init_state,
+        agents,
         RunOptions {
             max_turns: max_turns_override.or(config.limits.max_turns),
             max_invalid_actions: config.limits.max_invalid_actions,
             random: GameRandom::seeded(seed),
         },
-    );
+    )
+    .with_dice_seed(seed);
+    let result = host.run();
 
     Ok(GameOutcome {
         result,
-        stats: controller.run_stats(),
+        stats: host.run_stats(),
     })
 }
 
-fn build_agents(players: &[PlayerConfig], seed: u64) -> Vec<Box<dyn Agent>> {
+fn build_agents(players: &[PlayerConfig], seed: u64) -> Vec<Box<dyn BotPolicy>> {
     players
         .iter()
         .enumerate()
         .map(|(id, player)| match player {
-            PlayerConfig::Lazy => Box::new(LazyAgent::new(id)) as Box<dyn Agent>,
-            PlayerConfig::Greedy => Box::new(GreedyAgent::new(id)) as Box<dyn Agent>,
+            PlayerConfig::Lazy => Box::new(LazyAgent::new(id)) as Box<dyn BotPolicy>,
+            PlayerConfig::Greedy => Box::new(GreedyAgent::new(id)) as Box<dyn BotPolicy>,
             PlayerConfig::Random => {
-                Box::new(RandomAgent::with_seed(id, agent_seed(seed, id))) as Box<dyn Agent>
+                Box::new(RandomAgent::with_seed(id, agent_seed(seed, id))) as Box<dyn BotPolicy>
             }
             PlayerConfig::Cli => {
                 unreachable!("unsupported agents are rejected during validation")

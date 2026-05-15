@@ -1,0 +1,167 @@
+use serde::{Deserialize, Serialize};
+
+use crate::gameplay::primitives::{
+    player::PlayerId,
+    resource::{Resource, ResourceCollection},
+    trade::PlayerTrade,
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct TradeSessionId(pub u64);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct TradeOfferId(pub u64);
+
+impl From<usize> for TradeOfferId {
+    fn from(value: usize) -> Self {
+        Self(value as u64)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TradeScope {
+    Public,
+    Targeted(PlayerId),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TradeOffer {
+    pub id: TradeOfferId,
+    pub proposer: PlayerId,
+    pub peer: Option<PlayerId>,
+    pub trade: PlayerTrade,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TradeResponseState {
+    Waiting,
+    Accepted { offer_id: TradeOfferId },
+    Rejected,
+    Countered { offer_id: TradeOfferId },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TradeSession {
+    pub id: TradeSessionId,
+    pub proposer: PlayerId,
+    pub scope: TradeScope,
+    pub offers: Vec<TradeOffer>,
+    pub responses: Vec<Option<TradeResponseState>>,
+    pub version: u64,
+    pub open: bool,
+}
+
+impl TradeSession {
+    pub fn new(
+        id: TradeSessionId,
+        proposer: PlayerId,
+        scope: TradeScope,
+        trade: PlayerTrade,
+        player_count: usize,
+    ) -> Self {
+        let mut responses = vec![None; player_count];
+        for player_id in 0..player_count {
+            if player_id == proposer || !scope.includes(player_id) {
+                continue;
+            }
+            responses[player_id] = Some(TradeResponseState::Waiting);
+        }
+
+        Self {
+            id,
+            proposer,
+            scope,
+            offers: vec![TradeOffer {
+                id: TradeOfferId(0),
+                proposer,
+                peer: None,
+                trade,
+            }],
+            responses,
+            version: 0,
+            open: true,
+        }
+    }
+
+    pub fn original_offer_id(&self) -> TradeOfferId {
+        self.offers[0].id
+    }
+
+    pub fn offer(&self, id: TradeOfferId) -> Option<&TradeOffer> {
+        self.offers.iter().find(|offer| offer.id == id)
+    }
+
+    pub fn add_counter_offer(&mut self, player_id: PlayerId, trade: PlayerTrade) -> TradeOfferId {
+        let id = TradeOfferId(self.offers.len() as u64);
+        self.offers.push(TradeOffer {
+            id,
+            proposer: self.proposer,
+            peer: Some(player_id),
+            trade,
+        });
+        self.version += 1;
+        id
+    }
+
+    pub fn set_response(&mut self, player_id: PlayerId, response: TradeResponseState) {
+        self.responses[player_id] = Some(response);
+        self.version += 1;
+    }
+
+    pub fn accepted_peer_for_offer(&self, offer_id: TradeOfferId) -> Option<PlayerId> {
+        self.responses
+            .iter()
+            .enumerate()
+            .find_map(|(player_id, response)| match response {
+                Some(TradeResponseState::Accepted { offer_id: accepted })
+                | Some(TradeResponseState::Countered { offer_id: accepted })
+                    if *accepted == offer_id =>
+                {
+                    Some(player_id)
+                }
+                _ => None,
+            })
+    }
+}
+
+impl TradeScope {
+    pub fn includes(self, player_id: PlayerId) -> bool {
+        match self {
+            Self::Public => true,
+            Self::Targeted(target) => target == player_id,
+        }
+    }
+}
+
+pub fn trade_has_overlapping_resources(trade: &PlayerTrade) -> bool {
+    Resource::iter().any(|resource| trade.give[resource] > 0 && trade.take[resource] > 0)
+}
+
+pub fn trade_from_public_offer(
+    offer: crate::gameplay::primitives::trade::PublicTradeOffer,
+) -> PlayerTrade {
+    PlayerTrade {
+        give: offer.give,
+        take: offer.take,
+    }
+}
+
+pub fn trade_from_personal_offer(
+    offer: crate::gameplay::primitives::trade::PersonalTradeOffer,
+) -> (TradeScope, PlayerTrade) {
+    (
+        TradeScope::Targeted(offer.peer_id),
+        PlayerTrade {
+            give: offer.give,
+            take: offer.take,
+        },
+    )
+}
+
+pub fn trade_is_funded(
+    proposer_resources: &ResourceCollection,
+    peer_resources: &ResourceCollection,
+    trade: &PlayerTrade,
+) -> bool {
+    proposer_resources.has_enough(&trade.give) && peer_resources.has_enough(&trade.take)
+}

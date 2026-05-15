@@ -1,4 +1,7 @@
-use crate::{lazy, legal};
+use crate::{
+    bot::{BotPolicy, unsupported_decision_command},
+    lazy, legal,
+};
 use catan_core::{
     agent::{
         action::{
@@ -8,7 +11,12 @@ use catan_core::{
         agent::PlayerRuntime,
     },
     gameplay::{
-        game::{event::PlayerNotification, view::PlayerDecisionContext},
+        game::{
+            decision::{DecisionKind, OpenDecision},
+            event::PlayerNotification,
+            input::PlayerCommand,
+            view::PlayerDecisionContext,
+        },
         primitives::{
             dev_card::{DevCardUsage, UsableDevCard},
             player::PlayerId,
@@ -97,6 +105,44 @@ impl<R: Rng> PlayerRuntime for RandomAgent<R> {
 
     fn drop_half(&mut self, context: PlayerDecisionContext<'_>) -> DropHalfAction {
         rand_drop_half(context, &mut self.rng)
+    }
+}
+
+impl<R: Rng> BotPolicy for RandomAgent<R> {
+    fn player_id(&self) -> PlayerId {
+        self.id
+    }
+
+    fn command_for(
+        &mut self,
+        decision: &OpenDecision,
+        context: PlayerDecisionContext<'_>,
+    ) -> Option<PlayerCommand> {
+        match decision.kind {
+            DecisionKind::InitPlacement => Some(PlayerCommand::InitialPlacement(
+                self.init_stage_action(context),
+            )),
+            DecisionKind::InitAction => Some(PlayerCommand::InitAction(self.init_action(context))),
+            DecisionKind::PostDiceAction => {
+                Some(PlayerCommand::PostDice(self.after_dice_action(context)))
+            }
+            DecisionKind::PostDevCardAction => Some(PlayerCommand::PostDevCard(
+                self.after_dev_card_action(context),
+            )),
+            DecisionKind::RegularAction => {
+                Some(PlayerCommand::Regular(self.regular_action(context)))
+            }
+            DecisionKind::MoveRobber => {
+                Some(PlayerCommand::MoveRobbers(self.move_robbers(context)))
+            }
+            DecisionKind::ChooseRobbedPlayer { robber_pos } => Some(
+                PlayerCommand::ChooseRobbedPlayer(self.choose_player_to_rob(context, robber_pos)),
+            ),
+            DecisionKind::DropHalf { .. } => Some(PlayerCommand::DropHalf(self.drop_half(context))),
+            DecisionKind::TradeResponse { .. } | DecisionKind::TradeOwnerAction { .. } => {
+                unsupported_decision_command(decision.kind)
+            }
+        }
     }
 }
 

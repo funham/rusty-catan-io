@@ -13,6 +13,7 @@ use catan_core::agent::action::{
     ChoosePlayerToRobAction, DropHalfAction, InitStageAction, MoveRobbersAction, PostDevCardAction,
     TradeAnswer,
 };
+use catan_core::gameplay::game::output::GameOutput;
 
 use super::{
     input::{
@@ -107,6 +108,25 @@ fn run_player_session(
                     return Ok(());
                 }
             }
+            HostToCli::Output { output, view, .. } => match output {
+                GameOutput::Event(event) => {
+                    if process_host_event(&mut ui, view_mode, &event, &view, None)? {
+                        return Ok(());
+                    }
+                }
+                GameOutput::DecisionOpened(decision) => {
+                    let message = format!(
+                        "event protocol decision received but interactive command submission is not wired yet: {:?}",
+                        decision.kind
+                    );
+                    ui.set_message(message)
+                        .map_err(|err| format!("failed to draw TUI: {err}"))?;
+                }
+                GameOutput::DecisionClosed { .. } | GameOutput::CommandRejected { .. } => {
+                    ui.set_message(format!("engine output: {output:?}"))
+                        .map_err(|err| format!("failed to draw TUI: {err}"))?;
+                }
+            },
             HostToCli::DecisionRequest(request) => {
                 if view_mode == CliViewMode::Snapshot {
                     let message = format!(
@@ -182,6 +202,26 @@ fn run_observer_session(
                     }
                     state.latest = SessionViewState::view(view, format!("event: {event:?}"));
                 }
+                HostToCli::Output { output, view, .. } => match output {
+                    GameOutput::Event(event) => {
+                        state.event_count += 1;
+                        let view_mode = ui.view_mode();
+                        if process_host_event(
+                            &mut ui,
+                            view_mode,
+                            &event,
+                            &view,
+                            Some(state.event_count),
+                        )? {
+                            return Ok(());
+                        }
+                        state.latest = SessionViewState::view(view, format!("event: {event:?}"));
+                    }
+                    other => {
+                        state.latest.message = format!("engine output: {other:?}");
+                        draw_latest_or_message(&mut ui, &state.latest, state.event_count)?;
+                    }
+                },
                 HostToCli::DecisionRequest(request) => {
                     let message =
                         format!("observer received unexpected decision request: {request:?}");

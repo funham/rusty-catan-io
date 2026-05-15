@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     agent::action::RegularAction,
     gameplay::{
+        game::trade::{TradeOfferId, TradeResponseState, TradeScope, TradeSessionId},
         game::view::{
             OmniscientGameView, PlayerNotificationContext, PrivatePlayerView, PublicGameView,
         },
@@ -11,6 +12,7 @@ use crate::{
             dev_card::DevCardUsage,
             player::PlayerId,
             resource::ResourceCollection,
+            trade::PlayerTrade,
         },
     },
     math::dice::DiceRoll,
@@ -98,6 +100,34 @@ pub enum GameEvent {
     },
     Traded {
         player_id: PlayerId,
+    },
+    TradeOpened {
+        session_id: TradeSessionId,
+        proposer_id: PlayerId,
+        scope: TradeScope,
+        offer_id: TradeOfferId,
+        offer: PlayerTrade,
+    },
+    TradeOfferAdded {
+        session_id: TradeSessionId,
+        player_id: PlayerId,
+        offer_id: TradeOfferId,
+        offer: PlayerTrade,
+    },
+    TradeResponseUpdated {
+        session_id: TradeSessionId,
+        player_id: PlayerId,
+        response: TradeResponseState,
+    },
+    TradeCompleted {
+        session_id: TradeSessionId,
+        proposer_id: PlayerId,
+        peer_id: PlayerId,
+        offer_id: TradeOfferId,
+    },
+    TradeCancelled {
+        session_id: TradeSessionId,
+        proposer_id: PlayerId,
     },
     PlayerDiscarded {
         player_id: PlayerId,

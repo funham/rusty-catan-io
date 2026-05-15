@@ -7,13 +7,21 @@ use catan_core::{
         agent::PlayerRuntime,
     },
     gameplay::{
-        game::{event::PlayerNotification, view::PlayerDecisionContext},
+        game::{
+            decision::{DecisionKind, OpenDecision},
+            event::PlayerNotification,
+            input::PlayerCommand,
+            view::PlayerDecisionContext,
+        },
         primitives::{player::PlayerId, resource::ResourceCollection},
     },
     topology::Hex,
 };
 
-use crate::legal;
+use crate::{
+    bot::{BotPolicy, unsupported_decision_command},
+    legal,
+};
 
 #[derive(Debug, Default)]
 pub struct LazyAgent {
@@ -74,6 +82,44 @@ impl PlayerRuntime for LazyAgent {
     }
 }
 
+impl BotPolicy for LazyAgent {
+    fn player_id(&self) -> PlayerId {
+        self.id
+    }
+
+    fn command_for(
+        &mut self,
+        decision: &OpenDecision,
+        context: PlayerDecisionContext<'_>,
+    ) -> Option<PlayerCommand> {
+        match decision.kind {
+            DecisionKind::InitPlacement => Some(PlayerCommand::InitialPlacement(
+                self.init_stage_action(context),
+            )),
+            DecisionKind::InitAction => Some(PlayerCommand::InitAction(self.init_action(context))),
+            DecisionKind::PostDiceAction => {
+                Some(PlayerCommand::PostDice(self.after_dice_action(context)))
+            }
+            DecisionKind::PostDevCardAction => Some(PlayerCommand::PostDevCard(
+                self.after_dev_card_action(context),
+            )),
+            DecisionKind::RegularAction => {
+                Some(PlayerCommand::Regular(self.regular_action(context)))
+            }
+            DecisionKind::MoveRobber => {
+                Some(PlayerCommand::MoveRobbers(self.move_robbers(context)))
+            }
+            DecisionKind::ChooseRobbedPlayer { robber_pos } => Some(
+                PlayerCommand::ChooseRobbedPlayer(self.choose_player_to_rob(context, robber_pos)),
+            ),
+            DecisionKind::DropHalf { .. } => Some(PlayerCommand::DropHalf(self.drop_half(context))),
+            DecisionKind::TradeResponse { .. } | DecisionKind::TradeOwnerAction { .. } => {
+                unsupported_decision_command(decision.kind)
+            }
+        }
+    }
+}
+
 pub fn lazy_drop_half(context: PlayerDecisionContext<'_>) -> DropHalfAction {
     let number_to_drop = context.private.resources.total() / 2;
     let mut to_drop = ResourceCollection::default();
@@ -97,7 +143,7 @@ pub fn lazy_choose_player_to_rob(
     let id = legal::legal_rob_targets(&context, robber_pos)
         .into_iter()
         .next()
-        .expect("GameController must forbid this case");
+        .expect("engine must forbid this case");
     ChoosePlayerToRobAction(id)
 }
 

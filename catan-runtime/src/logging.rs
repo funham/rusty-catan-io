@@ -6,7 +6,7 @@ use std::{
 
 use chrono::{DateTime, Utc};
 
-use crate::config::LoggingConfig;
+use catan_runtime::config::LoggingConfig;
 
 struct TeeLogWriter {
     stderr: io::Stderr,
@@ -111,7 +111,7 @@ fn strip_ansi_escape_codes(buf: &[u8], state: &mut AnsiStripState) -> Vec<u8> {
 mod tests {
     use chrono::{TimeZone, Utc};
 
-    use crate::config::LoggingConfig;
+    use catan_runtime::config::LoggingConfig;
 
     use super::{AnsiStripState, strip_ansi_escape_codes, timestamped_log_path};
 

@@ -35,20 +35,20 @@ This framework implements the complete logic of Settlers of Catan, exposing a cl
   - **Settlement validation**: Enforces distance rules for building settlements
 
 #### **`crate::gameplay`**
-*Game engine implementing MVC pattern*
+*Deterministic game engine and domain model*
 - **`Field`**: Complete board state including terrain, numbers, ports, and player constructions
 - **`GameState`** (Model): Comprehensive game state tracking
   - Player resources, development cards, and victory points
   - Bank and resource supply
   - Longest road and largest army status
   - Rule-enforced state transitions for trades, robber placement, and building
-- **`GameController`** (Controller): Turn management and game flow
-  - Orchestrates player turns and phase transitions
-  - Validates and executes player actions
-  - Manages game initialization and victory conditions
-- **`Strategy` trait** (View/Interface): Bot AI or Player interface
-  - Stateful or stateless decision-making implementations
-  - Query-response pattern for turn decisions (and some other decisions, such as answering to trade offers)
+- **`GameEngine`**: Event-driven turn management and game flow
+  - Owns deterministic state, phases, pending decisions, and run stats
+  - Accepts serialized `GameInput` commands and emits `GameOutput`
+  - Validates and executes player commands, including live p2p trade sessions
+- **Runtime seats and bot policies**: Bot and player integration lives outside `catan-core`
+  - The core opens decisions; hosts deliver outputs and submit later commands
+  - Network and UI DTOs stay in runtime/agent crates
 
 ## Key Features
 
@@ -75,13 +75,20 @@ This framework implements the complete logic of Settlers of Catan, exposing a cl
 ### Basic Usage (TODO: check correctness)
 
 ```rust
-// Create a game with four AI players
-let mut game = GameState::build(...);
-let mut strategies = vec![ConsoleInputStrategy::new(...), LazyAssStrategy::default(), ...];
-let mut game_result = GameController::run(&mut game, &mut strategies);
+let init = GameInitializationState::default();
+let mut engine = GameEngine::from_init(init, RunOptions::default());
+let mut sink = VecOutputSink::default();
+engine.start(&mut sink);
 
-// Access final results
-match game_result {
-    GameResult::Win(player) => println!("Player #{} won!", player),
-    GameResult::Interrupted => println!("Game was interrupted"),
+for output in sink.into_vec() {
+    match output {
+        GameOutput::DecisionOpened(decision) => {
+            // Submit a matching GameInput::Submit later.
+        }
+        GameOutput::Event(event) => {
+            // Render, log, or project factual domain events.
+        }
+        _ => {}
+    }
 }
+```
