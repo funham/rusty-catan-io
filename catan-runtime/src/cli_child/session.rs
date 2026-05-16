@@ -407,14 +407,18 @@ fn process_host_event(
     );
     if let (
         CliViewMode::Normal,
-        catan_core::gameplay::game::event::GameEvent::GameEnded {
-            winner_id,
-            turn_no,
-            stats,
+        catan_core::gameplay::game::event::GameEvent::GameFinished {
+            result: catan_core::gameplay::game::run::GameResult::Win(winner_id),
+            stats: Some(stats),
         },
     ) = (view_mode, event)
     {
-        ui.show_game_ended(view, *winner_id, *turn_no, stats)
+        let turn_no = view
+            .snapshot_state
+            .as_ref()
+            .map(|state| state.turn.get_turns_played())
+            .unwrap_or_default();
+        ui.show_game_ended(view, *winner_id, turn_no, stats)
             .map_err(|err| format!("failed to draw game ended screen: {err}"))?;
         return Ok(true);
     }

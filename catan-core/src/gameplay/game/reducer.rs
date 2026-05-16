@@ -13,6 +13,7 @@ pub enum ReplayError {
     ExpectedActiveLifecycle,
     InvalidInitialPlacement,
     InvalidResourceTransfer,
+    InvalidBuild,
 }
 
 pub fn reduce(lifecycle: &mut EngineLifecycle, event: &GameEvent) -> Result<(), ReplayError> {
@@ -86,7 +87,58 @@ pub fn reduce(lifecycle: &mut EngineLifecycle, event: &GameEvent) -> Result<(), 
                 .players_resource_transfer(*robbed_id, *player_id, (*resource).into())
                 .map_err(|_| ReplayError::InvalidResourceTransfer)?;
         }
-        GameEvent::GameFinished { result } => finish(lifecycle, result.clone())?,
+        GameEvent::TurnStarted { player_id, .. } => {
+            let active = lifecycle
+                .active_mut()
+                .ok_or(ReplayError::ExpectedActiveLifecycle)?;
+            active
+                .game
+                .players
+                .get_mut(*player_id)
+                .dev_cards_reset_queue();
+            active.stats.turns_started += 1;
+        }
+        GameEvent::TurnEnded { .. } => {
+            let active = lifecycle
+                .active_mut()
+                .ok_or(ReplayError::ExpectedActiveLifecycle)?;
+            active.game.turn.next();
+            active.stats.turns_ended += 1;
+        }
+        GameEvent::Built { player_id, build } => {
+            let active = lifecycle
+                .active_mut()
+                .ok_or(ReplayError::ExpectedActiveLifecycle)?;
+            active
+                .game
+                .build(*player_id, *build)
+                .map_err(|_| ReplayError::InvalidBuild)?;
+            active
+                .index
+                .refresh_after_build(&active.game, *player_id, *build);
+            active.stats.builds += 1;
+        }
+        GameEvent::PlayerDiscarded {
+            player_id,
+            resources,
+        } => {
+            let active = lifecycle
+                .active_mut()
+                .ok_or(ReplayError::ExpectedActiveLifecycle)?;
+            active
+                .game
+                .transfer_to_bank(*resources, *player_id)
+                .map_err(|_| ReplayError::InvalidResourceTransfer)?;
+            active.stats.player_discards += 1;
+        }
+        GameEvent::RobberMoved { hex, .. } => {
+            let active = lifecycle
+                .active_mut()
+                .ok_or(ReplayError::ExpectedActiveLifecycle)?;
+            active.game.board_state.robber_pos = *hex;
+            active.stats.robber_moves += 1;
+        }
+        GameEvent::GameFinished { result, .. } => finish(lifecycle, result.clone())?,
         _ => {}
     }
     Ok(())

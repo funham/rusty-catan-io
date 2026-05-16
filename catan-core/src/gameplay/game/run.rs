@@ -87,9 +87,7 @@ impl GameRunStats {
             GameEvent::RobberMoved { .. } => self.robber_moves += 1,
             GameEvent::ResourceStolen { .. } => {}
             GameEvent::ActionRejected { .. } => self.action_rejections += 1,
-            GameEvent::GameEnded { .. } => self.games_ended += 1,
-            GameEvent::GameInterrupted { .. } => self.games_interrupted += 1,
-            GameEvent::GameFinished { result } => match result {
+            GameEvent::GameFinished { result, .. } => match result {
                 GameResult::Win(_) => self.games_ended += 1,
                 GameResult::Interrupted { .. } | GameResult::LimitReached { .. } => {
                     self.games_interrupted += 1

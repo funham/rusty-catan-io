@@ -20,3 +20,6 @@ path.
 ## Retired path
 
 CLI-owned snapshot writing has been retired. Snapshots are host-owned.
+
+Separate state-driving `GameEnded` and `GameInterrupted` events have been retired. Terminal state
+is represented by `GameFinished`.

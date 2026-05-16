@@ -28,6 +28,7 @@ use crate::{
 pub type EventBatch = SmallVec<[GameEvent; 32]>;
 pub type ResourceDistribution = SmallVec<[(PlayerId, ResourceCollection); 8]>;
 pub type EventRecipients = SmallVec<[PlayerId; 2]>;
+pub type GameEndStats = SmallVec<[GameEndPlayerStats; 6]>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EventCause {
@@ -231,15 +232,8 @@ pub enum GameEvent {
         action: RegularAction,
         reason: String,
     },
-    GameEnded {
-        winner_id: PlayerId,
-        turn_no: u64,
-        stats: Vec<GameEndPlayerStats>,
-    },
-    GameInterrupted {
-        reason: String,
-    },
     GameFinished {
         result: GameResult,
+        stats: Option<GameEndStats>,
     },
 }

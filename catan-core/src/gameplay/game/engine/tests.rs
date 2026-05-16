@@ -111,6 +111,7 @@ fn reducer_moves_active_lifecycle_to_finished_result() {
         &mut lifecycle,
         &GameEvent::GameFinished {
             result: crate::gameplay::game::run::GameResult::LimitReached { turns: 0 },
+            stats: None,
         },
     )
     .unwrap();
@@ -192,6 +193,50 @@ fn reducer_applies_explicit_resource_stolen_event() {
     let active = lifecycle.as_active().expect("lifecycle should stay active");
     assert_eq!(active.game.players.get(0).resources().brick, 1);
     assert_eq!(active.game.players.get(1).resources().brick, 0);
+}
+
+#[test]
+fn reducer_applies_discard_robber_and_turn_events() {
+    let mut lifecycle = EngineLifecycle::active(GameInitializationState::default().finish());
+    lifecycle
+        .active_mut()
+        .unwrap()
+        .game
+        .transfer_from_bank(one_brick(), 0)
+        .unwrap();
+    let target_hex = Hex::new(1, 0);
+
+    reducer::reduce(
+        &mut lifecycle,
+        &GameEvent::PlayerDiscarded {
+            player_id: 0,
+            resources: one_brick(),
+        },
+    )
+    .unwrap();
+    reducer::reduce(
+        &mut lifecycle,
+        &GameEvent::RobberMoved {
+            player_id: 0,
+            hex: target_hex,
+            robbed_id: None,
+        },
+    )
+    .unwrap();
+    reducer::reduce(
+        &mut lifecycle,
+        &GameEvent::TurnEnded {
+            player_id: 0,
+            turn_no: 0,
+        },
+    )
+    .unwrap();
+
+    let active = lifecycle.as_active().expect("lifecycle should stay active");
+    assert_eq!(active.game.players.get(0).resources().brick, 0);
+    assert_eq!(active.game.bank.resources.brick, 19);
+    assert_eq!(active.game.board_state.robber_pos, target_hex);
+    assert_eq!(active.game.turn.get_turn_index(), 1);
 }
 
 #[test]

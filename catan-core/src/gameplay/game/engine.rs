@@ -1070,11 +1070,16 @@ impl GameEngine {
         if let Some(max_turns) = self.max_turns
             && turn_no >= max_turns
         {
-            let reason = format!("turn limit reached ({max_turns})");
             self.result = Some(GameResult::LimitReached { turns: turn_no });
             self.phase = GamePhase::Ended;
             self.close_all_decisions(sink);
-            self.emit_event(GameEvent::GameInterrupted { reason }, sink);
+            self.emit_event(
+                GameEvent::GameFinished {
+                    result: GameResult::LimitReached { turns: turn_no },
+                    stats: None,
+                },
+                sink,
+            );
             return GameStatus::Ended;
         }
         if self.end_if_won(sink) {
@@ -1460,23 +1465,21 @@ impl GameEngine {
         let Some(winner) = GameQuery::new(&self.game, &self.index).check_win_condition() else {
             return false;
         };
-        let turn_no = self.game.turn.get_turns_played();
         let stats = self.game_end_stats();
         self.result = Some(GameResult::Win(winner));
         self.phase = GamePhase::Ended;
         self.close_all_decisions(sink);
         self.emit_event(
-            GameEvent::GameEnded {
-                winner_id: winner,
-                turn_no,
-                stats,
+            GameEvent::GameFinished {
+                result: GameResult::Win(winner),
+                stats: Some(stats),
             },
             sink,
         );
         true
     }
 
-    fn game_end_stats(&self) -> Vec<GameEndPlayerStats> {
+    fn game_end_stats(&self) -> crate::gameplay::game::event::GameEndStats {
         let query = GameQuery::new(&self.game, &self.index);
         (0..self.game.players.count())
             .map(|player_id| {
@@ -1601,7 +1604,13 @@ impl GameEngine {
             });
             self.phase = GamePhase::Ended;
             self.close_all_decisions(sink);
-            self.emit_event(GameEvent::GameInterrupted { reason }, sink);
+            self.emit_event(
+                GameEvent::GameFinished {
+                    result: GameResult::Interrupted { reason },
+                    stats: None,
+                },
+                sink,
+            );
             return;
         }
         self.reject_with_limit_count(

@@ -363,11 +363,12 @@ mod tests {
         host.start();
         let _ = host.run_to_result();
 
-        assert!(
-            events
-                .borrow()
-                .iter()
-                .any(|event| matches!(event, GameEvent::GameInterrupted { .. }))
-        );
+        assert!(events.borrow().iter().any(|event| matches!(
+            event,
+            GameEvent::GameFinished {
+                result: GameResult::LimitReached { turns: 0 },
+                stats: None,
+            }
+        )));
     }
 }
