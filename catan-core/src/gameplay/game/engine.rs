@@ -14,7 +14,10 @@ use crate::{
             event::{EventCause, GameEndPlayerStats, GameEvent, ResourceDistribution},
             index::GameIndex,
             init::GameInitializationState,
+            lifecycle::EngineLifecycle,
+            projector,
             query::GameQuery,
+            reducer,
             run::{GameResult, GameRunStats, RunOptions},
             state::GameState,
         },
@@ -69,6 +72,7 @@ pub struct GameEngine {
     result: Option<GameResult>,
     next_tx_id: u64,
     current_tx_id: u64,
+    lifecycle: EngineLifecycle,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -125,6 +129,7 @@ impl GameEngine {
 
     pub fn new_with_options(game: GameState, options: RunOptions) -> Self {
         let index = GameIndex::rebuild(&game);
+        let lifecycle = EngineLifecycle::active(game.clone());
         Self {
             game,
             init: None,
@@ -143,6 +148,7 @@ impl GameEngine {
             result: None,
             next_tx_id: 1,
             current_tx_id: 0,
+            lifecycle,
         }
     }
 
@@ -160,6 +166,17 @@ impl GameEngine {
     ) -> Self {
         let game = snapshot.state.into_state(board);
         let index = GameIndex::rebuild(&game);
+        let lifecycle = EngineLifecycle::from_snapshot_parts(
+            game.clone(),
+            snapshot.phase,
+            snapshot.pending.clone(),
+            snapshot.next_decision_id,
+            snapshot.trade_sessions.clone(),
+            snapshot.stats,
+            snapshot.invalid_actions,
+            snapshot.pending_discards.clone(),
+            snapshot.result.clone(),
+        );
         Self {
             game,
             init: None,
@@ -178,6 +195,7 @@ impl GameEngine {
             result: snapshot.result,
             next_tx_id: snapshot.next_tx_id,
             current_tx_id: 0,
+            lifecycle,
         }
     }
 
@@ -205,19 +223,26 @@ impl GameEngine {
         if self.phase != GamePhase::NotStarted {
             return GameStatus::Waiting;
         }
+        if self.init.is_some() {
+            let tx_id = self.begin_transaction(EventCause::Start);
+            let mut transaction =
+                crate::gameplay::game::event::EventTransaction::new(tx_id, EventCause::Start);
+            transaction.events =
+                crate::gameplay::game::decider::decide(&self.lifecycle, GameInput::Start);
+            for event in &transaction.events {
+                reducer::reduce(&mut self.lifecycle, event)
+                    .expect("start transaction should reduce");
+                self.record_event(event);
+            }
+            self.sync_from_lifecycle();
+            for output in projector::project_transaction(&transaction) {
+                sink.push(output);
+            }
+            return GameStatus::Waiting;
+        }
         self.begin_transaction(EventCause::Start);
         self.emit_event(GameEvent::GameStarted, sink);
-        if let Some(init) = &self.init {
-            self.phase = GamePhase::InitialPlacement;
-            self.open_decision(
-                init.turn.get_turn_index(),
-                DecisionKind::InitPlacement,
-                DecisionLifetime::OneShot,
-                sink,
-            );
-        } else {
-            self.start_turn(sink);
-        }
+        self.start_turn(sink);
         GameStatus::Waiting
     }
 
@@ -244,6 +269,10 @@ impl GameEngine {
 
     pub fn result(&self) -> Option<&GameResult> {
         self.result.as_ref()
+    }
+
+    pub fn lifecycle(&self) -> &EngineLifecycle {
+        &self.lifecycle
     }
 
     pub fn is_started(&self) -> bool {
@@ -1634,9 +1663,35 @@ impl GameEngine {
         self.stats.record_event(event);
     }
 
-    fn begin_transaction(&mut self, _cause: EventCause) {
+    fn begin_transaction(&mut self, _cause: EventCause) -> u64 {
         self.current_tx_id = self.next_tx_id;
         self.next_tx_id += 1;
+        self.current_tx_id
+    }
+
+    fn sync_from_lifecycle(&mut self) {
+        match &self.lifecycle {
+            EngineLifecycle::Active(active) => {
+                self.game = active.game.clone();
+                self.index = active.index.clone();
+                self.phase = active.phase;
+                self.pending = active.pending.clone();
+                self.next_decision_id = active.next_decision_id;
+                self.trade_sessions = active.trade_sessions.clone();
+                self.stats = active.stats;
+                self.invalid_actions = active.invalid_actions;
+                self.pending_discards = active.pending_discards.clone();
+                self.result = None;
+            }
+            EngineLifecycle::Finished(finished) => {
+                self.game = finished.game.clone();
+                self.index = finished.index.clone();
+                self.phase = GamePhase::Ended;
+                self.pending = PendingDecisions::default();
+                self.stats = finished.stats;
+                self.result = Some(finished.result.clone());
+            }
+        }
     }
 
     fn trade_session(&self, id: TradeSessionId) -> Option<&TradeSession> {

@@ -58,6 +58,39 @@ impl EngineLifecycle {
         })
     }
 
+    pub fn from_snapshot_parts(
+        game: GameState,
+        phase: GamePhase,
+        pending: PendingDecisions,
+        next_decision_id: u64,
+        trade_sessions: TradeSessions,
+        stats: GameRunStats,
+        invalid_actions: u64,
+        pending_discards: PendingDiscards,
+        result: Option<GameResult>,
+    ) -> Self {
+        let index = GameIndex::rebuild(&game);
+        match result {
+            Some(result) => Self::Finished(FinishedGame {
+                game,
+                index,
+                result,
+                stats,
+            }),
+            None => Self::Active(ActiveGame {
+                game,
+                index,
+                phase,
+                pending,
+                next_decision_id,
+                trade_sessions,
+                stats,
+                invalid_actions,
+                pending_discards,
+            }),
+        }
+    }
+
     pub fn as_active(&self) -> Option<&ActiveGame> {
         match self {
             Self::Active(active) => Some(active),

@@ -30,6 +30,12 @@ pub fn reduce(lifecycle: &mut EngineLifecycle, event: &GameEvent) -> Result<(), 
                 .ok_or(ReplayError::ExpectedActiveLifecycle)?;
             active.next_decision_id = active.next_decision_id.max(decision.id.0 + 1);
             active.pending.push(decision.clone());
+            if matches!(
+                decision.kind,
+                crate::gameplay::game::decision::DecisionKind::InitPlacement
+            ) {
+                active.phase = crate::gameplay::game::phase::GamePhase::InitialPlacement;
+            }
             if !matches!(
                 decision.kind,
                 crate::gameplay::game::decision::DecisionKind::InitPlacement

@@ -9,6 +9,7 @@ use crate::{
             input::{GameInput, PlayerCommand, TradeCommand, TradeResponseCommand},
             lifecycle::EngineLifecycle,
             output::{CommandRejectionReason, GameOutput, VecOutputSink},
+            phase::GamePhase,
             reducer,
             run::RunOptions,
             trade::TradeScope,
@@ -295,6 +296,36 @@ fn start_opens_one_shot_init_decision() {
     assert_eq!(decision.player_id, 0);
     assert!(matches!(decision.kind, DecisionKind::InitPlacement));
     assert_eq!(decision.lifetime, DecisionLifetime::OneShot);
+}
+
+#[test]
+fn start_updates_reducer_lifecycle_mirror() {
+    let (engine, outputs) = started_engine();
+    let decision = first_open_decision(&outputs);
+
+    let active = engine
+        .lifecycle()
+        .as_active()
+        .expect("started engine should have active lifecycle");
+
+    assert!(matches!(active.phase, GamePhase::InitialPlacement));
+    assert!(active.pending.get(decision.id).is_some());
+    assert_eq!(active.next_decision_id, decision.id.0 + 1);
+}
+
+#[test]
+fn start_outputs_share_one_transaction_id() {
+    let (_engine, outputs) = started_engine();
+    let tx_ids = outputs
+        .iter()
+        .filter_map(|output| match output {
+            GameOutput::Event(record) => Some(record.tx_id),
+            _ => None,
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+
+    assert_eq!(tx_ids.len(), 1);
+    assert_eq!(tx_ids.first().copied(), Some(1));
 }
 
 #[test]
