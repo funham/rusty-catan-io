@@ -118,6 +118,16 @@ pub fn reduce(lifecycle: &mut EngineLifecycle, event: &GameEvent) -> Result<(), 
                 .refresh_after_build(&active.game, *player_id, *build);
             active.stats.builds += 1;
         }
+        GameEvent::Traded { player_id, trade } => {
+            let active = lifecycle
+                .active_mut()
+                .ok_or(ReplayError::ExpectedActiveLifecycle)?;
+            active
+                .game
+                .trade_with_bank(*player_id, *trade)
+                .map_err(|_| ReplayError::InvalidResourceTransfer)?;
+            active.stats.bank_trades += 1;
+        }
         GameEvent::PlayerDiscarded {
             player_id,
             resources,

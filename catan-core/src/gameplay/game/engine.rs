@@ -644,7 +644,7 @@ impl GameEngine {
             RegularAction::TradeWithBank(trade) => {
                 match self.execute_trade_with_bank(player_id, trade) {
                     Ok(()) => {
-                        self.emit_event(GameEvent::Traded { player_id }, sink);
+                        self.emit_event(GameEvent::Traded { player_id, trade }, sink);
                         self.open_regular_decision(player_id, sink);
                         GameStatus::Waiting
                     }

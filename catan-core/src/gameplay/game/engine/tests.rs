@@ -16,7 +16,7 @@ use crate::{
         primitives::{
             dev_card::DevCardKind,
             resource::{Resource, ResourceCollection},
-            trade::{PlayerTrade, PublicTradeOffer},
+            trade::{BankTrade, BankTradeKind, PlayerTrade, PublicTradeOffer},
         },
     },
     topology::Hex,
@@ -237,6 +237,40 @@ fn reducer_applies_discard_robber_and_turn_events() {
     assert_eq!(active.game.bank.resources.brick, 19);
     assert_eq!(active.game.board_state.robber_pos, target_hex);
     assert_eq!(active.game.turn.get_turn_index(), 1);
+}
+
+#[test]
+fn reducer_applies_bank_trade_event_with_exact_exchange() {
+    let mut lifecycle = EngineLifecycle::active(GameInitializationState::default().finish());
+    lifecycle
+        .active_mut()
+        .unwrap()
+        .game
+        .transfer_from_bank(
+            ResourceCollection {
+                brick: 4,
+                ..ResourceCollection::ZERO
+            },
+            0,
+        )
+        .unwrap();
+
+    reducer::reduce(
+        &mut lifecycle,
+        &GameEvent::Traded {
+            player_id: 0,
+            trade: BankTrade {
+                kind: BankTradeKind::BankGeneric,
+                give: Resource::Brick,
+                take: Resource::Wood,
+            },
+        },
+    )
+    .unwrap();
+
+    let active = lifecycle.as_active().expect("lifecycle should stay active");
+    assert_eq!(active.game.players.get(0).resources().brick, 0);
+    assert_eq!(active.game.players.get(0).resources().wood, 1);
 }
 
 #[test]

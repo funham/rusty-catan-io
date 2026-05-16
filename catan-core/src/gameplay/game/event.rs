@@ -18,7 +18,7 @@ use crate::{
             dev_card::{DevCardKind, DevCardUsage},
             player::PlayerId,
             resource::{Resource, ResourceCollection},
-            trade::PlayerTrade,
+            trade::{BankTrade, PlayerTrade},
         },
     },
     math::dice::DiceRoll,
@@ -184,6 +184,7 @@ pub enum GameEvent {
     },
     Traded {
         player_id: PlayerId,
+        trade: BankTrade,
     },
     TradeOpened {
         session_id: TradeSessionId,
