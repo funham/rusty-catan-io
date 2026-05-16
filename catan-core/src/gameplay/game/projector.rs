@@ -12,12 +12,34 @@ pub fn project_event(tx_id: u64, event: GameEvent) -> GameOutput {
 }
 
 pub fn project_transaction(transaction: &EventTransaction) -> Vec<GameOutput> {
-    transaction
-        .events
-        .iter()
-        .cloned()
-        .map(|event| project_event(transaction.tx_id, event))
-        .collect()
+    let mut outputs = Vec::new();
+    for event in &transaction.events {
+        outputs.push(project_event(transaction.tx_id, event.clone()));
+        match event {
+            GameEvent::DecisionOpened(decision) => {
+                outputs.push(GameOutput::DecisionOpened(decision.clone()));
+            }
+            GameEvent::DecisionClosed { decision_id } => {
+                outputs.push(GameOutput::DecisionClosed {
+                    decision_id: *decision_id,
+                });
+            }
+            GameEvent::CommandRejected {
+                player_id,
+                decision_id,
+                reason,
+                ..
+            } => {
+                outputs.push(GameOutput::CommandRejected {
+                    player_id: *player_id,
+                    decision_id: *decision_id,
+                    reason: reason.clone(),
+                });
+            }
+            _ => {}
+        }
+    }
+    outputs
 }
 
 #[cfg(test)]
@@ -50,5 +72,27 @@ mod tests {
             record.event,
             GameEvent::DevCardDrawn { player_id: 2, .. }
         ));
+    }
+
+    #[test]
+    fn transaction_projection_includes_compatibility_decision_output() {
+        use crate::gameplay::game::decision::{
+            DecisionId, DecisionKind, DecisionLifetime, OpenDecision,
+        };
+
+        let mut transaction = EventTransaction::new(12, EventCause::Start);
+        transaction.events.push(GameEvent::DecisionOpened(OpenDecision {
+            id: DecisionId(3),
+            player_id: 1,
+            kind: DecisionKind::InitPlacement,
+            lifetime: DecisionLifetime::OneShot,
+        }));
+
+        let outputs = project_transaction(&transaction);
+
+        assert!(matches!(outputs.as_slice(), [
+            GameOutput::Event(record),
+            GameOutput::DecisionOpened(decision),
+        ] if record.tx_id == 12 && decision.id == DecisionId(3)));
     }
 }
