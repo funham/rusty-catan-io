@@ -71,13 +71,14 @@ impl GameRunStats {
             GameEvent::TurnStarted { .. } => self.turns_started += 1,
             GameEvent::TurnEnded { .. } => self.turns_ended += 1,
             GameEvent::InitialPlacementBuilt { .. } => {}
+            GameEvent::InitialResourcesGranted { .. } => {}
             GameEvent::DiceRolled { .. } => self.dice_rolls += 1,
             GameEvent::ResourcesDistributed { .. } => self.resources_distributed += 1,
             GameEvent::DevCardBought { .. } => self.dev_cards_bought += 1,
             GameEvent::DevCardDrawn { .. } => {}
             GameEvent::DevCardUsed { .. } => self.dev_cards_used += 1,
             GameEvent::Built { .. } => self.builds += 1,
-            GameEvent::Traded { .. } => self.bank_trades += 1,
+            GameEvent::BankTradeCompleted { .. } => self.bank_trades += 1,
             GameEvent::TradeOpened { .. }
             | GameEvent::TradeOfferAdded { .. }
             | GameEvent::TradeResponseUpdated { .. }
@@ -86,7 +87,6 @@ impl GameRunStats {
             GameEvent::PlayerDiscarded { .. } => self.player_discards += 1,
             GameEvent::RobberMoved { .. } => self.robber_moves += 1,
             GameEvent::ResourceStolen { .. } => {}
-            GameEvent::ActionRejected { .. } => self.action_rejections += 1,
             GameEvent::GameFinished { result, .. } => match result {
                 GameResult::Win(_) => self.games_ended += 1,
                 GameResult::Interrupted { .. } | GameResult::LimitReached { .. } => {

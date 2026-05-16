@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
 use crate::{
-    gameplay::game::action::RegularAction,
     gameplay::{
         game::view::{
             OmniscientGameView, PlayerNotificationContext, PrivatePlayerView, PublicGameView,
@@ -160,6 +159,10 @@ pub enum GameEvent {
         settlement: Intersection,
         road: Road,
     },
+    InitialResourcesGranted {
+        player_id: PlayerId,
+        resources: ResourceCollection,
+    },
     DiceRolled {
         player_id: PlayerId,
         value: DiceRoll,
@@ -182,7 +185,7 @@ pub enum GameEvent {
         player_id: PlayerId,
         build: Build,
     },
-    Traded {
+    BankTradeCompleted {
         player_id: PlayerId,
         trade: BankTrade,
     },
@@ -227,11 +230,6 @@ pub enum GameEvent {
         player_id: PlayerId,
         robbed_id: PlayerId,
         resource: Resource,
-    },
-    ActionRejected {
-        player_id: PlayerId,
-        action: RegularAction,
-        reason: String,
     },
     GameFinished {
         result: GameResult,

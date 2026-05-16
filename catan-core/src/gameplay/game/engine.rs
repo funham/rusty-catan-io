@@ -416,9 +416,9 @@ impl GameEngine {
                         .turn
                         .get_rounds_played()
                         == 1;
-                    if grant_resources {
-                        self.grant_second_initial_resources(player_id, settlement);
-                    }
+                    let initial_resources = grant_resources
+                        .then(|| self.grant_second_initial_resources(player_id, settlement))
+                        .flatten();
                     self.game = self
                         .init
                         .as_ref()
@@ -435,6 +435,15 @@ impl GameEngine {
                         },
                         sink,
                     );
+                    if let Some(resources) = initial_resources {
+                        self.emit_event(
+                            GameEvent::InitialResourcesGranted {
+                                player_id,
+                                resources,
+                            },
+                            sink,
+                        );
+                    }
                     let (rounds_played, next_player) = {
                         let init = self.init.as_mut().expect("init state exists");
                         init.turn.next();
@@ -500,9 +509,13 @@ impl GameEngine {
         }
     }
 
-    fn grant_second_initial_resources(&mut self, player_id: PlayerId, settlement: Establishment) {
+    fn grant_second_initial_resources(
+        &mut self,
+        player_id: PlayerId,
+        settlement: Establishment,
+    ) -> Option<ResourceCollection> {
         let Some(init) = self.init.as_mut() else {
-            return;
+            return None;
         };
         let mut resources = ResourceCollection::ZERO;
         for hex in settlement
@@ -521,6 +534,7 @@ impl GameEngine {
             init.players.get_mut(player_id).resources(),
             resources,
         );
+        Some(resources)
     }
 
     fn apply_init_action(
@@ -680,7 +694,7 @@ impl GameEngine {
             RegularAction::TradeWithBank(trade) => {
                 match self.execute_trade_with_bank(player_id, trade) {
                     Ok(()) => {
-                        self.emit_event(GameEvent::Traded { player_id, trade }, sink);
+                        self.emit_event(GameEvent::BankTradeCompleted { player_id, trade }, sink);
                         self.open_regular_decision(player_id, sink);
                         GameStatus::Waiting
                     }

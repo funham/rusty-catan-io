@@ -172,6 +172,25 @@ fn reducer_applies_explicit_resource_distribution_event() {
 }
 
 #[test]
+fn reducer_applies_initial_resource_grant_event() {
+    let mut lifecycle = EngineCore::active(GameInitializationState::default().finish());
+
+    reducer::reduce(
+        &mut lifecycle,
+        &GameEvent::InitialResourcesGranted {
+            player_id: 0,
+            resources: one_brick(),
+        },
+    )
+    .unwrap();
+
+    let active = lifecycle.as_active().expect("lifecycle should stay active");
+    assert_eq!(active.game.players.get(0).resources().brick, 1);
+    assert_eq!(active.game.bank.resources.brick, 18);
+    assert_eq!(active.stats.resources_distributed, 0);
+}
+
+#[test]
 fn reducer_applies_explicit_resource_stolen_event() {
     let mut lifecycle = EngineCore::active(GameInitializationState::default().finish());
     lifecycle
@@ -258,7 +277,7 @@ fn reducer_applies_bank_trade_event_with_exact_exchange() {
 
     reducer::reduce(
         &mut lifecycle,
-        &GameEvent::Traded {
+        &GameEvent::BankTradeCompleted {
             player_id: 0,
             trade: BankTrade {
                 kind: BankTradeKind::BankGeneric,
