@@ -2,7 +2,7 @@ use crate::gameplay::{
     game::{
         event::GameEvent,
         index::GameIndex,
-        lifecycle::{EngineLifecycle, FinishedGame},
+        lifecycle::{EngineCore, FinishedEngine},
         run::GameResult,
     },
     primitives::build::{Establishment, EstablishmentType},
@@ -16,7 +16,7 @@ pub enum ReplayError {
     InvalidBuild,
 }
 
-pub fn reduce(lifecycle: &mut EngineLifecycle, event: &GameEvent) -> Result<(), ReplayError> {
+pub fn reduce(lifecycle: &mut EngineCore, event: &GameEvent) -> Result<(), ReplayError> {
     match event {
         GameEvent::GameStarted => {
             let active = lifecycle
@@ -160,11 +160,11 @@ pub fn reduce(lifecycle: &mut EngineLifecycle, event: &GameEvent) -> Result<(), 
     Ok(())
 }
 
-fn finish(lifecycle: &mut EngineLifecycle, result: GameResult) -> Result<(), ReplayError> {
+fn finish(lifecycle: &mut EngineCore, result: GameResult) -> Result<(), ReplayError> {
     let active = lifecycle
         .take_active()
         .ok_or(ReplayError::ExpectedActiveLifecycle)?;
-    *lifecycle = EngineLifecycle::Finished(FinishedGame {
+    *lifecycle = EngineCore::Finished(FinishedEngine {
         game: active.game,
         index: active.index,
         result,

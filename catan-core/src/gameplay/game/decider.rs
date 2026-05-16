@@ -2,18 +2,18 @@ use crate::gameplay::game::{
     decision::{DecisionId, DecisionKind, DecisionLifetime, OpenDecision},
     event::{EventBatch, GameEvent},
     input::GameInput,
-    lifecycle::EngineLifecycle,
+    lifecycle::EngineCore,
     phase::GamePhase,
 };
 
-pub fn decide(lifecycle: &EngineLifecycle, input: GameInput) -> EventBatch {
+pub fn decide(lifecycle: &EngineCore, input: GameInput) -> EventBatch {
     match input {
         GameInput::Start => decide_start(lifecycle),
         GameInput::Submit { .. } => EventBatch::new(),
     }
 }
 
-fn decide_start(lifecycle: &EngineLifecycle) -> EventBatch {
+fn decide_start(lifecycle: &EngineCore) -> EventBatch {
     let mut events = EventBatch::new();
     let Some(active) = lifecycle.as_active() else {
         return events;

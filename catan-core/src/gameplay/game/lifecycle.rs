@@ -16,14 +16,15 @@ pub type TradeSessions = SmallVec<[TradeSession; 16]>;
 pub type PendingDiscards = SmallVec<[PlayerId; 8]>;
 
 #[derive(Debug, Clone)]
-pub enum EngineLifecycle {
-    Active(ActiveGame),
-    Finished(FinishedGame),
+pub enum EngineCore {
+    Active(ActiveEngine),
+    Finished(FinishedEngine),
 }
 
 #[derive(Debug, Clone)]
-pub struct ActiveGame {
+pub struct ActiveEngine {
     pub game: GameState,
+    pub init: Option<crate::gameplay::game::init::GameInitializationState>,
     pub index: GameIndex,
     pub phase: GamePhase,
     pub pending: PendingDecisions,
@@ -35,18 +36,19 @@ pub struct ActiveGame {
 }
 
 #[derive(Debug, Clone)]
-pub struct FinishedGame {
+pub struct FinishedEngine {
     pub game: GameState,
     pub index: GameIndex,
     pub result: GameResult,
     pub stats: GameRunStats,
 }
 
-impl EngineLifecycle {
+impl EngineCore {
     pub fn active(game: GameState) -> Self {
         let index = GameIndex::rebuild(&game);
-        Self::Active(ActiveGame {
+        Self::Active(ActiveEngine {
             game,
+            init: None,
             index,
             phase: GamePhase::NotStarted,
             pending: PendingDecisions::default(),
@@ -71,14 +73,15 @@ impl EngineLifecycle {
     ) -> Self {
         let index = GameIndex::rebuild(&game);
         match result {
-            Some(result) => Self::Finished(FinishedGame {
+            Some(result) => Self::Finished(FinishedEngine {
                 game,
                 index,
                 result,
                 stats,
             }),
-            None => Self::Active(ActiveGame {
+            None => Self::Active(ActiveEngine {
                 game,
+                init: None,
                 index,
                 phase,
                 pending,
@@ -91,22 +94,50 @@ impl EngineLifecycle {
         }
     }
 
-    pub fn as_active(&self) -> Option<&ActiveGame> {
+    pub fn as_active(&self) -> Option<&ActiveEngine> {
         match self {
             Self::Active(active) => Some(active),
             Self::Finished(_) => None,
         }
     }
 
-    pub fn active_mut(&mut self) -> Option<&mut ActiveGame> {
+    pub fn active_mut(&mut self) -> Option<&mut ActiveEngine> {
         match self {
             Self::Active(active) => Some(active),
             Self::Finished(_) => None,
         }
     }
 
-    pub(crate) fn take_active(&mut self) -> Option<ActiveGame> {
-        let placeholder = Self::Finished(FinishedGame {
+    pub fn state(&self) -> &GameState {
+        match self {
+            Self::Active(active) => &active.game,
+            Self::Finished(finished) => &finished.game,
+        }
+    }
+
+    pub fn index(&self) -> &GameIndex {
+        match self {
+            Self::Active(active) => &active.index,
+            Self::Finished(finished) => &finished.index,
+        }
+    }
+
+    pub fn stats(&self) -> GameRunStats {
+        match self {
+            Self::Active(active) => active.stats,
+            Self::Finished(finished) => finished.stats,
+        }
+    }
+
+    pub fn result(&self) -> Option<&GameResult> {
+        match self {
+            Self::Active(_) => None,
+            Self::Finished(finished) => Some(&finished.result),
+        }
+    }
+
+    pub(crate) fn take_active(&mut self) -> Option<ActiveEngine> {
+        let placeholder = Self::Finished(FinishedEngine {
             game: match self {
                 Self::Active(active) => active.game.clone(),
                 Self::Finished(finished) => finished.game.clone(),

@@ -7,7 +7,7 @@ use crate::{
             event::{EventBatch, GameEvent},
             init::GameInitializationState,
             input::{GameInput, PlayerCommand, TradeCommand, TradeResponseCommand},
-            lifecycle::EngineLifecycle,
+            lifecycle::EngineCore,
             output::{CommandRejectionReason, GameOutput, VecOutputSink},
             phase::GamePhase,
             reducer,
@@ -106,7 +106,7 @@ fn event_batch_has_extra_inline_capacity() {
 
 #[test]
 fn reducer_moves_active_lifecycle_to_finished_result() {
-    let mut lifecycle = EngineLifecycle::active(GameInitializationState::default().finish());
+    let mut lifecycle = EngineCore::active(GameInitializationState::default().finish());
 
     reducer::reduce(
         &mut lifecycle,
@@ -117,7 +117,7 @@ fn reducer_moves_active_lifecycle_to_finished_result() {
     )
     .unwrap();
 
-    let EngineLifecycle::Finished(finished) = lifecycle else {
+    let EngineCore::Finished(finished) = lifecycle else {
         panic!("finished event should move active lifecycle to finished");
     };
     assert_eq!(
@@ -137,7 +137,7 @@ fn reducer_replays_initial_placement_event() {
         .next()
         .expect("default board should have an initial placement");
     let (settlement, road) = placement.as_builds();
-    let mut lifecycle = EngineLifecycle::active(init.finish());
+    let mut lifecycle = EngineCore::active(init.finish());
 
     reducer::reduce(
         &mut lifecycle,
@@ -156,7 +156,7 @@ fn reducer_replays_initial_placement_event() {
 
 #[test]
 fn reducer_applies_explicit_resource_distribution_event() {
-    let mut lifecycle = EngineLifecycle::active(GameInitializationState::default().finish());
+    let mut lifecycle = EngineCore::active(GameInitializationState::default().finish());
     let mut by_player = smallvec::SmallVec::new();
     by_player.push((0, one_brick()));
 
@@ -173,7 +173,7 @@ fn reducer_applies_explicit_resource_distribution_event() {
 
 #[test]
 fn reducer_applies_explicit_resource_stolen_event() {
-    let mut lifecycle = EngineLifecycle::active(GameInitializationState::default().finish());
+    let mut lifecycle = EngineCore::active(GameInitializationState::default().finish());
     lifecycle
         .active_mut()
         .unwrap()
@@ -198,7 +198,7 @@ fn reducer_applies_explicit_resource_stolen_event() {
 
 #[test]
 fn reducer_applies_discard_robber_and_turn_events() {
-    let mut lifecycle = EngineLifecycle::active(GameInitializationState::default().finish());
+    let mut lifecycle = EngineCore::active(GameInitializationState::default().finish());
     lifecycle
         .active_mut()
         .unwrap()
@@ -242,7 +242,7 @@ fn reducer_applies_discard_robber_and_turn_events() {
 
 #[test]
 fn reducer_applies_bank_trade_event_with_exact_exchange() {
-    let mut lifecycle = EngineLifecycle::active(GameInitializationState::default().finish());
+    let mut lifecycle = EngineCore::active(GameInitializationState::default().finish());
     lifecycle
         .active_mut()
         .unwrap()
@@ -276,7 +276,7 @@ fn reducer_applies_bank_trade_event_with_exact_exchange() {
 
 #[test]
 fn decider_start_emits_game_started_and_initial_decision() {
-    let lifecycle = EngineLifecycle::active(GameInitializationState::default().finish());
+    let lifecycle = EngineCore::active(GameInitializationState::default().finish());
 
     let events = decider::decide(&lifecycle, GameInput::Start);
 
@@ -940,8 +940,8 @@ fn targeted_trade_rejects_invalid_target() {
 #[test]
 fn submit_after_game_end_is_rejected_without_mutation() {
     let (mut engine, _outputs) = started_engine();
-    engine.test_mark_ended();
     let decision = engine.open_decision_for_test(0, DecisionKind::RegularAction);
+    engine.test_mark_ended();
     let mut sink = VecOutputSink::default();
 
     let status = engine.apply(

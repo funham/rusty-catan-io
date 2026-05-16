@@ -12,7 +12,7 @@ use crate::gameplay::{
     random::GameRandom,
 };
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct GameInitializationState {
     pub board: Arc<BoardLayout>,
     pub board_state: BoardState,

@@ -14,7 +14,7 @@ use crate::{
             event::{EventCause, GameEndPlayerStats, GameEvent, ResourceDistribution},
             index::GameIndex,
             init::GameInitializationState,
-            lifecycle::EngineLifecycle,
+            lifecycle::{ActiveEngine, EngineCore, FinishedEngine},
             projector,
             query::GameQuery,
             reducer,
@@ -55,24 +55,48 @@ pub enum GameStatus {
 }
 
 pub struct GameEngine {
-    game: GameState,
-    init: Option<GameInitializationState>,
-    index: GameIndex,
-    phase: GamePhase,
-    pending: PendingDecisions,
-    next_decision_id: u64,
-    trade_sessions: SmallVec<[TradeSession; 16]>,
-    stats: GameRunStats,
+    core: EngineCore,
+    runtime: EngineRuntime,
+}
+
+pub struct EngineRuntime {
     random: GameRandom,
     dice: RandomDiceRoller,
     max_turns: Option<u64>,
     max_invalid_actions: Option<u64>,
-    invalid_actions: u64,
-    pending_discards: SmallVec<[PlayerId; 8]>,
-    result: Option<GameResult>,
     next_tx_id: u64,
     current_tx_id: u64,
-    lifecycle: EngineLifecycle,
+}
+
+impl EngineRuntime {
+    fn new(options: RunOptions) -> Self {
+        Self {
+            random: options.random,
+            dice: RandomDiceRoller::new(),
+            max_turns: options.max_turns,
+            max_invalid_actions: options.max_invalid_actions,
+            next_tx_id: 1,
+            current_tx_id: 0,
+        }
+    }
+}
+
+impl std::ops::Deref for GameEngine {
+    type Target = ActiveEngine;
+
+    fn deref(&self) -> &Self::Target {
+        self.core
+            .as_active()
+            .expect("active engine state is required for this operation")
+    }
+}
+
+impl std::ops::DerefMut for GameEngine {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.core
+            .active_mut()
+            .expect("active engine state is required for this operation")
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -128,27 +152,9 @@ impl GameEngine {
     }
 
     pub fn new_with_options(game: GameState, options: RunOptions) -> Self {
-        let index = GameIndex::rebuild(&game);
-        let lifecycle = EngineLifecycle::active(game.clone());
         Self {
-            game,
-            init: None,
-            index,
-            phase: GamePhase::NotStarted,
-            pending: PendingDecisions::default(),
-            next_decision_id: 0,
-            trade_sessions: SmallVec::new(),
-            stats: GameRunStats::default(),
-            random: options.random,
-            dice: RandomDiceRoller::new(),
-            max_turns: options.max_turns,
-            max_invalid_actions: options.max_invalid_actions,
-            invalid_actions: 0,
-            pending_discards: SmallVec::new(),
-            result: None,
-            next_tx_id: 1,
-            current_tx_id: 0,
-            lifecycle,
+            core: EngineCore::active(game),
+            runtime: EngineRuntime::new(options),
         }
     }
 
@@ -165,8 +171,7 @@ impl GameEngine {
         options: RunOptions,
     ) -> Self {
         let game = snapshot.state.into_state(board);
-        let index = GameIndex::rebuild(&game);
-        let lifecycle = EngineLifecycle::from_snapshot_parts(
+        let core = EngineCore::from_snapshot_parts(
             game.clone(),
             snapshot.phase,
             snapshot.pending.clone(),
@@ -177,46 +182,44 @@ impl GameEngine {
             snapshot.pending_discards.clone(),
             snapshot.result.clone(),
         );
-        Self {
-            game,
-            init: None,
-            index,
-            phase: snapshot.phase,
-            pending: snapshot.pending,
-            next_decision_id: snapshot.next_decision_id,
-            trade_sessions: snapshot.trade_sessions,
-            stats: snapshot.stats,
-            random: options.random,
-            dice: RandomDiceRoller::new(),
-            max_turns: options.max_turns,
-            max_invalid_actions: options.max_invalid_actions,
-            invalid_actions: snapshot.invalid_actions,
-            pending_discards: snapshot.pending_discards,
-            result: snapshot.result,
-            next_tx_id: snapshot.next_tx_id,
-            current_tx_id: 0,
-            lifecycle,
-        }
+        let mut runtime = EngineRuntime::new(options);
+        runtime.next_tx_id = snapshot.next_tx_id;
+        Self { core, runtime }
     }
 
     pub fn snapshot(&self) -> GameEngineSnapshot {
-        GameEngineSnapshot {
-            schema: "rusty-catan.engine-snapshot.v1".to_owned(),
-            state: GameStateSnapshot::from_state(&self.game),
-            phase: self.phase,
-            pending: self.pending.clone(),
-            next_decision_id: self.next_decision_id,
-            trade_sessions: self.trade_sessions.clone(),
-            stats: self.stats,
-            invalid_actions: self.invalid_actions,
-            pending_discards: self.pending_discards.clone(),
-            result: self.result.clone(),
-            next_tx_id: self.next_tx_id,
+        match &self.core {
+            EngineCore::Active(active) => GameEngineSnapshot {
+                schema: "rusty-catan.engine-snapshot.v1".to_owned(),
+                state: GameStateSnapshot::from_state(&active.game),
+                phase: active.phase,
+                pending: active.pending.clone(),
+                next_decision_id: active.next_decision_id,
+                trade_sessions: active.trade_sessions.clone(),
+                stats: active.stats,
+                invalid_actions: active.invalid_actions,
+                pending_discards: active.pending_discards.clone(),
+                result: None,
+                next_tx_id: self.runtime.next_tx_id,
+            },
+            EngineCore::Finished(finished) => GameEngineSnapshot {
+                schema: "rusty-catan.engine-snapshot.v1".to_owned(),
+                state: GameStateSnapshot::from_state(&finished.game),
+                phase: GamePhase::Ended,
+                pending: PendingDecisions::default(),
+                next_decision_id: 0,
+                trade_sessions: SmallVec::new(),
+                stats: finished.stats,
+                invalid_actions: 0,
+                pending_discards: SmallVec::new(),
+                result: Some(finished.result.clone()),
+                next_tx_id: self.runtime.next_tx_id,
+            },
         }
     }
 
     pub fn set_dice_seed(&mut self, seed: u64) {
-        self.dice = RandomDiceRoller::with_seed(seed);
+        self.runtime.dice = RandomDiceRoller::with_seed(seed);
     }
 
     pub fn start(&mut self, sink: &mut impl OutputSink) -> GameStatus {
@@ -228,13 +231,12 @@ impl GameEngine {
             let mut transaction =
                 crate::gameplay::game::event::EventTransaction::new(tx_id, EventCause::Start);
             transaction.events =
-                crate::gameplay::game::decider::decide(&self.lifecycle, GameInput::Start);
+                crate::gameplay::game::decider::decide(&self.core, GameInput::Start);
             for event in &transaction.events {
-                reducer::reduce(&mut self.lifecycle, event)
+                reducer::reduce(&mut self.core, event)
                     .expect("start transaction should reduce");
                 self.record_event(event);
             }
-            self.sync_from_lifecycle();
             for output in projector::project_transaction(&transaction) {
                 sink.push(output);
             }
@@ -264,31 +266,36 @@ impl GameEngine {
     }
 
     pub fn run_stats(&self) -> GameRunStats {
-        self.stats
+        self.core.stats()
     }
 
     pub fn result(&self) -> Option<&GameResult> {
-        self.result.as_ref()
+        self.core.result()
     }
 
-    pub fn lifecycle(&self) -> &EngineLifecycle {
-        &self.lifecycle
+    pub fn lifecycle(&self) -> &EngineCore {
+        &self.core
     }
 
     pub fn is_started(&self) -> bool {
-        self.phase != GamePhase::NotStarted
+        self.core
+            .as_active()
+            .is_none_or(|active| active.phase != GamePhase::NotStarted)
     }
 
     pub fn pending_decisions(&self) -> impl Iterator<Item = &OpenDecision> {
-        self.pending.iter()
+        self.core
+            .as_active()
+            .into_iter()
+            .flat_map(|active| active.pending.iter())
     }
 
     pub fn index(&self) -> &GameIndex {
-        &self.index
+        self.core.index()
     }
 
     pub fn state(&self) -> &GameState {
-        &self.game
+        self.core.state()
     }
 
     pub fn legal_initial_placements(&self, player_id: PlayerId) -> Vec<InitStageAction> {
@@ -305,7 +312,7 @@ impl GameEngine {
         command: PlayerCommand,
         sink: &mut impl OutputSink,
     ) -> GameStatus {
-        if self.result.is_some() {
+        if self.core.result().is_some() {
             self.reject(
                 player_id,
                 Some(decision_id),
@@ -1096,19 +1103,20 @@ impl GameEngine {
 
     fn start_turn(&mut self, sink: &mut impl OutputSink) -> GameStatus {
         let turn_no = self.game.turn.get_turns_played();
-        if let Some(max_turns) = self.max_turns
+        if let Some(max_turns) = self.runtime.max_turns
             && turn_no >= max_turns
         {
-            self.result = Some(GameResult::LimitReached { turns: turn_no });
             self.phase = GamePhase::Ended;
             self.close_all_decisions(sink);
+            let result = GameResult::LimitReached { turns: turn_no };
             self.emit_event(
                 GameEvent::GameFinished {
-                    result: GameResult::LimitReached { turns: turn_no },
+                    result: result.clone(),
                     stats: None,
                 },
                 sink,
             );
+            self.finish_core(result);
             return GameStatus::Ended;
         }
         if self.end_if_won(sink) {
@@ -1170,7 +1178,7 @@ impl GameEngine {
     }
 
     fn roll_dice(&mut self) -> DiceRoll {
-        self.dice.roll()
+        self.runtime.dice.roll()
     }
 
     fn execute_harvesting(&mut self, player: PlayerId, num: TileNum) -> ResourceDistribution {
@@ -1387,10 +1395,17 @@ impl GameEngine {
         robbed_id: Option<PlayerId>,
         sink: &mut impl OutputSink,
     ) {
-        let result = self.random.with_rng(|rng| {
-            self.game
-                .use_robbers_with_rng(target_hex, player_id, robbed_id, rng)
-        });
+        let result = {
+            let active = self
+                .core
+                .active_mut()
+                .expect("robber move requires active engine");
+            self.runtime.random.with_rng(|rng| {
+                active
+                    .game
+                    .use_robbers_with_rng(target_hex, player_id, robbed_id, rng)
+            })
+        };
         if let Ok(stolen) = result {
             self.emit_event(
                 GameEvent::RobberMoved {
@@ -1419,12 +1434,21 @@ impl GameEngine {
         usage: DevCardUsage,
         sink: &mut impl OutputSink,
     ) -> Result<(), crate::gameplay::game::state::DevCardUsageError> {
-        let stolen = self.random.with_rng(|rng| {
-            self.game
-                .use_dev_card_with_rng(usage.clone(), player_id, rng)
-        })?;
-        self.index
-            .refresh_after_dev_card(&self.game, player_id, &usage);
+        let stolen = {
+            let active = self
+                .core
+                .active_mut()
+                .expect("dev-card usage requires active engine");
+            let stolen = self.runtime.random.with_rng(|rng| {
+                active
+                    .game
+                    .use_dev_card_with_rng(usage.clone(), player_id, rng)
+            })?;
+            active
+                .index
+                .refresh_after_dev_card(&active.game, player_id, &usage);
+            stolen
+        };
         self.emit_event(
             GameEvent::DevCardUsed {
                 player_id,
@@ -1464,7 +1488,13 @@ impl GameEngine {
         self.game
             .build(player_id, build)
             .map_err(|err| format!("invalid build action: {err:?}"))?;
-        self.index.refresh_after_build(&self.game, player_id, build);
+        let active = self
+            .core
+            .active_mut()
+            .expect("build requires active engine");
+        active
+            .index
+            .refresh_after_build(&active.game, player_id, build);
         self.emit_event(GameEvent::Built { player_id, build }, sink);
         Ok(())
     }
@@ -1495,16 +1525,17 @@ impl GameEngine {
             return false;
         };
         let stats = self.game_end_stats();
-        self.result = Some(GameResult::Win(winner));
         self.phase = GamePhase::Ended;
         self.close_all_decisions(sink);
+        let result = GameResult::Win(winner);
         self.emit_event(
             GameEvent::GameFinished {
-                result: GameResult::Win(winner),
+                result: result.clone(),
                 stats: Some(stats),
             },
             sink,
         );
+        self.finish_core(result);
         true
     }
 
@@ -1624,22 +1655,21 @@ impl GameEngine {
         sink: &mut impl OutputSink,
     ) {
         self.invalid_actions += 1;
-        if let Some(limit) = self.max_invalid_actions
+        if let Some(limit) = self.runtime.max_invalid_actions
             && self.invalid_actions >= limit
         {
             let reason = format!("invalid action limit reached: {limit}");
-            self.result = Some(GameResult::Interrupted {
-                reason: reason.clone(),
-            });
             self.phase = GamePhase::Ended;
             self.close_all_decisions(sink);
+            let result = GameResult::Interrupted { reason };
             self.emit_event(
                 GameEvent::GameFinished {
-                    result: GameResult::Interrupted { reason },
+                    result: result.clone(),
                     stats: None,
                 },
                 sink,
             );
+            self.finish_core(result);
             return;
         }
         self.reject_with_limit_count(
@@ -1654,44 +1684,34 @@ impl GameEngine {
     fn emit_event(&mut self, event: GameEvent, sink: &mut impl OutputSink) {
         self.record_event(&event);
         sink.push(crate::gameplay::game::projector::project_event(
-            self.current_tx_id,
+            self.runtime.current_tx_id,
             event,
         ));
     }
 
     fn record_event(&mut self, event: &GameEvent) {
-        self.stats.record_event(event);
+        match &mut self.core {
+            EngineCore::Active(active) => active.stats.record_event(event),
+            EngineCore::Finished(finished) => finished.stats.record_event(event),
+        }
     }
 
     fn begin_transaction(&mut self, _cause: EventCause) -> u64 {
-        self.current_tx_id = self.next_tx_id;
-        self.next_tx_id += 1;
-        self.current_tx_id
+        self.runtime.current_tx_id = self.runtime.next_tx_id;
+        self.runtime.next_tx_id += 1;
+        self.runtime.current_tx_id
     }
 
-    fn sync_from_lifecycle(&mut self) {
-        match &self.lifecycle {
-            EngineLifecycle::Active(active) => {
-                self.game = active.game.clone();
-                self.index = active.index.clone();
-                self.phase = active.phase;
-                self.pending = active.pending.clone();
-                self.next_decision_id = active.next_decision_id;
-                self.trade_sessions = active.trade_sessions.clone();
-                self.stats = active.stats;
-                self.invalid_actions = active.invalid_actions;
-                self.pending_discards = active.pending_discards.clone();
-                self.result = None;
-            }
-            EngineLifecycle::Finished(finished) => {
-                self.game = finished.game.clone();
-                self.index = finished.index.clone();
-                self.phase = GamePhase::Ended;
-                self.pending = PendingDecisions::default();
-                self.stats = finished.stats;
-                self.result = Some(finished.result.clone());
-            }
-        }
+    fn finish_core(&mut self, result: GameResult) {
+        let Some(active) = self.core.take_active() else {
+            return;
+        };
+        self.core = EngineCore::Finished(FinishedEngine {
+            game: active.game,
+            index: active.index,
+            result,
+            stats: active.stats,
+        });
     }
 
     fn trade_session(&self, id: TradeSessionId) -> Option<&TradeSession> {
@@ -1769,12 +1789,13 @@ impl GameEngine {
         trade: PlayerTrade,
     ) -> TradeSessionId {
         let id = TradeSessionId(self.trade_sessions.len() as u64);
+        let player_count = self.game.players.count();
         self.trade_sessions.push(TradeSession::new(
             id,
             proposer,
             scope,
             trade,
-            self.game.players.count(),
+            player_count,
         ));
         id
     }
@@ -1797,10 +1818,10 @@ impl GameEngine {
     }
 
     pub fn test_mark_ended(&mut self) {
-        self.result = Some(GameResult::Interrupted {
+        self.phase = GamePhase::Ended;
+        self.finish_core(GameResult::Interrupted {
             reason: "test ended".to_owned(),
         });
-        self.phase = GamePhase::Ended;
     }
 }
 
