@@ -10,6 +10,7 @@ pub mod legal;
 pub mod lifecycle;
 pub mod output;
 pub mod phase;
+pub mod projector;
 pub mod query;
 pub mod reducer;
 pub mod run;

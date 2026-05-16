@@ -37,7 +37,7 @@ use smallvec::SmallVec;
 use super::{
     decision::{DecisionId, DecisionKind, DecisionLifetime, OpenDecision, PendingDecisions},
     input::{GameInput, PlayerCommand, TradeCommand, TradeResponseCommand},
-    output::{CommandRejectionReason, GameEventRecord, GameOutput, OutputSink},
+    output::{CommandRejectionReason, GameOutput, OutputSink},
     phase::{GamePhase, TradePhase},
     trade::{
         TradeOfferId, TradeResponseState, TradeScope, TradeSession, TradeSessionId,
@@ -1624,11 +1624,10 @@ impl GameEngine {
 
     fn emit_event(&mut self, event: GameEvent, sink: &mut impl OutputSink) {
         self.record_event(&event);
-        sink.push(GameOutput::Event(GameEventRecord {
-            tx_id: self.current_tx_id,
-            visibility: crate::gameplay::game::event::EventVisibility::for_event(&event),
+        sink.push(crate::gameplay::game::projector::project_event(
+            self.current_tx_id,
             event,
-        }));
+        ));
     }
 
     fn record_event(&mut self, event: &GameEvent) {
