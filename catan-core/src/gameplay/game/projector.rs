@@ -81,12 +81,14 @@ mod tests {
         };
 
         let mut transaction = EventTransaction::new(12, EventCause::Start);
-        transaction.events.push(GameEvent::DecisionOpened(OpenDecision {
-            id: DecisionId(3),
-            player_id: 1,
-            kind: DecisionKind::InitPlacement,
-            lifetime: DecisionLifetime::OneShot,
-        }));
+        transaction
+            .events
+            .push(GameEvent::DecisionOpened(OpenDecision {
+                id: DecisionId(3),
+                player_id: 1,
+                kind: DecisionKind::InitPlacement,
+                lifetime: DecisionLifetime::OneShot,
+            }));
 
         let outputs = project_transaction(&transaction);
 
