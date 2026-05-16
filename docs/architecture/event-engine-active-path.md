@@ -2,10 +2,11 @@
 
 ## Active path
 
-`SyncGameHost -> GameEngine -> committed GameEventRecord outputs -> runtime observers`
+`SyncGameHost -> GameEngine::start -> EngineLifecycle -> decider -> reducer -> projector -> runtime observers`
 
-`GameOutput::Event` now carries transaction metadata and event visibility. Persistence writes
-committed event records rather than serialized output envelopes.
+The initialized `Start` command is reducer-driven. `GameOutput::Event` carries transaction metadata
+and event visibility. Persistence writes committed event records rather than serialized output
+envelopes.
 
 ## Target path
 
@@ -13,9 +14,9 @@ committed event records rather than serialized output envelopes.
 
 ## Legacy path
 
-`GameEngine` still mutates most game state directly through imperative helper methods. The
-`EngineLifecycle`, `decider`, and `reducer` modules are present but not yet the only active command
-path.
+Submit command groups still mutate through legacy `GameEngine` helpers while emitting committed
+event records. Remaining groups are initial placement, turn lifecycle, regular actions, dev cards,
+robber/discard flow, and player trades.
 
 ## Retired path
 
