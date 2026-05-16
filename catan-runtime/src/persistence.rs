@@ -1,14 +1,14 @@
 use std::{
     fs::{self, File},
-    io::{self, Write},
-    path::PathBuf,
+    io::{self, BufRead, BufReader, Write},
+    path::{Path, PathBuf},
 };
 
 use catan_core::gameplay::game::{
     event::{EventVisibility, GameEvent},
     output::GameOutput,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     config::PersistenceConfig,
@@ -34,6 +34,42 @@ struct JournalRecord<'a> {
     tx_id: u64,
     event: &'a GameEvent,
     visibility: &'a EventVisibility,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PersistedJournalRecord {
+    pub schema: String,
+    pub seq: u64,
+    pub tx_id: u64,
+    pub event: GameEvent,
+    pub visibility: EventVisibility,
+}
+
+pub fn read_journal_suffix(
+    journal_path: &Path,
+    checkpoint_seq: u64,
+    target_seq: u64,
+) -> io::Result<Vec<PersistedJournalRecord>> {
+    let file = File::open(journal_path)?;
+    let reader = BufReader::new(file);
+    let mut records = Vec::new();
+
+    for line in reader.lines() {
+        let line = line?;
+        let record: PersistedJournalRecord =
+            serde_json::from_str(&line).map_err(io::Error::other)?;
+        if record.schema != "rusty-catan.journal.v1" {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("unsupported journal schema {}", record.schema),
+            ));
+        }
+        if record.seq > checkpoint_seq && record.seq <= target_seq {
+            records.push(record);
+        }
+    }
+
+    Ok(records)
 }
 
 impl PersistenceObserver {
@@ -87,7 +123,9 @@ impl OutputObserver for PersistenceObserver {
 
         if let Some(policy) = self.checkpoints.as_mut()
             && self.event_seq % policy.every == 0
-            && let Err(err) = policy.store.write_checkpoint(frame.engine)
+            && let Err(err) = policy
+                .store
+                .write_checkpoint_at(frame.engine, self.event_seq)
         {
             log::warn!(
                 "failed to write checkpoint at event {}: {err}",
@@ -160,6 +198,50 @@ mod tests {
         assert!(journal.contains("\"event\":\"GameStarted\""));
         assert!(journal.contains("\"visibility\":\"Public\""));
         assert!(dir.join("checkpoints").join("snapshot-000001").exists());
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn journal_records_can_be_loaded_for_replay_suffix() {
+        let dir = unique_test_dir();
+        let mut observer =
+            PersistenceObserver::from_config(&PersistenceConfig::JournalOnly { dir: dir.clone() })
+                .unwrap()
+                .unwrap();
+        let init = GameInitializationState::default();
+        let engine = GameEngine::from_init(init.clone(), RunOptions::default());
+        let state = engine.state();
+        let index = GameIndex::rebuild(&state);
+        let visibility = VisibilityConfig::default();
+        let factory = ContextFactory {
+            state: &state,
+            index: &index,
+            visibility: &visibility,
+        };
+
+        for tx_id in [10, 11, 12] {
+            let output = GameOutput::Event(GameEventRecord {
+                tx_id,
+                event: GameEvent::GameStarted,
+                visibility: EventVisibility::Public,
+            });
+            observer.on_output(ObserverFrame {
+                output: &output,
+                factory: &factory,
+                engine: &engine,
+            });
+        }
+
+        drop(observer);
+
+        let records = super::read_journal_suffix(&dir.join("journal.jsonl"), 1, 3).unwrap();
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].seq, 2);
+        assert_eq!(records[0].tx_id, 11);
+        assert_eq!(records[1].seq, 3);
+        assert_eq!(records[1].tx_id, 12);
 
         fs::remove_dir_all(dir).unwrap();
     }

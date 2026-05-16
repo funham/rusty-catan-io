@@ -80,8 +80,9 @@ fn build_initial_engine(
             ))
         }
         InitialStateConfig::Snapshot { path } => {
-            let (snapshot, board) = snapshot::load_checkpoint(path)
+            let loaded = snapshot::load_checkpoint(path)
                 .map_err(|err| format!("failed to load snapshot {}: {err}", path.display()))?;
+            let snapshot = loaded.snapshot;
             let snapshot_players = snapshot.state.players.count();
             if snapshot_players != player_count {
                 return Err(format!(
@@ -90,7 +91,9 @@ fn build_initial_engine(
             }
             Ok(
                 catan_core::gameplay::game::engine::GameEngine::from_snapshot(
-                    snapshot, board, options,
+                    snapshot,
+                    loaded.board,
+                    options,
                 ),
             )
         }
