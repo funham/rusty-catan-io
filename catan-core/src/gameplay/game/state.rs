@@ -167,7 +167,10 @@ impl GameState {
         Ok(())
     }
 
-    pub fn buy_dev_card(&mut self, player_id: PlayerId) -> Result<(), BuyDevCardError> {
+    pub fn buy_dev_card(
+        &mut self,
+        player_id: PlayerId,
+    ) -> Result<crate::gameplay::primitives::dev_card::DevCardKind, BuyDevCardError> {
         if self.bank.dev_cards.is_empty() {
             return Err(BuyDevCardError::BankIsShort);
         }
@@ -195,7 +198,7 @@ impl GameState {
             .ok_or(BuyDevCardError::BankIsShort)?;
         self.players.get_mut(player_id).dev_cards_add(card);
 
-        Ok(())
+        Ok(card)
     }
 
     pub fn transfer_to_bank(
@@ -286,7 +289,7 @@ impl GameState {
         robber_id: PlayerId,
         robbed_id: Option<PlayerId>,
         rng: &mut R,
-    ) -> Result<(), DevCardUsageError> {
+    ) -> Result<Option<Resource>, DevCardUsageError> {
         log::trace!("use robbers");
 
         if (self.board.arrangement.radius() as usize) < rob_hex.norm() {
@@ -308,11 +311,13 @@ impl GameState {
         }
 
         self.board_state.robber_pos = rob_hex;
-        if let Some(robbed_id) = robbed_id {
-            self.steal_with_rng(robbed_id, robber_id, rng);
-        }
+        let stolen = if let Some(robbed_id) = robbed_id {
+            self.steal_with_rng(robbed_id, robber_id, rng)
+        } else {
+            None
+        };
         log::trace!("use robbers success");
-        Ok(())
+        Ok(stolen)
     }
 
     fn robbery_candidates(&self, rob_hex: Hex, robber_id: PlayerId) -> Vec<PlayerId> {
@@ -334,7 +339,7 @@ impl GameState {
         usage: DevCardUsage,
         user: PlayerId,
         rng: &mut R,
-    ) -> Result<(), DevCardUsageError> {
+    ) -> Result<Option<Resource>, DevCardUsageError> {
         if !self
             .players
             .get(user)
@@ -365,16 +370,25 @@ impl GameState {
             return Err(DevCardUsageError::CardNotFoundInInventory);
         }
 
-        match usage {
+        let stolen = match usage {
             DevCardUsage::Knight { rob_hex, robbed_id } => {
                 self.use_robbers_with_rng(rob_hex, user, robbed_id, rng)?
             }
-            DevCardUsage::YearOfPlenty(list) => self.apply_year_of_plenty(list, user)?,
-            DevCardUsage::RoadBuild(poses) => self.apply_roadbuild(poses, user)?,
-            DevCardUsage::Monopoly(resource) => self.use_monopoly(resource, user)?,
-        }
+            DevCardUsage::YearOfPlenty(list) => {
+                self.apply_year_of_plenty(list, user)?;
+                None
+            }
+            DevCardUsage::RoadBuild(poses) => {
+                self.apply_roadbuild(poses, user)?;
+                None
+            }
+            DevCardUsage::Monopoly(resource) => {
+                self.use_monopoly(resource, user)?;
+                None
+            }
+        };
 
-        Ok(())
+        Ok(stolen)
     }
 
     fn validate_robbers(
@@ -404,17 +418,19 @@ impl GameState {
         robbed_id: PlayerId,
         robber_id: PlayerId,
         rng: &mut R,
-    ) {
+    ) -> Option<Resource> {
         log::trace!("steal");
         let robbed_account = self.players.get(robbed_id).resources();
         let stolen = robbed_account.peek_random(rng);
         log::trace!("peek random success");
         if let Some(card) = stolen {
             if let Err(e) = self.players_resource_transfer(robbed_id, robber_id, card.into()) {
-                log::error!("stealing non-existent card: {:?}", e)
+                log::error!("stealing non-existent card: {:?}", e);
+                return None;
             }
         }
         log::trace!("steal success");
+        stolen
     }
 
     fn validate_year_of_plenty(&self, list: [Resource; 2]) -> Result<(), DevCardUsageError> {
@@ -580,6 +596,7 @@ mod tests {
         let raw = serde_json::to_string(&state).unwrap();
         let restored: GameState = serde_json::from_str(&raw).unwrap();
 
+        assert!(!raw.contains("\"_p\""));
         assert_eq!(restored.board.n_players, state.board.n_players);
         assert_eq!(
             restored.board.arrangement.len(),

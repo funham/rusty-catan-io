@@ -2,16 +2,20 @@ use super::{GameEngine, GameStatus};
 use crate::{
     gameplay::{
         game::{
+            decider,
             decision::{DecisionKind, DecisionLifetime, OpenDecision},
-            event::GameEvent,
+            event::{EventBatch, GameEvent},
             init::GameInitializationState,
             input::{GameInput, PlayerCommand, TradeCommand, TradeResponseCommand},
+            lifecycle::EngineLifecycle,
             output::{CommandRejectionReason, GameOutput, VecOutputSink},
+            reducer,
             run::RunOptions,
             trade::TradeScope,
         },
         primitives::{
-            resource::ResourceCollection,
+            dev_card::DevCardKind,
+            resource::{Resource, ResourceCollection},
             trade::{PlayerTrade, PublicTradeOffer},
         },
     },
@@ -50,6 +54,159 @@ fn first_open_decision(outputs: &[GameOutput]) -> OpenDecision {
         .expect("engine should open a decision")
 }
 
+fn output_event(output: &GameOutput) -> Option<&GameEvent> {
+    match output {
+        GameOutput::Event(record) => Some(&record.event),
+        _ => None,
+    }
+}
+
+fn add_two_initial_settlements(engine: &mut GameEngine) -> Hex {
+    let mut victim_hex = None;
+
+    for player_id in 0..2 {
+        let (establishment, road) = engine
+            .game
+            .builds
+            .query()
+            .possible_initial_placements(&engine.game.board, player_id)
+            .iter()
+            .map(crate::gameplay::game::action::InitStageAction::as_builds)
+            .next()
+            .expect("default board should have initial placements");
+
+        if player_id == 1 {
+            let board_hexes = engine.game.board.arrangement.hex_iter().collect::<Vec<_>>();
+            victim_hex = establishment.vtx.as_set().into_iter().find(|hex| {
+                *hex != engine.game.board_state.robber_pos && board_hexes.contains(hex)
+            });
+        }
+
+        engine
+            .game
+            .builds
+            .try_init_place(player_id, road, establishment)
+            .expect("generated initial placement should be valid");
+    }
+
+    victim_hex.expect("victim settlement should touch a non-robber hex")
+}
+
+#[test]
+fn event_batch_has_extra_inline_capacity() {
+    let mut batch = EventBatch::new();
+
+    for _ in 0..32 {
+        batch.push(GameEvent::GameStarted);
+    }
+
+    assert!(!batch.spilled());
+}
+
+#[test]
+fn reducer_moves_active_lifecycle_to_finished_result() {
+    let mut lifecycle = EngineLifecycle::active(GameInitializationState::default().finish());
+
+    reducer::reduce(
+        &mut lifecycle,
+        &GameEvent::GameFinished {
+            result: crate::gameplay::game::run::GameResult::LimitReached { turns: 0 },
+        },
+    )
+    .unwrap();
+
+    let EngineLifecycle::Finished(finished) = lifecycle else {
+        panic!("finished event should move active lifecycle to finished");
+    };
+    assert_eq!(
+        finished.result,
+        crate::gameplay::game::run::GameResult::LimitReached { turns: 0 }
+    );
+}
+
+#[test]
+fn reducer_replays_initial_placement_event() {
+    let init = GameInitializationState::default();
+    let placement = init
+        .builds
+        .query()
+        .possible_initial_placements(&init.board, 0)
+        .into_iter()
+        .next()
+        .expect("default board should have an initial placement");
+    let (settlement, road) = placement.as_builds();
+    let mut lifecycle = EngineLifecycle::active(init.finish());
+
+    reducer::reduce(
+        &mut lifecycle,
+        &GameEvent::InitialPlacementBuilt {
+            player_id: 0,
+            settlement: settlement.vtx,
+            road,
+        },
+    )
+    .unwrap();
+
+    let active = lifecycle.as_active().expect("lifecycle should stay active");
+    assert_eq!(active.game.builds.by_player(0).settlements_count(), 1);
+    assert_eq!(active.game.builds.by_player(0).roads_count(), 1);
+}
+
+#[test]
+fn reducer_applies_explicit_resource_distribution_event() {
+    let mut lifecycle = EngineLifecycle::active(GameInitializationState::default().finish());
+    let mut by_player = smallvec::SmallVec::new();
+    by_player.push((0, one_brick()));
+
+    reducer::reduce(
+        &mut lifecycle,
+        &GameEvent::ResourcesDistributed { by_player },
+    )
+    .unwrap();
+
+    let active = lifecycle.as_active().expect("lifecycle should stay active");
+    assert_eq!(active.game.players.get(0).resources().brick, 1);
+    assert_eq!(active.game.bank.resources.brick, 18);
+}
+
+#[test]
+fn reducer_applies_explicit_resource_stolen_event() {
+    let mut lifecycle = EngineLifecycle::active(GameInitializationState::default().finish());
+    lifecycle
+        .active_mut()
+        .unwrap()
+        .game
+        .transfer_from_bank(Resource::Brick.into(), 1)
+        .unwrap();
+
+    reducer::reduce(
+        &mut lifecycle,
+        &GameEvent::ResourceStolen {
+            player_id: 0,
+            robbed_id: 1,
+            resource: Resource::Brick,
+        },
+    )
+    .unwrap();
+
+    let active = lifecycle.as_active().expect("lifecycle should stay active");
+    assert_eq!(active.game.players.get(0).resources().brick, 1);
+    assert_eq!(active.game.players.get(1).resources().brick, 0);
+}
+
+#[test]
+fn decider_start_emits_game_started_and_initial_decision() {
+    let lifecycle = EngineLifecycle::active(GameInitializationState::default().finish());
+
+    let events = decider::decide(&lifecycle, GameInput::Start);
+
+    assert!(matches!(events.as_slice(), [
+        GameEvent::GameStarted,
+        GameEvent::DecisionOpened(decision),
+    ] if decision.player_id == 0 && matches!(decision.kind, DecisionKind::InitPlacement)));
+    assert!(!events.spilled());
+}
+
 #[test]
 fn start_opens_one_shot_init_decision() {
     let (_engine, outputs) = started_engine();
@@ -59,6 +216,19 @@ fn start_opens_one_shot_init_decision() {
     assert_eq!(decision.player_id, 0);
     assert!(matches!(decision.kind, DecisionKind::InitPlacement));
     assert_eq!(decision.lifetime, DecisionLifetime::OneShot);
+}
+
+#[test]
+fn start_emits_domain_decision_opened_event() {
+    let (_engine, outputs) = started_engine();
+
+    assert!(outputs.iter().any(|output| {
+        matches!(
+            output_event(output),
+            Some(GameEvent::DecisionOpened(decision))
+                if decision.player_id == 0 && matches!(decision.kind, DecisionKind::InitPlacement)
+        )
+    }));
 }
 
 #[test]
@@ -87,6 +257,36 @@ fn wrong_player_is_rejected_without_closing_decision() {
                 decision_id: Some(id),
                 reason: CommandRejectionReason::WrongPlayer { expected: 0 },
             } if *id == decision.id
+        )
+    }));
+}
+
+#[test]
+fn wrong_player_rejection_emits_domain_command_rejected_event() {
+    let (mut engine, outputs) = started_engine();
+    let decision = first_open_decision(&outputs);
+    let mut sink = VecOutputSink::default();
+
+    engine.apply(
+        GameInput::Submit {
+            player_id: 1,
+            decision_id: decision.id,
+            command: PlayerCommand::MoveRobbers(crate::gameplay::game::action::MoveRobbersAction(
+                Hex::new(0, 0),
+            )),
+        },
+        &mut sink,
+    );
+
+    assert!(sink.into_vec().iter().any(|output| {
+        matches!(
+            output_event(output),
+            Some(GameEvent::CommandRejected {
+                player_id: 1,
+                decision_id: Some(id),
+                reason: CommandRejectionReason::WrongPlayer { expected: 0 },
+                counts_toward_limit: false,
+            }) if *id == decision.id
         )
     }));
 }
@@ -128,6 +328,76 @@ fn stale_decision_is_rejected_after_one_shot_closes() {
                 decision_id: Some(id),
                 reason: CommandRejectionReason::StaleDecision,
             } if *id == decision.id
+        )
+    }));
+}
+
+#[test]
+fn buying_dev_card_emits_private_drawn_card_event() {
+    let (mut engine, _outputs) = started_engine();
+    engine.test_force_regular_action_phase(0);
+    engine.test_give_resources(
+        0,
+        ResourceCollection {
+            wheat: 1,
+            sheep: 1,
+            ore: 1,
+            ..ResourceCollection::ZERO
+        },
+    );
+    engine.game.bank.dev_cards = vec![DevCardKind::VictoryPoint];
+    let decision = engine.open_decision_for_test(0, DecisionKind::RegularAction);
+    let mut sink = VecOutputSink::default();
+
+    engine.apply(
+        GameInput::Submit {
+            player_id: 0,
+            decision_id: decision.id,
+            command: PlayerCommand::Regular(
+                crate::gameplay::game::action::RegularAction::BuyDevCard,
+            ),
+        },
+        &mut sink,
+    );
+
+    assert!(sink.into_vec().iter().any(|output| {
+        matches!(
+            output_event(output),
+            Some(GameEvent::DevCardDrawn {
+                player_id: 0,
+                card: DevCardKind::VictoryPoint,
+            })
+        )
+    }));
+}
+
+#[test]
+fn moving_robber_emits_stolen_resource_event() {
+    let (mut engine, _outputs) = started_engine();
+    let victim_hex = add_two_initial_settlements(&mut engine);
+    engine.test_give_resources(1, Resource::Brick.into());
+    let decision = engine.open_decision_for_test(0, DecisionKind::MoveRobber);
+    let mut sink = VecOutputSink::default();
+
+    engine.apply(
+        GameInput::Submit {
+            player_id: 0,
+            decision_id: decision.id,
+            command: PlayerCommand::MoveRobbers(crate::gameplay::game::action::MoveRobbersAction(
+                victim_hex,
+            )),
+        },
+        &mut sink,
+    );
+
+    assert!(sink.into_vec().iter().any(|output| {
+        matches!(
+            output_event(output),
+            Some(GameEvent::ResourceStolen {
+                player_id: 0,
+                robbed_id: 1,
+                resource: Resource::Brick,
+            })
         )
     }));
 }
@@ -195,8 +465,8 @@ fn reusable_trade_response_decision_can_be_updated_until_session_closes() {
         .into_iter()
         .filter(|output| {
             matches!(
-                output,
-                GameOutput::Event(GameEvent::TradeResponseUpdated { .. })
+                output_event(output),
+                Some(GameEvent::TradeResponseUpdated { .. })
             )
         })
         .count();
@@ -303,8 +573,8 @@ fn player_can_reject_trade() {
 
     assert!(sink.into_vec().iter().any(|output| {
         matches!(
-            output,
-            GameOutput::Event(GameEvent::TradeResponseUpdated {
+            output_event(output),
+            Some(GameEvent::TradeResponseUpdated {
                 session_id,
                 player_id: 1,
                 response: crate::gameplay::game::trade::TradeResponseState::Rejected,
@@ -345,8 +615,8 @@ fn player_can_counter_trade() {
     let outputs = sink.into_vec();
     assert!(outputs.iter().any(|output| {
         matches!(
-            output,
-            GameOutput::Event(GameEvent::TradeOfferAdded {
+            output_event(output),
+            Some(GameEvent::TradeOfferAdded {
                 session_id,
                 player_id: 1,
                 ..
@@ -355,8 +625,8 @@ fn player_can_counter_trade() {
     }));
     assert!(outputs.iter().any(|output| {
         matches!(
-            output,
-            GameOutput::Event(GameEvent::TradeResponseUpdated {
+            output_event(output),
+            Some(GameEvent::TradeResponseUpdated {
                 session_id,
                 player_id: 1,
                 response: crate::gameplay::game::trade::TradeResponseState::Countered { .. },
@@ -397,8 +667,8 @@ fn active_player_can_commit_accepted_offer() {
     assert_eq!(*engine.state().players.get(1).resources(), one_brick());
     assert!(sink.into_vec().iter().any(|output| {
         matches!(
-            output,
-            GameOutput::Event(GameEvent::TradeCompleted {
+            output_event(output),
+            Some(GameEvent::TradeCompleted {
                 session_id,
                 proposer_id: 0,
                 peer_id: 1,
@@ -448,8 +718,8 @@ fn active_player_can_cancel_trade_and_close_trade_decisions() {
     }));
     assert!(outputs.iter().any(|output| {
         matches!(
-            output,
-            GameOutput::Event(GameEvent::TradeCancelled {
+            output_event(output),
+            Some(GameEvent::TradeCancelled {
                 session_id,
                 proposer_id: 0,
             }) if *session_id == session
@@ -490,7 +760,10 @@ fn player_cannot_accept_another_players_counteroffer() {
         .as_slice()
         .iter()
         .find_map(|output| match output {
-            GameOutput::Event(GameEvent::TradeOfferAdded { offer_id, .. }) => Some(*offer_id),
+            GameOutput::Event(record) => match &record.event {
+                GameEvent::TradeOfferAdded { offer_id, .. } => Some(*offer_id),
+                _ => None,
+            },
             _ => None,
         })
         .expect("countering should add an offer");

@@ -1,7 +1,8 @@
 use std::{io, os::unix::net::UnixStream};
 
 use catan_agents::remote_agent::{
-    CliRole, CliToHost, HostToCli, LegalDecisionOptions, UiModel, read_frame, write_frame,
+    CliRole, CliToHost, HostToCli, LegalDecisionOptions, NonblockingFrameReader, UiModel,
+    read_frame, write_frame,
 };
 use catan_core::gameplay::{
     game::{
@@ -13,6 +14,7 @@ use catan_core::gameplay::{
     primitives::player::PlayerId,
 };
 
+use crate::snapshot::SnapshotStore;
 use crate::sync_host::{
     ObserverFrame, OutputObserver, Seat, SeatCommand, SeatCommandBuffer, SeatFrame,
 };
@@ -112,6 +114,8 @@ impl Seat for RemoteCliSeat {
 pub struct RemoteCliOutputObserver {
     role: CliRole,
     stream: UnixStream,
+    reader: NonblockingFrameReader<CliToHost>,
+    snapshot_store: Option<SnapshotStore>,
 }
 
 impl RemoteCliOutputObserver {
@@ -124,7 +128,18 @@ impl RemoteCliOutputObserver {
         }
         write_frame(&mut stream, &HostToCli::Hello { role: role.clone() })?;
         expect_ready(&mut stream)?;
-        Ok(Self { role, stream })
+        stream.set_nonblocking(true)?;
+        let snapshot_store = if role.includes_exact_snapshot_state() {
+            Some(SnapshotStore::new()?)
+        } else {
+            None
+        };
+        Ok(Self {
+            role,
+            stream,
+            reader: NonblockingFrameReader::default(),
+            snapshot_store,
+        })
     }
 }
 
@@ -139,6 +154,71 @@ impl OutputObserver for RemoteCliOutputObserver {
                 legal: LegalDecisionOptions::default(),
             },
         );
+        self.handle_control_messages(frame);
+    }
+}
+
+impl RemoteCliOutputObserver {
+    fn handle_control_messages(&mut self, frame: ObserverFrame<'_>) {
+        loop {
+            let message = match self.reader.poll(&mut self.stream) {
+                Ok(Some(message)) => message,
+                Ok(None) => return,
+                Err(err) => {
+                    log::warn!(target: "catan_runtime::remote_seat", "failed to read observer control frame: {err}");
+                    return;
+                }
+            };
+            match message {
+                CliToHost::SaveSnapshot => self.save_snapshot(frame.engine),
+                CliToHost::Log {
+                    level,
+                    target,
+                    message,
+                } => {
+                    let level = log::Level::from(level);
+                    for line in message.lines().filter(|line| !line.trim().is_empty()) {
+                        log::log!(target: &target, level, "{line}");
+                    }
+                }
+                CliToHost::Error { message } => {
+                    log::warn!(target: "catan_runtime::remote_seat", "remote observer error: {message}");
+                }
+                other => {
+                    log::warn!(target: "catan_runtime::remote_seat", "unexpected observer control frame: {other:?}");
+                }
+            }
+        }
+    }
+
+    fn save_snapshot(&mut self, engine: &catan_core::gameplay::game::engine::GameEngine) {
+        let Some(store) = self.snapshot_store.as_mut() else {
+            let _ = write_frame(
+                &mut self.stream,
+                &HostToCli::SnapshotFailed {
+                    reason: "snapshot store is not available for this observer".to_owned(),
+                },
+            );
+            return;
+        };
+        match store.write_checkpoint(engine) {
+            Ok(path) => {
+                let _ = write_frame(
+                    &mut self.stream,
+                    &HostToCli::SnapshotSaved {
+                        path: path.display().to_string(),
+                    },
+                );
+            }
+            Err(err) => {
+                let _ = write_frame(
+                    &mut self.stream,
+                    &HostToCli::SnapshotFailed {
+                        reason: err.to_string(),
+                    },
+                );
+            }
+        }
     }
 }
 

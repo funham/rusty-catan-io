@@ -129,12 +129,8 @@ pub struct FieldBuildParam {
 
 impl Default for FieldBuildParam {
     fn default() -> Self {
-        let default_arrangement_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("data")
-            .join("default-hex-arrangement.json");
         let n_players = 4;
-        let arrangement = super::ser::arrangement_from_json(&default_arrangement_path)
-            .expect("default field arrangement should be readable");
+        let arrangement = super::ser::standard_4p_arrangement();
 
         Self {
             n_players,

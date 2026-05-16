@@ -16,16 +16,20 @@ use catan_agents::{
 use catan_core::gameplay::game::{init::GameInitializationState, run::RunOptions};
 
 use crate::{
-    config::{FieldConfig, MatchConfig, ObserverConfig, PlayerConfig},
+    config::{self, FieldConfig, InitialStateConfig, MatchConfig, ObserverConfig, PlayerConfig},
+    persistence::PersistenceObserver,
     remote_seat::{RemoteCliOutputObserver, RemoteCliSeat},
+    snapshot,
     sync_host::{OutputObserver, Seat, SyncGameHost, bot_seat},
 };
 
 pub fn load_config(path: &Path) -> Result<MatchConfig, String> {
     let raw = fs::read_to_string(path)
         .map_err(|err| format!("failed to read config {}: {err}", path.display()))?;
-    serde_json::from_str(&raw)
-        .map_err(|err| format!("failed to parse config {}: {err}", path.display()))
+    let mut config: MatchConfig = serde_json::from_str(&raw)
+        .map_err(|err| format!("failed to parse config {}: {err}", path.display()))?;
+    config::resolve_paths(&mut config, path.parent().unwrap_or_else(|| Path::new(".")));
+    Ok(config)
 }
 
 pub fn run_match(config: MatchConfig) -> Result<(), String> {
@@ -37,28 +41,60 @@ pub fn run_match(config: MatchConfig) -> Result<(), String> {
         std::env::current_exe().map_err(|err| format!("failed to find current exe: {err}"))?;
     let seats = build_seats(&config.players, &exe)?;
     let observers = build_observers(&config.observers, &exe)?;
-    let init_state = build_initial_state(&config.field, config.players.len());
+    let options = RunOptions {
+        max_turns: config.limits.max_turns,
+        max_invalid_actions: config.limits.max_invalid_actions,
+        ..RunOptions::default()
+    };
+    let engine = build_initial_engine(&config, config.players.len(), options)?;
 
     match &config.dice {
         crate::config::DiceConfig::Random => {}
     }
 
-    let mut host = SyncGameHost::new(
-        init_state,
-        seats,
-        RunOptions {
-            max_turns: config.limits.max_turns,
-            max_invalid_actions: config.limits.max_invalid_actions,
-            ..RunOptions::default()
-        },
-    );
+    let mut host = SyncGameHost::from_engine(engine, seats);
     for observer in observers {
         host.add_observer(observer);
+    }
+    if let Some(observer) = PersistenceObserver::from_config(&config.persistence)
+        .map_err(|err| format!("failed to initialize persistence: {err}"))?
+    {
+        host.add_observer(Box::new(observer));
     }
     host.start();
     let result = host.run_to_result();
     log::info!("match result: {result:?}");
     Ok(())
+}
+
+fn build_initial_engine(
+    config: &MatchConfig,
+    player_count: usize,
+    options: RunOptions,
+) -> Result<catan_core::gameplay::game::engine::GameEngine, String> {
+    match &config.initial {
+        InitialStateConfig::Fresh => {
+            let init = build_initial_state(&config.field, player_count)?;
+            Ok(catan_core::gameplay::game::engine::GameEngine::from_init(
+                init, options,
+            ))
+        }
+        InitialStateConfig::Snapshot { path } => {
+            let (snapshot, board) = snapshot::load_checkpoint(path)
+                .map_err(|err| format!("failed to load snapshot {}: {err}", path.display()))?;
+            let snapshot_players = snapshot.state.players.count();
+            if snapshot_players != player_count {
+                return Err(format!(
+                    "snapshot has {snapshot_players} players but config declares {player_count}"
+                ));
+            }
+            Ok(
+                catan_core::gameplay::game::engine::GameEngine::from_snapshot(
+                    snapshot, board, options,
+                ),
+            )
+        }
+    }
 }
 
 fn build_seats(players: &[PlayerConfig], exe: &Path) -> Result<Vec<Box<dyn Seat>>, String> {
@@ -99,12 +135,25 @@ fn build_observers(
         .collect()
 }
 
-fn build_initial_state(config: &FieldConfig, player_count: usize) -> GameInitializationState {
+fn build_initial_state(
+    config: &FieldConfig,
+    player_count: usize,
+) -> Result<GameInitializationState, String> {
     match config {
         FieldConfig::Default => {
             let mut field = catan_core::gameplay::field::state::FieldBuildParam::default();
             field.n_players = player_count;
-            GameInitializationState::new(field)
+            Ok(GameInitializationState::new(field))
+        }
+        FieldConfig::LayoutRef { path } => {
+            let arrangement = catan_core::gameplay::field::ser::arrangement_from_json(path)
+                .ok_or_else(|| format!("failed to read field layout {}", path.display()))?;
+            Ok(GameInitializationState::new(
+                catan_core::gameplay::field::state::FieldBuildParam {
+                    n_players: player_count,
+                    arrangement,
+                },
+            ))
         }
     }
 }
@@ -339,10 +388,17 @@ fn apple_quote(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use catan_agents::remote_agent::CliRole;
+    use catan_core::gameplay::game::{
+        engine::GameEngine, init::GameInitializationState, output::VecOutputSink, run::RunOptions,
+    };
 
     use crate::{
-        config::{FieldConfig, ObserverConfig},
-        host::{CliChildSpec, build_initial_state, unique_socket_path},
+        config::{
+            DiceConfig, FieldConfig, InitialStateConfig, LimitsConfig, LoggingConfig, MatchConfig,
+            ObserverConfig, PersistenceConfig, PlayerConfig,
+        },
+        host::{CliChildSpec, build_initial_engine, build_initial_state, unique_socket_path},
+        snapshot::SnapshotStore,
     };
 
     #[test]
@@ -372,11 +428,56 @@ mod tests {
     #[test]
     fn default_field_uses_configured_player_count() {
         for player_count in [1, 2, 3, 4, 6] {
-            let init = build_initial_state(&FieldConfig::Default, player_count);
+            let init = build_initial_state(&FieldConfig::Default, player_count).unwrap();
 
             assert_eq!(init.board.n_players, player_count);
             assert_eq!(init.players.count(), player_count);
             assert_eq!(init.builds.players().len(), player_count);
         }
+    }
+
+    #[test]
+    fn snapshot_initial_engine_preserves_pending_decisions() {
+        let dir = unique_test_dir();
+        let mut engine =
+            GameEngine::from_init(GameInitializationState::default(), RunOptions::default());
+        let mut sink = VecOutputSink::default();
+        engine.start(&mut sink);
+        let mut store = SnapshotStore::new_in(dir.clone()).unwrap();
+        let snapshot_dir = store.write_checkpoint(&engine).unwrap();
+        let config = MatchConfig {
+            players: vec![
+                PlayerConfig::Lazy,
+                PlayerConfig::Lazy,
+                PlayerConfig::Lazy,
+                PlayerConfig::Lazy,
+            ],
+            observers: Vec::new(),
+            initial: InitialStateConfig::Snapshot { path: snapshot_dir },
+            field: FieldConfig::Default,
+            dice: DiceConfig::default(),
+            limits: LimitsConfig::default(),
+            logging: LoggingConfig::default(),
+            persistence: PersistenceConfig::default(),
+        };
+
+        let loaded = build_initial_engine(&config, config.players.len(), RunOptions::default())
+            .expect("snapshot should load into an engine");
+
+        assert!(loaded.is_started());
+        assert_eq!(loaded.pending_decisions().count(), 1);
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn unique_test_dir() -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "rusty-catan-host-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ))
     }
 }

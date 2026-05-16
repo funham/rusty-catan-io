@@ -5,7 +5,7 @@
     { "kind": "lazy" }
   ],
   "observers": [],
-  "field": { "kind": "default" },
+  "field": { "kind": "layout_ref", "path": "../layouts/standard-4p.layout.json" },
   "dice": { "kind": "random" },
   "limits": { "max_turns": 500 }
 }

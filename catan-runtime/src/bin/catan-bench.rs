@@ -15,7 +15,7 @@ use catan_core::{
     gameplay::random::GameRandom,
 };
 use catan_runtime::{
-    config::{FieldConfig, MatchConfig, PlayerConfig},
+    config::{self, FieldConfig, MatchConfig, PlayerConfig},
     simulation::SimulationHost,
 };
 use serde::Serialize;
@@ -251,8 +251,13 @@ fn help_text() -> String {
 fn load_config(path: &PathBuf) -> Result<MatchConfig, String> {
     let raw = fs::read_to_string(path)
         .map_err(|err| format!("failed to read config {}: {err}", path.display()))?;
-    serde_json::from_str(&raw)
-        .map_err(|err| format!("failed to parse config {}: {err}", path.display()))
+    let mut config: MatchConfig = serde_json::from_str(&raw)
+        .map_err(|err| format!("failed to parse config {}: {err}", path.display()))?;
+    config::resolve_paths(
+        &mut config,
+        path.parent().unwrap_or_else(|| std::path::Path::new(".")),
+    );
+    Ok(config)
 }
 
 fn validate_benchmark_config(config: &MatchConfig) -> Result<(), String> {
@@ -281,7 +286,7 @@ fn run_one_game(
     max_turns_override: Option<u64>,
 ) -> Result<GameOutcome, String> {
     let agents = build_agents(&config.players, seed);
-    let init_state = build_initial_state(&config.field, seed);
+    let init_state = build_initial_state(&config.field, config.players.len(), seed)?;
     let mut host = SimulationHost::new(
         init_state,
         agents,
@@ -324,9 +329,30 @@ fn agent_seed(game_seed: u64, player_id: usize) -> u64 {
         .wrapping_add(0x94D0_49BB_1331_11EB)
 }
 
-fn build_initial_state(config: &FieldConfig, seed: u64) -> GameInitializationState {
+fn build_initial_state(
+    config: &FieldConfig,
+    player_count: usize,
+    seed: u64,
+) -> Result<GameInitializationState, String> {
     match config {
-        FieldConfig::Default => GameInitializationState::new_with_seed(Default::default(), seed),
+        FieldConfig::Default => {
+            let mut field = catan_core::gameplay::field::state::FieldBuildParam::default();
+            field.n_players = player_count;
+            Ok(GameInitializationState::new_with_seed(field, seed))
+        }
+        FieldConfig::LayoutRef { path } => {
+            let arrangement = catan_core::gameplay::field::ser::arrangement_from_json(path)
+                .ok_or_else(|| format!("failed to read field layout {}", path.display()))?;
+            Ok(GameInitializationState::new_with_options(
+                catan_core::gameplay::field::state::FieldBuildParam {
+                    n_players: player_count,
+                    arrangement,
+                },
+                catan_core::gameplay::game::init::GameInitializationOptions {
+                    random: GameRandom::seeded(seed),
+                },
+            ))
+        }
     }
 }
 

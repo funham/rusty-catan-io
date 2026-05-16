@@ -25,7 +25,6 @@ use super::{
         read_post_dice_action, read_regular_action, read_resource_collection, read_robbed_player,
     },
     logging::init_socket_logger,
-    snapshot::SnapshotWriter,
     tui::{CliUi, CliViewMode, ControlInput},
 };
 
@@ -50,13 +49,6 @@ pub fn run(socket: &FsPath, log_socket: &FsPath, _role: &str) -> Result<(), Stri
         other => return Err(format!("expected hello, got {other:?}")),
     };
     let view_mode = view_mode_for_role(&role);
-    let snapshot_writer = match &role {
-        role if role.includes_exact_snapshot_state() => Some(
-            SnapshotWriter::new()
-                .map_err(|err| format!("failed to initialize snapshots: {err}"))?,
-        ),
-        _ => None,
-    };
     let mut ui = CliUi::new(view_mode).map_err(|err| format!("failed to initialize TUI: {err}"))?;
     ui.set_message(format!("connected as {role:?}"))
         .map_err(|err| format!("failed to draw TUI: {err}"))?;
@@ -65,7 +57,7 @@ pub fn run(socket: &FsPath, log_socket: &FsPath, _role: &str) -> Result<(), Stri
     log::trace!("Sent ready message to host");
 
     if role.is_observer() {
-        return run_observer_session(stream, ui, snapshot_writer);
+        return run_observer_session(stream, ui);
     }
 
     let player_id = match role {
@@ -112,6 +104,14 @@ fn run_player_session(
                     .map_err(|err| format!("failed to draw TUI: {err}"))?;
                 return Ok(());
             }
+            HostToCli::SnapshotSaved { path } => {
+                ui.set_message(format!("snapshot saved: {path}"))
+                    .map_err(|err| format!("failed to draw TUI: {err}"))?;
+            }
+            HostToCli::SnapshotFailed { reason } => {
+                ui.set_message(format!("snapshot failed: {reason}"))
+                    .map_err(|err| format!("failed to draw TUI: {err}"))?;
+            }
             HostToCli::Event { event, view } => {
                 if process_host_event(&mut ui, view_mode, &event, &view, None)? {
                     return Ok(());
@@ -122,8 +122,8 @@ fn run_player_session(
                 view,
                 legal,
             } => match output {
-                GameOutput::Event(event) => {
-                    if process_host_event(&mut ui, view_mode, &event, &view, None)? {
+                GameOutput::Event(record) => {
+                    if process_host_event(&mut ui, view_mode, &record.event, &view, None)? {
                         return Ok(());
                     }
                 }
@@ -269,11 +269,7 @@ fn command_from_decision_response(
     }
 }
 
-fn run_observer_session(
-    mut stream: UnixStream,
-    mut ui: CliUi,
-    snapshot_writer: Option<SnapshotWriter>,
-) -> Result<(), String> {
+fn run_observer_session(mut stream: UnixStream, mut ui: CliUi) -> Result<(), String> {
     stream
         .set_nonblocking(true)
         .map_err(|err| format!("failed to set snapshot observer socket nonblocking: {err}"))?;
@@ -281,7 +277,6 @@ fn run_observer_session(
     let mut state = ObserverSessionState {
         latest: SessionViewState::message("connected as observer"),
         event_count: 0,
-        snapshot_writer,
     };
     loop {
         let mut received_message = false;
@@ -296,6 +291,14 @@ fn run_observer_session(
                 }
                 HostToCli::Shutdown { reason } => {
                     return handle_shutdown(&mut ui, reason);
+                }
+                HostToCli::SnapshotSaved { path } => {
+                    state.latest.message = format!("snapshot saved: {path}");
+                    draw_latest_or_message(&mut ui, &state.latest, state.event_count)?;
+                }
+                HostToCli::SnapshotFailed { reason } => {
+                    state.latest.message = format!("snapshot failed: {reason}");
+                    draw_latest_or_message(&mut ui, &state.latest, state.event_count)?;
                 }
                 HostToCli::Event { event, view } => {
                     state.event_count += 1;
@@ -319,19 +322,20 @@ fn run_observer_session(
                     state.latest = SessionViewState::view(view, format!("event: {event:?}"));
                 }
                 HostToCli::Output { output, view, .. } => match output {
-                    GameOutput::Event(event) => {
+                    GameOutput::Event(record) => {
                         state.event_count += 1;
                         let view_mode = ui.view_mode();
                         if process_host_event(
                             &mut ui,
                             view_mode,
-                            &event,
+                            &record.event,
                             &view,
                             Some(state.event_count),
                         )? {
                             return Ok(());
                         }
-                        state.latest = SessionViewState::view(view, format!("event: {event:?}"));
+                        state.latest =
+                            SessionViewState::view(view, format!("event: {:?}", record.event));
                     }
                     other => {
                         state.latest.message = format!("engine output: {other:?}");
@@ -351,8 +355,8 @@ fn run_observer_session(
         let can_save_snapshot = matches!(ui.view_mode(), CliViewMode::Snapshot);
         handle_control_input(
             &mut ui,
+            &mut stream,
             &mut state.latest,
-            state.snapshot_writer.as_mut(),
             can_save_snapshot,
             state.event_count,
         )?;
@@ -366,7 +370,6 @@ fn run_observer_session(
 struct ObserverSessionState {
     latest: SessionViewState,
     event_count: u64,
-    snapshot_writer: Option<SnapshotWriter>,
 }
 
 struct SessionViewState {
@@ -436,8 +439,8 @@ fn process_host_event(
 
 fn handle_control_input(
     ui: &mut CliUi,
+    stream: &mut UnixStream,
     latest: &mut SessionViewState,
-    snapshot_writer: Option<&mut SnapshotWriter>,
     can_save_snapshot: bool,
     event_count: u64,
 ) -> Result<(), String> {
@@ -446,10 +449,9 @@ fn handle_control_input(
         .map_err(|err| format!("failed to read control input: {err}"))?
     {
         Some(ControlInput::SaveSnapshot) if can_save_snapshot => {
-            latest.message = match latest.view.as_ref() {
-                Some(view) => save_snapshot(snapshot_writer, view),
-                None => "no snapshot state available".to_owned(),
-            };
+            write_frame(stream, &CliToHost::SaveSnapshot)
+                .map_err(|err| format!("failed to request snapshot: {err}"))?;
+            latest.message = "snapshot requested".to_owned();
             draw_latest_or_message(ui, latest, event_count)
         }
         Some(ControlInput::SaveSnapshot) => Ok(()),
@@ -484,19 +486,6 @@ fn send_child_error(stream: &mut UnixStream, message: String) -> Result<(), Stri
     log::warn!("{message}");
     write_frame(stream, &CliToHost::Error { message })
         .map_err(|err| format!("failed to send observer error: {err}"))
-}
-
-fn save_snapshot(writer: Option<&mut SnapshotWriter>, view: &UiModel) -> String {
-    let Some(writer) = writer else {
-        return "snapshot writer is not available".to_owned();
-    };
-    let Some(state) = &view.snapshot_state else {
-        return "no snapshot state available".to_owned();
-    };
-    match writer.write(state) {
-        Ok(path) => format!("snapshot saved: {}", path.display()),
-        Err(err) => format!("snapshot failed: {err}"),
-    }
 }
 
 fn handle_decision(

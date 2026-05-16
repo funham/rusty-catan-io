@@ -7,7 +7,7 @@ use catan_core::gameplay::{
         engine::GameEngine,
         init::GameInitializationState,
         input::{GameInput, PlayerCommand},
-        output::{GameOutput, VecOutputSink},
+        output::{GameOutput, OutputSink, VecOutputSink},
         run::{GameResult, RunOptions},
         view::{ContextFactory, PlayerDecisionContext, SearchFactory, VisibilityConfig},
     },
@@ -58,6 +58,7 @@ pub trait Seat {
 pub struct ObserverFrame<'a> {
     pub output: &'a GameOutput,
     pub factory: &'a ContextFactory<'a>,
+    pub engine: &'a GameEngine,
 }
 
 pub trait OutputObserver {
@@ -111,8 +112,12 @@ impl SyncGameHost {
         seats: Vec<Box<dyn Seat>>,
         options: RunOptions,
     ) -> Self {
+        Self::from_engine(GameEngine::from_init(init, options), seats)
+    }
+
+    pub fn from_engine(engine: GameEngine, seats: Vec<Box<dyn Seat>>) -> Self {
         Self {
-            engine: GameEngine::from_init(init, options),
+            engine,
             seats,
             observers: Vec::new(),
             visibility: VisibilityConfig::default(),
@@ -132,7 +137,13 @@ impl SyncGameHost {
 
     pub fn start(&mut self) {
         let mut sink = VecOutputSink::default();
-        self.engine.start(&mut sink);
+        if self.engine.is_started() {
+            for decision in self.engine.pending_decisions() {
+                sink.push(GameOutput::DecisionOpened(decision.clone()));
+            }
+        } else {
+            self.engine.start(&mut sink);
+        }
         self.outputs.extend(sink.into_vec());
     }
 
@@ -187,6 +198,7 @@ impl SyncGameHost {
             observer.on_output(ObserverFrame {
                 output,
                 factory: &factory,
+                engine: &self.engine,
             });
         }
 
@@ -321,8 +333,8 @@ mod tests {
 
     impl OutputObserver for EventRecordingObserver {
         fn on_output(&mut self, frame: ObserverFrame<'_>) {
-            if let GameOutput::Event(event) = frame.output {
-                self.events.borrow_mut().push(event.clone());
+            if let GameOutput::Event(record) = frame.output {
+                self.events.borrow_mut().push(record.event.clone());
             }
         }
     }

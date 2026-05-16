@@ -90,6 +90,12 @@ pub enum HostToCli {
         event: GameEvent,
         view: UiModel,
     },
+    SnapshotSaved {
+        path: String,
+    },
+    SnapshotFailed {
+        reason: String,
+    },
     Shutdown {
         reason: String,
     },
@@ -104,6 +110,7 @@ pub enum CliToHost {
         decision_id: DecisionId,
         command: PlayerCommand,
     },
+    SaveSnapshot,
     Error {
         message: String,
     },

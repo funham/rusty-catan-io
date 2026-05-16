@@ -36,9 +36,9 @@ pub enum DecisionKind {
     TradeOwnerAction { session: TradeSessionId },
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct PendingDecisions {
-    decisions: SmallVec<[OpenDecision; 31]>,
+    decisions: SmallVec<[OpenDecision; 64]>,
 }
 
 impl PendingDecisions {
@@ -48,6 +48,10 @@ impl PendingDecisions {
 
     pub fn push(&mut self, decision: OpenDecision) {
         self.decisions.push(decision);
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &OpenDecision> {
+        self.decisions.iter()
     }
 
     pub fn close(&mut self, id: DecisionId) -> Option<OpenDecision> {

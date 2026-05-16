@@ -1,23 +1,90 @@
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 
 use crate::{
     gameplay::game::action::RegularAction,
     gameplay::{
-        game::trade::{TradeOfferId, TradeResponseState, TradeScope, TradeSessionId},
         game::view::{
             OmniscientGameView, PlayerNotificationContext, PrivatePlayerView, PublicGameView,
         },
+        game::{
+            decision::{DecisionId, OpenDecision},
+            output::CommandRejectionReason,
+            run::GameResult,
+            trade::{TradeOfferId, TradeResponseState, TradeScope, TradeSessionId},
+        },
         primitives::{
             build::{Build, Road},
-            dev_card::DevCardUsage,
+            dev_card::{DevCardKind, DevCardUsage},
             player::PlayerId,
-            resource::ResourceCollection,
+            resource::{Resource, ResourceCollection},
             trade::PlayerTrade,
         },
     },
     math::dice::DiceRoll,
     topology::{Hex, Intersection},
 };
+
+pub type EventBatch = SmallVec<[GameEvent; 32]>;
+pub type ResourceDistribution = SmallVec<[(PlayerId, ResourceCollection); 8]>;
+pub type EventRecipients = SmallVec<[PlayerId; 2]>;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EventCause {
+    Start,
+    PlayerCommand {
+        player_id: PlayerId,
+        decision_id: DecisionId,
+    },
+    System,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventTransaction {
+    pub tx_id: u64,
+    pub cause: EventCause,
+    pub events: EventBatch,
+}
+
+impl EventTransaction {
+    pub fn new(tx_id: u64, cause: EventCause) -> Self {
+        Self {
+            tx_id,
+            cause,
+            events: EventBatch::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EventVisibility {
+    Public,
+    PrivateTo(EventRecipients),
+    OmniscientOnly,
+}
+
+impl EventVisibility {
+    pub fn for_event(event: &GameEvent) -> Self {
+        match event {
+            GameEvent::DevCardDrawn { player_id, .. } => {
+                let mut recipients = EventRecipients::new();
+                recipients.push(*player_id);
+                Self::PrivateTo(recipients)
+            }
+            GameEvent::ResourceStolen {
+                player_id,
+                robbed_id,
+                ..
+            } => {
+                let mut recipients = EventRecipients::new();
+                recipients.push(*player_id);
+                recipients.push(*robbed_id);
+                Self::PrivateTo(recipients)
+            }
+            _ => Self::Public,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameEndPlayerStats {
@@ -69,6 +136,16 @@ pub trait PlayerNotification {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GameEvent {
     GameStarted,
+    DecisionOpened(OpenDecision),
+    DecisionClosed {
+        decision_id: DecisionId,
+    },
+    CommandRejected {
+        player_id: PlayerId,
+        decision_id: Option<DecisionId>,
+        reason: CommandRejectionReason,
+        counts_toward_limit: bool,
+    },
     TurnStarted {
         player_id: PlayerId,
         turn_no: u64,
@@ -86,9 +163,15 @@ pub enum GameEvent {
         player_id: PlayerId,
         value: DiceRoll,
     },
-    ResourcesDistributed,
+    ResourcesDistributed {
+        by_player: ResourceDistribution,
+    },
     DevCardBought {
         player_id: PlayerId,
+    },
+    DevCardDrawn {
+        player_id: PlayerId,
+        card: DevCardKind,
     },
     DevCardUsed {
         player_id: PlayerId,
@@ -138,6 +221,11 @@ pub enum GameEvent {
         hex: Hex,
         robbed_id: Option<PlayerId>,
     },
+    ResourceStolen {
+        player_id: PlayerId,
+        robbed_id: PlayerId,
+        resource: Resource,
+    },
     ActionRejected {
         player_id: PlayerId,
         action: RegularAction,
@@ -150,5 +238,8 @@ pub enum GameEvent {
     },
     GameInterrupted {
         reason: String,
+    },
+    GameFinished {
+        result: GameResult,
     },
 }

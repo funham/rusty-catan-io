@@ -8,6 +8,8 @@ pub struct MatchConfig {
     #[serde(default)]
     pub observers: Vec<ObserverConfig>,
     #[serde(default)]
+    pub initial: InitialStateConfig,
+    #[serde(default)]
     pub field: FieldConfig,
     #[serde(default)]
     pub dice: DiceConfig,
@@ -15,6 +17,8 @@ pub struct MatchConfig {
     pub limits: LimitsConfig,
     #[serde(default)]
     pub logging: LoggingConfig,
+    #[serde(default)]
+    pub persistence: PersistenceConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -37,9 +41,22 @@ pub enum ObserverConfig {
 
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+pub enum InitialStateConfig {
+    #[default]
+    Fresh,
+    Snapshot {
+        path: PathBuf,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum FieldConfig {
     #[default]
     Default,
+    LayoutRef {
+        path: PathBuf,
+    },
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -84,6 +101,33 @@ pub struct LoggingConfig {
     pub file_prefix: String,
 }
 
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PersistenceConfig {
+    #[default]
+    Off,
+    JournalOnly {
+        dir: PathBuf,
+    },
+    JournalWithCheckpoints {
+        dir: PathBuf,
+        checkpoint_every: u64,
+    },
+}
+
+pub fn resolve_paths(config: &mut MatchConfig, base: &std::path::Path) {
+    if let FieldConfig::LayoutRef { path } = &mut config.field
+        && path.is_relative()
+    {
+        *path = base.join(&path);
+    }
+    if let InitialStateConfig::Snapshot { path } = &mut config.initial
+        && path.is_relative()
+    {
+        *path = base.join(&path);
+    }
+}
+
 impl Default for LoggingConfig {
     fn default() -> Self {
         Self {
@@ -108,7 +152,7 @@ fn default_logging_file_prefix() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{MatchConfig, ObserverConfig};
+    use super::{FieldConfig, InitialStateConfig, MatchConfig, ObserverConfig, PersistenceConfig};
 
     #[test]
     fn parses_snapshot_observer_config() {
@@ -123,6 +167,61 @@ mod tests {
         assert!(matches!(
             config.observers.as_slice(),
             [ObserverConfig::SnapshotObserver]
+        ));
+    }
+
+    #[test]
+    fn parses_layout_ref_field_config() {
+        let config: MatchConfig = serde_json::from_str(
+            r#"{
+              "players": [{ "kind": "lazy" }],
+              "field": { "kind": "layout_ref", "path": "../layouts/standard-4p.layout.json" }
+            }"#,
+        )
+        .unwrap();
+
+        assert!(matches!(config.field, FieldConfig::LayoutRef { .. }));
+    }
+
+    #[test]
+    fn parses_snapshot_initial_state_config() {
+        let config: MatchConfig = serde_json::from_str(
+            r#"{
+              "players": [{ "kind": "lazy" }],
+              "initial": { "kind": "snapshot", "path": "target/snapshots/snapshot-000001" }
+            }"#,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            config.initial,
+            InitialStateConfig::Snapshot { .. }
+        ));
+    }
+
+    #[test]
+    fn persistence_defaults_to_off_and_parses_checkpoint_mode() {
+        let default_config: MatchConfig =
+            serde_json::from_str(r#"{ "players": [{ "kind": "lazy" }] }"#).unwrap();
+        assert!(matches!(default_config.persistence, PersistenceConfig::Off));
+
+        let checkpoint_config: MatchConfig = serde_json::from_str(
+            r#"{
+              "players": [{ "kind": "lazy" }],
+              "persistence": {
+                "kind": "journal_with_checkpoints",
+                "dir": "target/test-journal",
+                "checkpoint_every": 25
+              }
+            }"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            checkpoint_config.persistence,
+            PersistenceConfig::JournalWithCheckpoints {
+                checkpoint_every: 25,
+                ..
+            }
         ));
     }
 }

@@ -13,6 +13,7 @@ pub struct GameTurn<CycleType = RegularCycle> {
     n_players: u8, // in [0..=4]
     rounds_played: u16,
     turn_index: u8, // in [0..=n_players]
+    #[serde(skip)]
     _p: PhantomData<CycleType>,
 }
 

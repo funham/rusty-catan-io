@@ -1,3 +1,7 @@
+use std::sync::Arc;
+
+use serde::{Deserialize, Serialize};
+
 use crate::{
     constants,
     gameplay::game::action::{
@@ -5,8 +9,9 @@ use crate::{
         PostDevCardAction, PostDiceAction, RegularAction,
     },
     gameplay::{
+        field::state::{BoardLayout, BoardState},
         game::{
-            event::{GameEndPlayerStats, GameEvent},
+            event::{EventCause, GameEndPlayerStats, GameEvent, ResourceDistribution},
             index::GameIndex,
             init::GameInitializationState,
             query::GameQuery,
@@ -27,11 +32,12 @@ use crate::{
     math::dice::{DiceOutcome, DiceRoll, DiceRoller, RandomDiceRoller, TileNum},
     topology::Hex,
 };
+use smallvec::SmallVec;
 
 use super::{
     decision::{DecisionId, DecisionKind, DecisionLifetime, OpenDecision, PendingDecisions},
     input::{GameInput, PlayerCommand, TradeCommand, TradeResponseCommand},
-    output::{CommandRejectionReason, GameOutput, OutputSink},
+    output::{CommandRejectionReason, GameEventRecord, GameOutput, OutputSink},
     phase::{GamePhase, TradePhase},
     trade::{
         TradeOfferId, TradeResponseState, TradeScope, TradeSession, TradeSessionId,
@@ -52,15 +58,64 @@ pub struct GameEngine {
     phase: GamePhase,
     pending: PendingDecisions,
     next_decision_id: u64,
-    trade_sessions: Vec<TradeSession>,
+    trade_sessions: SmallVec<[TradeSession; 16]>,
     stats: GameRunStats,
     random: GameRandom,
     dice: RandomDiceRoller,
     max_turns: Option<u64>,
     max_invalid_actions: Option<u64>,
     invalid_actions: u64,
-    pending_discards: Vec<PlayerId>,
+    pending_discards: SmallVec<[PlayerId; 8]>,
     result: Option<GameResult>,
+    next_tx_id: u64,
+    current_tx_id: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GameStateSnapshot {
+    pub board_state: BoardState,
+    pub turn: crate::gameplay::primitives::turn::GameTurn,
+    pub bank: crate::gameplay::primitives::bank::Bank,
+    pub players: crate::gameplay::primitives::player::PlayerDataContainer,
+    pub builds: crate::gameplay::primitives::build::BoardBuildData,
+}
+
+impl GameStateSnapshot {
+    pub fn from_state(state: &GameState) -> Self {
+        Self {
+            board_state: state.board_state.clone(),
+            turn: state.turn.clone(),
+            bank: state.bank.clone(),
+            players: state.players.clone(),
+            builds: state.builds.clone(),
+        }
+    }
+
+    pub fn into_state(self, board: Arc<BoardLayout>) -> GameState {
+        GameState {
+            board,
+            board_state: self.board_state,
+            turn: self.turn,
+            bank: self.bank,
+            players: self.players,
+            builds: self.builds,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GameEngineSnapshot {
+    pub schema: String,
+    pub state: GameStateSnapshot,
+    pub phase: GamePhase,
+    pub pending: PendingDecisions,
+    pub next_decision_id: u64,
+    pub trade_sessions: SmallVec<[TradeSession; 16]>,
+    pub stats: GameRunStats,
+    pub invalid_actions: u64,
+    pub pending_discards: SmallVec<[PlayerId; 8]>,
+    pub result: Option<GameResult>,
+    pub next_tx_id: u64,
 }
 
 impl GameEngine {
@@ -77,15 +132,17 @@ impl GameEngine {
             phase: GamePhase::NotStarted,
             pending: PendingDecisions::default(),
             next_decision_id: 0,
-            trade_sessions: Vec::new(),
+            trade_sessions: SmallVec::new(),
             stats: GameRunStats::default(),
             random: options.random,
             dice: RandomDiceRoller::new(),
             max_turns: options.max_turns,
             max_invalid_actions: options.max_invalid_actions,
             invalid_actions: 0,
-            pending_discards: Vec::new(),
+            pending_discards: SmallVec::new(),
             result: None,
+            next_tx_id: 1,
+            current_tx_id: 0,
         }
     }
 
@@ -96,6 +153,50 @@ impl GameEngine {
         engine
     }
 
+    pub fn from_snapshot(
+        snapshot: GameEngineSnapshot,
+        board: Arc<BoardLayout>,
+        options: RunOptions,
+    ) -> Self {
+        let game = snapshot.state.into_state(board);
+        let index = GameIndex::rebuild(&game);
+        Self {
+            game,
+            init: None,
+            index,
+            phase: snapshot.phase,
+            pending: snapshot.pending,
+            next_decision_id: snapshot.next_decision_id,
+            trade_sessions: snapshot.trade_sessions,
+            stats: snapshot.stats,
+            random: options.random,
+            dice: RandomDiceRoller::new(),
+            max_turns: options.max_turns,
+            max_invalid_actions: options.max_invalid_actions,
+            invalid_actions: snapshot.invalid_actions,
+            pending_discards: snapshot.pending_discards,
+            result: snapshot.result,
+            next_tx_id: snapshot.next_tx_id,
+            current_tx_id: 0,
+        }
+    }
+
+    pub fn snapshot(&self) -> GameEngineSnapshot {
+        GameEngineSnapshot {
+            schema: "rusty-catan.engine-snapshot.v1".to_owned(),
+            state: GameStateSnapshot::from_state(&self.game),
+            phase: self.phase,
+            pending: self.pending.clone(),
+            next_decision_id: self.next_decision_id,
+            trade_sessions: self.trade_sessions.clone(),
+            stats: self.stats,
+            invalid_actions: self.invalid_actions,
+            pending_discards: self.pending_discards.clone(),
+            result: self.result.clone(),
+            next_tx_id: self.next_tx_id,
+        }
+    }
+
     pub fn set_dice_seed(&mut self, seed: u64) {
         self.dice = RandomDiceRoller::with_seed(seed);
     }
@@ -104,6 +205,7 @@ impl GameEngine {
         if self.phase != GamePhase::NotStarted {
             return GameStatus::Waiting;
         }
+        self.begin_transaction(EventCause::Start);
         self.emit_event(GameEvent::GameStarted, sink);
         if let Some(init) = &self.init {
             self.phase = GamePhase::InitialPlacement;
@@ -126,7 +228,13 @@ impl GameEngine {
                 player_id,
                 decision_id,
                 command,
-            } => self.apply_submit(player_id, decision_id, command, sink),
+            } => {
+                self.begin_transaction(EventCause::PlayerCommand {
+                    player_id,
+                    decision_id,
+                });
+                self.apply_submit(player_id, decision_id, command, sink)
+            }
         }
     }
 
@@ -136,6 +244,14 @@ impl GameEngine {
 
     pub fn result(&self) -> Option<&GameResult> {
         self.result.as_ref()
+    }
+
+    pub fn is_started(&self) -> bool {
+        self.phase != GamePhase::NotStarted
+    }
+
+    pub fn pending_decisions(&self) -> impl Iterator<Item = &OpenDecision> {
+        self.pending.iter()
     }
 
     pub fn index(&self) -> &GameIndex {
@@ -540,8 +656,9 @@ impl GameEngine {
                 }
             }
             RegularAction::BuyDevCard => match self.game.buy_dev_card(player_id) {
-                Ok(()) => {
+                Ok(card) => {
                     self.emit_event(GameEvent::DevCardBought { player_id }, sink);
+                    self.emit_event(GameEvent::DevCardDrawn { player_id, card }, sink);
                     if self.end_if_won(sink) {
                         GameStatus::Ended
                     } else {
@@ -1009,8 +1126,8 @@ impl GameEngine {
         );
         match roll.resolve() {
             DiceOutcome::Harvest(num) => {
-                self.execute_harvesting(player_id, num);
-                self.emit_event(GameEvent::ResourcesDistributed, sink);
+                let by_player = self.execute_harvesting(player_id, num);
+                self.emit_event(GameEvent::ResourcesDistributed { by_player }, sink);
                 self.phase = GamePhase::Turn(super::phase::TurnPhase::RegularAction);
             }
             DiceOutcome::Seven => self.execute_seven(player_id, sink),
@@ -1022,9 +1139,10 @@ impl GameEngine {
         self.dice.roll()
     }
 
-    fn execute_harvesting(&mut self, player: PlayerId, num: TileNum) {
+    fn execute_harvesting(&mut self, player: PlayerId, num: TileNum) -> ResourceDistribution {
         let hexes = self.game.board.hexes_by_num(num).clone();
         let player_ids = (player..self.game.players.count()).chain(0..player);
+        let mut by_player = ResourceDistribution::new();
 
         for pid in player_ids {
             for est in self.game.builds[pid].establishments.clone() {
@@ -1036,10 +1154,29 @@ impl GameEngine {
                     }
                     if let Tile::Resource { resource, .. } = self.game.board.arrangement[*hex] {
                         let amount = est.stage.harvest_amount() as u16;
-                        let _ = self.game.transfer_from_bank((resource, amount).into(), pid);
+                        let resources = (resource, amount).into();
+                        if self.game.transfer_from_bank(resources, pid).is_ok() {
+                            Self::add_distribution(&mut by_player, pid, resources);
+                        }
                     }
                 }
             }
+        }
+        by_player
+    }
+
+    fn add_distribution(
+        by_player: &mut ResourceDistribution,
+        player_id: PlayerId,
+        resources: ResourceCollection,
+    ) {
+        if let Some((_, existing)) = by_player
+            .iter_mut()
+            .find(|(existing_id, _)| *existing_id == player_id)
+        {
+            *existing += &resources;
+        } else {
+            by_player.push((player_id, resources));
         }
     }
 
@@ -1220,7 +1357,7 @@ impl GameEngine {
             self.game
                 .use_robbers_with_rng(target_hex, player_id, robbed_id, rng)
         });
-        if result.is_ok() {
+        if let Ok(stolen) = result {
             self.emit_event(
                 GameEvent::RobberMoved {
                     player_id,
@@ -1229,6 +1366,16 @@ impl GameEngine {
                 },
                 sink,
             );
+            if let (Some(robbed_id), Some(resource)) = (robbed_id, stolen) {
+                self.emit_event(
+                    GameEvent::ResourceStolen {
+                        player_id,
+                        robbed_id,
+                        resource,
+                    },
+                    sink,
+                );
+            }
         }
     }
 
@@ -1238,7 +1385,7 @@ impl GameEngine {
         usage: DevCardUsage,
         sink: &mut impl OutputSink,
     ) -> Result<(), crate::gameplay::game::state::DevCardUsageError> {
-        self.random.with_rng(|rng| {
+        let stolen = self.random.with_rng(|rng| {
             self.game
                 .use_dev_card_with_rng(usage.clone(), player_id, rng)
         })?;
@@ -1260,6 +1407,16 @@ impl GameEngine {
                 },
                 sink,
             );
+            if let (Some(robbed_id), Some(resource)) = (robbed_id, stolen) {
+                self.emit_event(
+                    GameEvent::ResourceStolen {
+                        player_id,
+                        robbed_id,
+                        resource,
+                    },
+                    sink,
+                );
+            }
         }
         Ok(())
     }
@@ -1373,15 +1530,14 @@ impl GameEngine {
         };
         self.next_decision_id += 1;
         self.pending.push(decision.clone());
-        if !matches!(decision.kind, DecisionKind::InitPlacement) {
-            self.stats.decision_requests += 1;
-        }
+        self.emit_event(GameEvent::DecisionOpened(decision.clone()), sink);
         sink.push(GameOutput::DecisionOpened(decision.clone()));
         decision
     }
 
     fn close_decision(&mut self, id: DecisionId, sink: &mut impl OutputSink) {
         if self.pending.close(id).is_some() {
+            self.emit_event(GameEvent::DecisionClosed { decision_id: id }, sink);
             sink.push(GameOutput::DecisionClosed { decision_id: id });
         }
     }
@@ -1401,6 +1557,26 @@ impl GameEngine {
         reason: CommandRejectionReason,
         sink: &mut impl OutputSink,
     ) {
+        self.reject_with_limit_count(player_id, decision_id, reason, false, sink);
+    }
+
+    fn reject_with_limit_count(
+        &mut self,
+        player_id: PlayerId,
+        decision_id: Option<DecisionId>,
+        reason: CommandRejectionReason,
+        counts_toward_limit: bool,
+        sink: &mut impl OutputSink,
+    ) {
+        self.emit_event(
+            GameEvent::CommandRejected {
+                player_id,
+                decision_id,
+                reason: reason.clone(),
+                counts_toward_limit,
+            },
+            sink,
+        );
         sink.push(GameOutput::CommandRejected {
             player_id,
             decision_id,
@@ -1428,21 +1604,31 @@ impl GameEngine {
             self.emit_event(GameEvent::GameInterrupted { reason }, sink);
             return;
         }
-        self.reject(
+        self.reject_with_limit_count(
             player_id,
             decision_id,
             CommandRejectionReason::IllegalCommand(reason),
+            true,
             sink,
         );
     }
 
     fn emit_event(&mut self, event: GameEvent, sink: &mut impl OutputSink) {
         self.record_event(&event);
-        sink.push(GameOutput::Event(event));
+        sink.push(GameOutput::Event(GameEventRecord {
+            tx_id: self.current_tx_id,
+            visibility: crate::gameplay::game::event::EventVisibility::for_event(&event),
+            event,
+        }));
     }
 
     fn record_event(&mut self, event: &GameEvent) {
         self.stats.record_event(event);
+    }
+
+    fn begin_transaction(&mut self, _cause: EventCause) {
+        self.current_tx_id = self.next_tx_id;
+        self.next_tx_id += 1;
     }
 
     fn trade_session(&self, id: TradeSessionId) -> Option<&TradeSession> {

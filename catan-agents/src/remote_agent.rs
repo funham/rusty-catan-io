@@ -373,7 +373,9 @@ mod tests {
                 visibility: &visibility,
             };
             observer.on_event(
-                &GameEvent::ResourcesDistributed,
+                &GameEvent::ResourcesDistributed {
+                    by_player: Default::default(),
+                },
                 ObserverNotificationContext::Omniscient {
                     public: second_factory.spectator_public_view(),
                     full: second_factory.omniscient_view(),
@@ -393,7 +395,7 @@ mod tests {
         assert!(matches!(
             second,
             HostToCli::Event {
-                event: GameEvent::ResourcesDistributed,
+                event: GameEvent::ResourcesDistributed { .. },
                 ..
             }
         ));
