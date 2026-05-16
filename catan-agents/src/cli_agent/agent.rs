@@ -6,9 +6,9 @@ use std::{
 use catan_core::{
     gameplay::{
         game::{
-            action::{
-                ChoosePlayerToRobAction, DropHalfAction, InitAction, InitStageAction,
-                MoveRobbersAction, PostDevCardAction, PostDiceAction, RegularAction, TradeAnswer,
+            command::{
+                ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, InitialPlacementCommand,
+                MoveRobberCommand, PostDevCardCommand, PostDiceCommand, RegularCommand, TradeAnswer,
             },
             decision::{DecisionKind, OpenDecision},
             event::{GameEvent, PlayerNotification},
@@ -62,11 +62,11 @@ impl CliAgent {
         self.player_id
     }
 
-    fn init_stage_action(&mut self, context: PlayerDecisionContext<'_>) -> InitStageAction {
+    fn init_stage_action(&mut self, context: PlayerDecisionContext<'_>) -> InitialPlacementCommand {
         let _guard = self.terminal.inner.lock().expect("terminal mutex poisoned");
         TerminalUi::print_decision_context("Initial placement", &context);
         loop {
-            if let Some(action) = InitStageAction::try_new(
+            if let Some(action) = InitialPlacementCommand::try_new(
                 TerminalUi::read_intersection("settlement (h1 h2 h3): "),
                 TerminalUi::read_path("road (h1 h2): "),
             ) {
@@ -77,52 +77,52 @@ impl CliAgent {
         }
     }
 
-    fn init_action(&mut self, context: PlayerDecisionContext<'_>) -> InitAction {
+    fn init_action(&mut self, context: PlayerDecisionContext<'_>) -> InitCommand {
         let _guard = self.terminal.inner.lock().expect("terminal mutex poisoned");
         TerminalUi::print_decision_context("Before dice", &context);
-        InitAction::RollDice
+        InitCommand::RollDice
     }
 
-    fn after_dice_action(&mut self, context: PlayerDecisionContext<'_>) -> PostDiceAction {
+    fn after_dice_action(&mut self, context: PlayerDecisionContext<'_>) -> PostDiceCommand {
         let _guard = self.terminal.inner.lock().expect("terminal mutex poisoned");
         TerminalUi::print_decision_context("After dice", &context);
-        PostDiceAction::RegularAction(TerminalUi::read_regular_action())
+        PostDiceCommand::RegularCommand(TerminalUi::read_regular_action())
     }
 
-    fn after_dev_card_action(&mut self, _context: PlayerDecisionContext<'_>) -> PostDevCardAction {
-        PostDevCardAction::RollDice
+    fn after_dev_card_action(&mut self, _context: PlayerDecisionContext<'_>) -> PostDevCardCommand {
+        PostDevCardCommand::RollDice
     }
 
-    fn regular_action(&mut self, context: PlayerDecisionContext<'_>) -> RegularAction {
+    fn regular_action(&mut self, context: PlayerDecisionContext<'_>) -> RegularCommand {
         let _guard = self.terminal.inner.lock().expect("terminal mutex poisoned");
         TerminalUi::print_decision_context("Action", &context);
         TerminalUi::read_regular_action()
     }
 
-    fn move_robbers(&mut self, context: PlayerDecisionContext<'_>) -> MoveRobbersAction {
+    fn move_robbers(&mut self, context: PlayerDecisionContext<'_>) -> MoveRobberCommand {
         let _guard = self.terminal.inner.lock().expect("terminal mutex poisoned");
         TerminalUi::print_decision_context("Move robber", &context);
-        MoveRobbersAction(TerminalUi::read_hex("robber hex: "))
+        MoveRobberCommand(TerminalUi::read_hex("robber hex: "))
     }
 
     fn choose_player_to_rob(
         &mut self,
         context: PlayerDecisionContext<'_>,
         _robber_pos: Hex,
-    ) -> ChoosePlayerToRobAction {
+    ) -> ChooseRobbedPlayerCommand {
         let _guard = self.terminal.inner.lock().expect("terminal mutex poisoned");
         TerminalUi::print_decision_context("Choose player to rob", &context);
-        ChoosePlayerToRobAction(TerminalUi::read_player_id("player id: "))
+        ChooseRobbedPlayerCommand(TerminalUi::read_player_id("player id: "))
     }
 
     fn answer_trade(&mut self, _context: PlayerDecisionContext<'_>) -> TradeAnswer {
         TradeAnswer::Decline
     }
 
-    fn drop_half(&mut self, context: PlayerDecisionContext<'_>) -> DropHalfAction {
+    fn drop_half(&mut self, context: PlayerDecisionContext<'_>) -> DropHalfCommand {
         let _guard = self.terminal.inner.lock().expect("terminal mutex poisoned");
         TerminalUi::print_decision_context("Discard half", &context);
-        DropHalfAction(TerminalUi::read_resource_collection(
+        DropHalfCommand(TerminalUi::read_resource_collection(
             "drop brick wood wheat sheep ore: ",
         ))
     }
@@ -142,14 +142,14 @@ impl BotPolicy for CliAgent {
             DecisionKind::InitPlacement => Some(PlayerCommand::InitialPlacement(
                 self.init_stage_action(context),
             )),
-            DecisionKind::InitAction => Some(PlayerCommand::InitAction(self.init_action(context))),
-            DecisionKind::PostDiceAction => {
+            DecisionKind::InitCommand => Some(PlayerCommand::InitCommand(self.init_action(context))),
+            DecisionKind::PostDiceCommand => {
                 Some(PlayerCommand::PostDice(self.after_dice_action(context)))
             }
-            DecisionKind::PostDevCardAction => Some(PlayerCommand::PostDevCard(
+            DecisionKind::PostDevCardCommand => Some(PlayerCommand::PostDevCard(
                 self.after_dev_card_action(context),
             )),
-            DecisionKind::RegularAction => {
+            DecisionKind::RegularCommand => {
                 Some(PlayerCommand::Regular(self.regular_action(context)))
             }
             DecisionKind::MoveRobber => {
@@ -189,24 +189,24 @@ impl TerminalUi {
         }
     }
 
-    pub fn parse_regular_action(line: &str) -> Option<RegularAction> {
+    pub fn parse_regular_action(line: &str) -> Option<RegularCommand> {
         let line = line.trim();
         if line == "end" || line.is_empty() {
-            return Some(RegularAction::EndMove);
+            return Some(RegularCommand::EndMove);
         }
         if line == "buy dev" || line == "buy-dev" {
-            return Some(RegularAction::BuyDevCard);
+            return Some(RegularCommand::BuyDevCard);
         }
         if let Some(build) = Self::parse_build(line) {
-            return Some(RegularAction::Build(build));
+            return Some(RegularCommand::Build(build));
         }
         if let Some(trade) = Self::parse_bank_trade(line) {
-            return Some(RegularAction::TradeWithBank(trade));
+            return Some(RegularCommand::TradeWithBank(trade));
         }
         None
     }
 
-    fn read_regular_action() -> RegularAction {
+    fn read_regular_action() -> RegularCommand {
         loop {
             let line = Self::read_line(
                 "command [end | buy dev | build road ... | build settlement ... | build city ... | bank-trade give take kind]: ",

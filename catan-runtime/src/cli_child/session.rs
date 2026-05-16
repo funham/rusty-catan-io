@@ -9,8 +9,8 @@ use catan_agents::remote_agent::{
     CliRole, CliToHost, DecisionRequestFrame, DecisionResponseFrame, HostToCli,
     NonblockingFrameReader, UiModel, read_frame, ui_model_summary, write_frame,
 };
-use catan_core::gameplay::game::action::{
-    ChoosePlayerToRobAction, DropHalfAction, InitStageAction, MoveRobbersAction, PostDevCardAction,
+use catan_core::gameplay::game::command::{
+    ChooseRobbedPlayerCommand, DropHalfCommand, InitialPlacementCommand, MoveRobberCommand, PostDevCardCommand,
     TradeAnswer,
 };
 use catan_core::gameplay::game::output::GameOutput;
@@ -214,10 +214,10 @@ fn decision_request_from_output(
     };
     Some(match decision.kind {
         DecisionKind::InitPlacement => DecisionRequestFrame::InitStage(envelope),
-        DecisionKind::InitAction => DecisionRequestFrame::InitAction(envelope),
-        DecisionKind::PostDiceAction => DecisionRequestFrame::PostDice(envelope),
-        DecisionKind::PostDevCardAction => DecisionRequestFrame::PostDevCard(envelope),
-        DecisionKind::RegularAction => DecisionRequestFrame::Regular(envelope),
+        DecisionKind::InitCommand => DecisionRequestFrame::InitCommand(envelope),
+        DecisionKind::PostDiceCommand => DecisionRequestFrame::PostDice(envelope),
+        DecisionKind::PostDevCardCommand => DecisionRequestFrame::PostDevCard(envelope),
+        DecisionKind::RegularCommand => DecisionRequestFrame::Regular(envelope),
         DecisionKind::MoveRobber => DecisionRequestFrame::MoveRobbers(envelope),
         DecisionKind::ChooseRobbedPlayer { .. } => {
             DecisionRequestFrame::ChoosePlayerToRob(envelope)
@@ -236,16 +236,16 @@ fn command_from_decision_response(
         (DecisionKind::InitPlacement, DecisionResponseFrame::InitStage(action)) => {
             Some(PlayerCommand::InitialPlacement(action))
         }
-        (DecisionKind::InitAction, DecisionResponseFrame::InitAction(action)) => {
-            Some(PlayerCommand::InitAction(action))
+        (DecisionKind::InitCommand, DecisionResponseFrame::InitCommand(action)) => {
+            Some(PlayerCommand::InitCommand(action))
         }
-        (DecisionKind::PostDiceAction, DecisionResponseFrame::PostDice(action)) => {
+        (DecisionKind::PostDiceCommand, DecisionResponseFrame::PostDice(action)) => {
             Some(PlayerCommand::PostDice(action))
         }
-        (DecisionKind::PostDevCardAction, DecisionResponseFrame::PostDevCard(action)) => {
+        (DecisionKind::PostDevCardCommand, DecisionResponseFrame::PostDevCard(action)) => {
             Some(PlayerCommand::PostDevCard(action))
         }
-        (DecisionKind::RegularAction, DecisionResponseFrame::Regular(action)) => {
+        (DecisionKind::RegularCommand, DecisionResponseFrame::Regular(action)) => {
             Some(PlayerCommand::Regular(action))
         }
         (DecisionKind::MoveRobber, DecisionResponseFrame::MoveRobbers(action)) => {
@@ -513,7 +513,7 @@ fn handle_decision(
             log::trace!("Selected settlement: {:?}", settlement);
             let road = read_initial_road(ui, &envelope, settlement, "road: ")?;
             log::trace!("Selected road: {:?}", road);
-            if let Some(action) = InitStageAction::try_new(settlement, road.path) {
+            if let Some(action) = InitialPlacementCommand::try_new(settlement, road.path) {
                 break Ok(DecisionResponseFrame::InitStage(action));
             }
 
@@ -523,15 +523,15 @@ fn handle_decision(
                 envelope.request_id
             );
         },
-        DecisionRequestFrame::InitAction(envelope) => {
+        DecisionRequestFrame::InitCommand(envelope) => {
             log::trace!(
                 target: "catan_runtime::cli_child::session",
-                "processing InitAction decision id={}",
+                "processing InitCommand decision id={}",
                 envelope.request_id
             );
             let action = read_init_action(ui, &envelope)?;
             log::trace!("Init action result: {:?}", action);
-            Ok(DecisionResponseFrame::InitAction(action))
+            Ok(DecisionResponseFrame::InitCommand(action))
         }
         DecisionRequestFrame::PostDice(envelope) => {
             log::trace!(
@@ -551,7 +551,7 @@ fn handle_decision(
             );
             ui.show_model(&envelope.view, "dev card resolved; rolling dice".to_owned())?;
             Ok(DecisionResponseFrame::PostDevCard(
-                PostDevCardAction::RollDice,
+                PostDevCardCommand::RollDice,
             ))
         }
         DecisionRequestFrame::Regular(envelope) => {
@@ -572,7 +572,7 @@ fn handle_decision(
             );
             let hex = read_hex(ui, &envelope, "robber hex: ")?;
             log::trace!("Selected robber hex: {:?}", hex);
-            Ok(DecisionResponseFrame::MoveRobbers(MoveRobbersAction(hex)))
+            Ok(DecisionResponseFrame::MoveRobbers(MoveRobberCommand(hex)))
         }
         DecisionRequestFrame::ChoosePlayerToRob(envelope) => {
             log::trace!(
@@ -584,7 +584,7 @@ fn handle_decision(
             let player_id = read_robbed_player(ui, &envelope, "robbed player: ")?;
             log::trace!("Selected player to rob: {}", player_id);
             Ok(DecisionResponseFrame::ChoosePlayerToRob(
-                ChoosePlayerToRobAction(player_id),
+                ChooseRobbedPlayerCommand(player_id),
             ))
         }
         DecisionRequestFrame::AnswerTrade(envelope) => {
@@ -615,7 +615,7 @@ fn handle_decision(
             let resources =
                 read_resource_collection(ui, &envelope.view, "drop brick wood wheat sheep ore: ")?;
             log::trace!("Resources to drop: {:?}", resources);
-            Ok(DecisionResponseFrame::DropHalf(DropHalfAction(resources)))
+            Ok(DecisionResponseFrame::DropHalf(DropHalfCommand(resources)))
         }
     }
 }
@@ -624,7 +624,7 @@ fn handle_decision(
 mod tests {
     use catan_agents::remote_agent::{DecisionResponseFrame, LegalDecisionOptions, UiModel};
     use catan_core::{
-        gameplay::game::action::RegularAction,
+        gameplay::game::command::RegularCommand,
         gameplay::game::{
             decision::{DecisionId, DecisionKind, DecisionLifetime, OpenDecision},
             input::PlayerCommand,
@@ -652,7 +652,7 @@ mod tests {
         let decision = OpenDecision {
             id: DecisionId(9),
             player_id: 0,
-            kind: DecisionKind::RegularAction,
+            kind: DecisionKind::RegularCommand,
             lifetime: DecisionLifetime::OneShot,
         };
 
@@ -663,11 +663,11 @@ mod tests {
 
         let command = command_from_decision_response(
             decision.kind,
-            DecisionResponseFrame::Regular(RegularAction::EndMove),
+            DecisionResponseFrame::Regular(RegularCommand::EndMove),
         );
         assert!(matches!(
             command,
-            Some(PlayerCommand::Regular(RegularAction::EndMove))
+            Some(PlayerCommand::Regular(RegularCommand::EndMove))
         ));
     }
 

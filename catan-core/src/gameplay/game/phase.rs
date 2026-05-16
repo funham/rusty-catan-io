@@ -15,10 +15,10 @@ pub enum GamePhase {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TurnPhase {
-    InitAction,
-    PostDiceAction,
-    PostDevCardAction,
-    RegularAction,
+    InitCommand,
+    PostDiceCommand,
+    PostDevCardCommand,
+    RegularCommand,
     MoveRobber,
     ChooseRobbedPlayer { robber_pos: crate::topology::Hex },
     DropHalf { player_id: PlayerId, required: u16 },

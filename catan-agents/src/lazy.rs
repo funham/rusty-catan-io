@@ -1,9 +1,9 @@
 use catan_core::{
     gameplay::{
         game::{
-            action::{
-                ChoosePlayerToRobAction, DropHalfAction, InitAction, InitStageAction,
-                MoveRobbersAction, PostDevCardAction, PostDiceAction, RegularAction,
+            command::{
+                ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, InitialPlacementCommand,
+                MoveRobberCommand, PostDevCardCommand, PostDiceCommand, RegularCommand,
             },
             decision::{DecisionKind, OpenDecision},
             input::PlayerCommand,
@@ -31,27 +31,27 @@ impl LazyAgent {
 }
 
 impl LazyAgent {
-    fn init_stage_action(&mut self, context: PlayerDecisionContext<'_>) -> InitStageAction {
+    fn init_stage_action(&mut self, context: PlayerDecisionContext<'_>) -> InitialPlacementCommand {
         lazy_init_stage_action(context, self.id)
     }
 
-    fn init_action(&mut self, _context: PlayerDecisionContext<'_>) -> InitAction {
-        InitAction::RollDice
+    fn init_action(&mut self, _context: PlayerDecisionContext<'_>) -> InitCommand {
+        InitCommand::RollDice
     }
 
-    fn after_dice_action(&mut self, _context: PlayerDecisionContext<'_>) -> PostDiceAction {
-        PostDiceAction::RegularAction(RegularAction::EndMove)
+    fn after_dice_action(&mut self, _context: PlayerDecisionContext<'_>) -> PostDiceCommand {
+        PostDiceCommand::RegularCommand(RegularCommand::EndMove)
     }
 
-    fn after_dev_card_action(&mut self, _context: PlayerDecisionContext<'_>) -> PostDevCardAction {
-        PostDevCardAction::RollDice
+    fn after_dev_card_action(&mut self, _context: PlayerDecisionContext<'_>) -> PostDevCardCommand {
+        PostDevCardCommand::RollDice
     }
 
-    fn regular_action(&mut self, _context: PlayerDecisionContext<'_>) -> RegularAction {
-        RegularAction::EndMove
+    fn regular_action(&mut self, _context: PlayerDecisionContext<'_>) -> RegularCommand {
+        RegularCommand::EndMove
     }
 
-    fn move_robbers(&mut self, context: PlayerDecisionContext<'_>) -> MoveRobbersAction {
+    fn move_robbers(&mut self, context: PlayerDecisionContext<'_>) -> MoveRobberCommand {
         lazy_move_robbers(context)
     }
 
@@ -59,11 +59,11 @@ impl LazyAgent {
         &mut self,
         context: PlayerDecisionContext<'_>,
         robber_pos: Hex,
-    ) -> ChoosePlayerToRobAction {
+    ) -> ChooseRobbedPlayerCommand {
         lazy_choose_player_to_rob(context, robber_pos)
     }
 
-    fn drop_half(&mut self, context: PlayerDecisionContext<'_>) -> DropHalfAction {
+    fn drop_half(&mut self, context: PlayerDecisionContext<'_>) -> DropHalfCommand {
         lazy_drop_half(context)
     }
 }
@@ -82,14 +82,14 @@ impl BotPolicy for LazyAgent {
             DecisionKind::InitPlacement => Some(PlayerCommand::InitialPlacement(
                 self.init_stage_action(context),
             )),
-            DecisionKind::InitAction => Some(PlayerCommand::InitAction(self.init_action(context))),
-            DecisionKind::PostDiceAction => {
+            DecisionKind::InitCommand => Some(PlayerCommand::InitCommand(self.init_action(context))),
+            DecisionKind::PostDiceCommand => {
                 Some(PlayerCommand::PostDice(self.after_dice_action(context)))
             }
-            DecisionKind::PostDevCardAction => Some(PlayerCommand::PostDevCard(
+            DecisionKind::PostDevCardCommand => Some(PlayerCommand::PostDevCard(
                 self.after_dev_card_action(context),
             )),
-            DecisionKind::RegularAction => {
+            DecisionKind::RegularCommand => {
                 Some(PlayerCommand::Regular(self.regular_action(context)))
             }
             DecisionKind::MoveRobber => {
@@ -106,7 +106,7 @@ impl BotPolicy for LazyAgent {
     }
 }
 
-pub fn lazy_drop_half(context: PlayerDecisionContext<'_>) -> DropHalfAction {
+pub fn lazy_drop_half(context: PlayerDecisionContext<'_>) -> DropHalfCommand {
     let number_to_drop = context.private.resources.total() / 2;
     let mut to_drop = ResourceCollection::default();
     for (resource, number) in context.private.resources.unroll() {
@@ -119,24 +119,24 @@ pub fn lazy_drop_half(context: PlayerDecisionContext<'_>) -> DropHalfAction {
         to_drop[resource] = remaining.min(number);
     }
 
-    DropHalfAction(to_drop)
+    DropHalfCommand(to_drop)
 }
 
 pub fn lazy_choose_player_to_rob(
     context: PlayerDecisionContext<'_>,
     robber_pos: Hex,
-) -> ChoosePlayerToRobAction {
+) -> ChooseRobbedPlayerCommand {
     let id = legal::legal_rob_targets(&context, robber_pos)
         .into_iter()
         .next()
         .expect("engine must forbid this case");
-    ChoosePlayerToRobAction(id)
+    ChooseRobbedPlayerCommand(id)
 }
 
-pub fn lazy_move_robbers(context: PlayerDecisionContext<'_>) -> MoveRobbersAction {
+pub fn lazy_move_robbers(context: PlayerDecisionContext<'_>) -> MoveRobberCommand {
     for hex in context.public.board.arrangement.hex_iter() {
         if hex != context.public.board_state.robber_pos {
-            return MoveRobbersAction(hex);
+            return MoveRobberCommand(hex);
         }
     }
 
@@ -146,7 +146,7 @@ pub fn lazy_move_robbers(context: PlayerDecisionContext<'_>) -> MoveRobbersActio
 pub fn lazy_init_stage_action(
     context: PlayerDecisionContext<'_>,
     player_id: PlayerId,
-) -> InitStageAction {
+) -> InitialPlacementCommand {
     context
         .public
         .builds

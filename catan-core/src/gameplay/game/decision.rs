@@ -25,10 +25,10 @@ pub enum DecisionLifetime {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DecisionKind {
     InitPlacement,
-    InitAction,
-    PostDiceAction,
-    PostDevCardAction,
-    RegularAction,
+    InitCommand,
+    PostDiceCommand,
+    PostDevCardCommand,
+    RegularCommand,
     MoveRobber,
     ChooseRobbedPlayer { robber_pos: crate::topology::Hex },
     DropHalf { required: u16 },

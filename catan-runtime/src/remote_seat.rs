@@ -318,7 +318,7 @@ mod tests {
                     player_id: decision.player_id,
                     decision_id: decision.id,
                     command: catan_core::gameplay::game::input::PlayerCommand::Regular(
-                        catan_core::gameplay::game::action::RegularAction::EndMove,
+                        catan_core::gameplay::game::command::RegularCommand::EndMove,
                     ),
                 },
             )
@@ -340,7 +340,7 @@ mod tests {
         let output = GameOutput::DecisionOpened(OpenDecision {
             id: catan_core::gameplay::game::decision::DecisionId(7),
             player_id: 0,
-            kind: DecisionKind::RegularAction,
+            kind: DecisionKind::RegularCommand,
             lifetime: DecisionLifetime::OneShot,
         });
 
@@ -389,7 +389,7 @@ mod tests {
         let output = GameOutput::DecisionOpened(OpenDecision {
             id: catan_core::gameplay::game::decision::DecisionId(8),
             player_id: 1,
-            kind: DecisionKind::RegularAction,
+            kind: DecisionKind::RegularCommand,
             lifetime: DecisionLifetime::OneShot,
         });
 

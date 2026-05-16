@@ -72,7 +72,7 @@ fn add_two_initial_settlements(engine: &mut GameEngine) -> Hex {
             .query()
             .possible_initial_placements(&engine.game.board, player_id)
             .iter()
-            .map(crate::gameplay::game::action::InitStageAction::as_builds)
+            .map(crate::gameplay::game::command::InitialPlacementCommand::as_builds)
             .next()
             .expect("default board should have initial placements");
 
@@ -370,7 +370,7 @@ fn wrong_player_is_rejected_without_closing_decision() {
         GameInput::Submit {
             player_id: 1,
             decision_id: decision.id,
-            command: PlayerCommand::MoveRobbers(crate::gameplay::game::action::MoveRobbersAction(
+            command: PlayerCommand::MoveRobbers(crate::gameplay::game::command::MoveRobberCommand(
                 Hex::new(0, 0),
             )),
         },
@@ -400,7 +400,7 @@ fn wrong_player_rejection_emits_domain_command_rejected_event() {
         GameInput::Submit {
             player_id: 1,
             decision_id: decision.id,
-            command: PlayerCommand::MoveRobbers(crate::gameplay::game::action::MoveRobbersAction(
+            command: PlayerCommand::MoveRobbers(crate::gameplay::game::command::MoveRobberCommand(
                 Hex::new(0, 0),
             )),
         },
@@ -475,7 +475,7 @@ fn buying_dev_card_emits_private_drawn_card_event() {
         },
     );
     engine.game.bank.dev_cards = vec![DevCardKind::VictoryPoint];
-    let decision = engine.open_decision_for_test(0, DecisionKind::RegularAction);
+    let decision = engine.open_decision_for_test(0, DecisionKind::RegularCommand);
     let mut sink = VecOutputSink::default();
 
     engine.apply(
@@ -483,7 +483,7 @@ fn buying_dev_card_emits_private_drawn_card_event() {
             player_id: 0,
             decision_id: decision.id,
             command: PlayerCommand::Regular(
-                crate::gameplay::game::action::RegularAction::BuyDevCard,
+                crate::gameplay::game::command::RegularCommand::BuyDevCard,
             ),
         },
         &mut sink,
@@ -512,7 +512,7 @@ fn moving_robber_emits_stolen_resource_event() {
         GameInput::Submit {
             player_id: 0,
             decision_id: decision.id,
-            command: PlayerCommand::MoveRobbers(crate::gameplay::game::action::MoveRobbersAction(
+            command: PlayerCommand::MoveRobbers(crate::gameplay::game::command::MoveRobberCommand(
                 victim_hex,
             )),
         },
@@ -539,7 +539,7 @@ fn reusable_trade_response_decision_can_be_updated_until_session_closes() {
     engine.test_give_resources(1, one_wood());
 
     let mut sink = VecOutputSink::default();
-    let owner_decision = engine.open_decision_for_test(0, DecisionKind::RegularAction);
+    let owner_decision = engine.open_decision_for_test(0, DecisionKind::RegularCommand);
     engine.apply(
         GameInput::Submit {
             player_id: 0,
@@ -647,7 +647,7 @@ fn trade_commit_revalidates_resources_and_rejects_missing_resources() {
 fn same_resource_on_both_sides_is_rejected() {
     let (mut engine, _outputs) = started_engine();
     engine.test_force_regular_action_phase(0);
-    let owner = engine.open_decision_for_test(0, DecisionKind::RegularAction);
+    let owner = engine.open_decision_for_test(0, DecisionKind::RegularCommand);
     let mut sink = VecOutputSink::default();
 
     engine.apply(
@@ -926,7 +926,7 @@ fn player_cannot_accept_another_players_counteroffer() {
 fn targeted_trade_rejects_invalid_target() {
     let (mut engine, _outputs) = started_engine();
     engine.test_force_regular_action_phase(0);
-    let owner = engine.open_decision_for_test(0, DecisionKind::RegularAction);
+    let owner = engine.open_decision_for_test(0, DecisionKind::RegularCommand);
     let mut sink = VecOutputSink::default();
 
     engine.apply(
@@ -959,7 +959,7 @@ fn targeted_trade_rejects_invalid_target() {
 #[test]
 fn submit_after_game_end_is_rejected_without_mutation() {
     let (mut engine, _outputs) = started_engine();
-    let decision = engine.open_decision_for_test(0, DecisionKind::RegularAction);
+    let decision = engine.open_decision_for_test(0, DecisionKind::RegularCommand);
     engine.test_mark_ended();
     let mut sink = VecOutputSink::default();
 
@@ -967,7 +967,7 @@ fn submit_after_game_end_is_rejected_without_mutation() {
         GameInput::Submit {
             player_id: 0,
             decision_id: decision.id,
-            command: PlayerCommand::Regular(crate::gameplay::game::action::RegularAction::EndMove),
+            command: PlayerCommand::Regular(crate::gameplay::game::command::RegularCommand::EndMove),
         },
         &mut sink,
     );

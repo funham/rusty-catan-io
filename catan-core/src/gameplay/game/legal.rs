@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     common::SmallSet,
     constants::costs,
-    gameplay::game::action::{InitStageAction, RegularAction},
+    gameplay::game::command::{InitialPlacementCommand, RegularCommand},
     gameplay::{
         game::view::{PlayerDecisionContext, PublicPlayerResources},
         primitives::{
@@ -85,7 +85,7 @@ pub enum BuildClass {
     City,
 }
 
-pub fn legal_initial_placements(context: &PlayerDecisionContext<'_>) -> Vec<InitStageAction> {
+pub fn legal_initial_placements(context: &PlayerDecisionContext<'_>) -> Vec<InitialPlacementCommand> {
     context
         .public
         .builds
@@ -823,7 +823,7 @@ pub fn legal_trades(context: &PlayerDecisionContext<'_>) -> impl IntoIterator<It
     legal_bank_trades(context)
 }
 
-pub fn legal_regular_actions(context: &PlayerDecisionContext<'_>) -> Vec<RegularAction> {
+pub fn legal_regular_actions(context: &PlayerDecisionContext<'_>) -> Vec<RegularCommand> {
     legal_regular_actions_iter(context).collect()
 }
 
@@ -850,15 +850,15 @@ pub fn legal_regular_action_count(context: &PlayerDecisionContext<'_>) -> usize 
 pub fn legal_regular_action_at(
     context: &PlayerDecisionContext<'_>,
     mut index: usize,
-) -> Option<RegularAction> {
+) -> Option<RegularCommand> {
     if index == 0 {
-        return Some(RegularAction::EndMove);
+        return Some(RegularCommand::EndMove);
     }
     index -= 1;
 
     if can_buy_dev_card(context) {
         if index == 0 {
-            return Some(RegularAction::BuyDevCard);
+            return Some(RegularCommand::BuyDevCard);
         }
         index -= 1;
     }
@@ -868,7 +868,7 @@ pub fn legal_regular_action_at(
         if index < count {
             return legal_road_spots_iter(context, context.actor)
                 .nth(index)
-                .map(RegularAction::Build);
+                .map(RegularCommand::Build);
         }
         index -= count;
     }
@@ -878,7 +878,7 @@ pub fn legal_regular_action_at(
         if index < count {
             return legal_settlement_spots_iter(context, context.actor)
                 .nth(index)
-                .map(RegularAction::Build);
+                .map(RegularCommand::Build);
         }
         index -= count;
     }
@@ -888,41 +888,41 @@ pub fn legal_regular_action_at(
         if index < count {
             return legal_city_spots_iter(context, context.actor)
                 .nth(index)
-                .map(RegularAction::Build);
+                .map(RegularCommand::Build);
         }
         index -= count;
     }
 
-    legal_bank_trade_at(context, index).map(RegularAction::TradeWithBank)
+    legal_bank_trade_at(context, index).map(RegularCommand::TradeWithBank)
 }
 
 pub fn legal_regular_actions_iter<'a>(
     context: &'a PlayerDecisionContext<'_>,
-) -> Box<dyn Iterator<Item = RegularAction> + 'a> {
+) -> Box<dyn Iterator<Item = RegularCommand> + 'a> {
     let buy_dev = can_buy_dev_card(context)
-        .then_some(RegularAction::BuyDevCard)
+        .then_some(RegularCommand::BuyDevCard)
         .into_iter();
     let roads = can_buy_road(context)
         .then(|| legal_road_spots_iter(context, context.actor))
         .into_iter()
         .flatten()
-        .map(RegularAction::Build);
+        .map(RegularCommand::Build);
     let settlements = can_buy_settlement(context)
         .then(|| legal_settlement_spots_iter(context, context.actor))
         .into_iter()
         .flatten()
-        .map(RegularAction::Build);
+        .map(RegularCommand::Build);
     let cities = can_buy_city(context)
         .then(|| legal_city_spots_iter(context, context.actor))
         .into_iter()
         .flatten()
-        .map(RegularAction::Build);
+        .map(RegularCommand::Build);
     let bank_trades = legal_bank_trades(context)
         .into_iter()
-        .map(RegularAction::TradeWithBank);
+        .map(RegularCommand::TradeWithBank);
 
     Box::new(
-        std::iter::once(RegularAction::EndMove)
+        std::iter::once(RegularCommand::EndMove)
             .chain(buy_dev)
             .chain(roads)
             .chain(settlements)
@@ -1124,7 +1124,7 @@ mod tests {
             })
     }
 
-    fn context_action_with_resources(resources: ResourceCollection) -> RegularAction {
+    fn context_action_with_resources(resources: ResourceCollection) -> RegularCommand {
         let mut state = initialized_state();
         state
             .transfer_from_bank(resources, 0)
@@ -1132,7 +1132,7 @@ mod tests {
         preferred_action(&state, 0)
     }
 
-    fn preferred_action(state: &GameState, player_id: PlayerId) -> RegularAction {
+    fn preferred_action(state: &GameState, player_id: PlayerId) -> RegularCommand {
         let index = GameIndex::rebuild(state);
         let visibility = VisibilityConfig::default();
         let factory = ContextFactory {
@@ -1148,23 +1148,23 @@ mod tests {
         let context = factory.player_decision_context(player_id, search);
         legal_regular_actions(&context)
             .into_iter()
-            .find(|action| matches!(action, RegularAction::Build(Build::Establishment(est)) if est.stage == EstablishmentType::City))
+            .find(|action| matches!(action, RegularCommand::Build(Build::Establishment(est)) if est.stage == EstablishmentType::City))
             .or_else(|| {
                 legal_regular_actions(&context)
                     .into_iter()
-                    .find(|action| matches!(action, RegularAction::Build(Build::Establishment(est)) if est.stage == EstablishmentType::Settlement))
+                    .find(|action| matches!(action, RegularCommand::Build(Build::Establishment(est)) if est.stage == EstablishmentType::Settlement))
             })
             .or_else(|| {
                 legal_regular_actions(&context)
                     .into_iter()
-                    .find(|action| matches!(action, RegularAction::BuyDevCard))
+                    .find(|action| matches!(action, RegularCommand::BuyDevCard))
             })
             .or_else(|| {
                 legal_regular_actions(&context)
                     .into_iter()
-                    .find(|action| matches!(action, RegularAction::Build(Build::Road(_))))
+                    .find(|action| matches!(action, RegularCommand::Build(Build::Road(_))))
             })
-            .unwrap_or(RegularAction::EndMove)
+            .unwrap_or(RegularCommand::EndMove)
     }
 
     fn context_bank_trades(
@@ -1289,7 +1289,7 @@ mod tests {
         values
     }
 
-    fn sorted_regular_debug(actions: Vec<RegularAction>) -> Vec<String> {
+    fn sorted_regular_debug(actions: Vec<RegularCommand>) -> Vec<String> {
         let mut values = actions
             .into_iter()
             .map(|action| format!("{action:?}"))
@@ -1466,7 +1466,7 @@ mod tests {
         });
 
         match action {
-            RegularAction::Build(Build::Establishment(establishment)) => {
+            RegularCommand::Build(Build::Establishment(establishment)) => {
                 assert_eq!(establishment.stage, EstablishmentType::City);
             }
             other => panic!("expected city build, got {other:?}"),
@@ -1506,7 +1506,7 @@ mod tests {
         });
 
         match action {
-            RegularAction::Build(Build::Establishment(establishment)) => {
+            RegularCommand::Build(Build::Establishment(establishment)) => {
                 assert_eq!(establishment.stage, EstablishmentType::Settlement);
             }
             other => panic!("expected settlement build, got {other:?}"),
@@ -1523,7 +1523,7 @@ mod tests {
             ore: 1,
         });
 
-        assert!(matches!(action, RegularAction::BuyDevCard));
+        assert!(matches!(action, RegularCommand::BuyDevCard));
     }
 
     #[test]
@@ -1557,7 +1557,7 @@ mod tests {
         assert!(
             !actions
                 .iter()
-                .any(|action| matches!(action, RegularAction::BuyDevCard)),
+                .any(|action| matches!(action, RegularCommand::BuyDevCard)),
             "empty dev-card deck should not produce BuyDevCard, got {actions:?}"
         );
     }
@@ -1572,7 +1572,7 @@ mod tests {
             ore: 0,
         });
 
-        assert!(matches!(action, RegularAction::Build(Build::Road(_))));
+        assert!(matches!(action, RegularCommand::Build(Build::Road(_))));
     }
 
     #[test]
@@ -1627,7 +1627,7 @@ mod tests {
         assert!(
             placements
                 .iter()
-                .map(InitStageAction::as_builds)
+                .map(InitialPlacementCommand::as_builds)
                 .all(|(settlement, road)| {
                     road.path
                         .intersections_iter()

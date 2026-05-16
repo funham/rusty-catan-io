@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 use crate::{
     algorithm,
     constants,
-    gameplay::game::action::{
-        ChoosePlayerToRobAction, DropHalfAction, InitAction, InitStageAction, MoveRobbersAction,
-        PostDevCardAction, PostDiceAction, RegularAction,
+    gameplay::game::command::{
+        ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, InitialPlacementCommand, MoveRobberCommand,
+        PostDevCardCommand, PostDiceCommand, RegularCommand,
     },
     gameplay::{
         field::state::{BoardLayout, BoardState},
@@ -299,7 +299,7 @@ impl GameEngine {
         self.core.state()
     }
 
-    pub fn legal_initial_placements(&self, player_id: PlayerId) -> Vec<InitStageAction> {
+    pub fn legal_initial_placements(&self, player_id: PlayerId) -> Vec<InitialPlacementCommand> {
         self.game
             .builds
             .query()
@@ -349,19 +349,19 @@ impl GameEngine {
             (DecisionKind::InitPlacement, PlayerCommand::InitialPlacement(action)) => {
                 self.apply_initial_placement(decision, action, sink)
             }
-            (DecisionKind::InitAction, PlayerCommand::InitAction(action)) => {
+            (DecisionKind::InitCommand, PlayerCommand::InitCommand(action)) => {
                 self.apply_init_action(decision, action, sink)
             }
-            (DecisionKind::PostDiceAction, PlayerCommand::PostDice(action)) => {
+            (DecisionKind::PostDiceCommand, PlayerCommand::PostDice(action)) => {
                 self.apply_post_dice_action(decision, action, sink)
             }
-            (DecisionKind::PostDevCardAction, PlayerCommand::PostDevCard(action)) => {
+            (DecisionKind::PostDevCardCommand, PlayerCommand::PostDevCard(action)) => {
                 self.apply_post_dev_card_action(decision, action, sink)
             }
-            (DecisionKind::RegularAction, PlayerCommand::Regular(action)) => {
+            (DecisionKind::RegularCommand, PlayerCommand::Regular(action)) => {
                 self.apply_regular_action(decision, action, sink)
             }
-            (DecisionKind::RegularAction, PlayerCommand::Trade(command)) => {
+            (DecisionKind::RegularCommand, PlayerCommand::Trade(command)) => {
                 self.apply_trade_owner_command(decision, command, sink)
             }
             (DecisionKind::TradeResponse { session }, PlayerCommand::Trade(command)) => {
@@ -370,16 +370,16 @@ impl GameEngine {
             (DecisionKind::TradeOwnerAction { session }, PlayerCommand::Trade(command)) => {
                 self.apply_trade_owner_session_command(decision, session, command, sink)
             }
-            (DecisionKind::MoveRobber, PlayerCommand::MoveRobbers(MoveRobbersAction(hex))) => {
+            (DecisionKind::MoveRobber, PlayerCommand::MoveRobbers(MoveRobberCommand(hex))) => {
                 self.apply_move_robber(decision, hex, sink)
             }
             (
                 DecisionKind::ChooseRobbedPlayer { robber_pos },
-                PlayerCommand::ChooseRobbedPlayer(ChoosePlayerToRobAction(robbed_id)),
+                PlayerCommand::ChooseRobbedPlayer(ChooseRobbedPlayerCommand(robbed_id)),
             ) => self.apply_choose_robbed_player(decision, robber_pos, robbed_id, sink),
             (
                 DecisionKind::DropHalf { required },
-                PlayerCommand::DropHalf(DropHalfAction(drop)),
+                PlayerCommand::DropHalf(DropHalfCommand(drop)),
             ) => self.apply_drop_half(decision, required, drop, sink),
             _ => {
                 self.reject(
@@ -396,7 +396,7 @@ impl GameEngine {
     fn apply_initial_placement(
         &mut self,
         decision: OpenDecision,
-        action: InitStageAction,
+        action: InitialPlacementCommand,
         sink: &mut impl OutputSink,
     ) -> GameStatus {
         let player_id = decision.player_id;
@@ -541,38 +541,38 @@ impl GameEngine {
     fn apply_init_action(
         &mut self,
         decision: OpenDecision,
-        action: InitAction,
+        action: InitCommand,
         sink: &mut impl OutputSink,
     ) -> GameStatus {
         self.close_decision(decision.id, sink);
         match action {
-            InitAction::RollDice => {
+            InitCommand::RollDice => {
                 if self.execute_dice_roll(decision.player_id, sink) == GameStatus::Ended {
                     return GameStatus::Ended;
                 }
                 if matches!(
                     self.phase,
-                    GamePhase::Turn(super::phase::TurnPhase::RegularAction)
+                    GamePhase::Turn(super::phase::TurnPhase::RegularCommand)
                 ) {
                     self.open_decision(
                         decision.player_id,
-                        DecisionKind::PostDiceAction,
+                        DecisionKind::PostDiceCommand,
                         DecisionLifetime::OneShot,
                         sink,
                     );
-                    self.phase = GamePhase::Turn(super::phase::TurnPhase::PostDiceAction);
+                    self.phase = GamePhase::Turn(super::phase::TurnPhase::PostDiceCommand);
                 }
             }
-            InitAction::UseDevCard(usage) => {
+            InitCommand::UseDevCard(usage) => {
                 match self.execute_dev_card(decision.player_id, usage, sink) {
                     Ok(()) => {
                         if self.end_if_won(sink) {
                             return GameStatus::Ended;
                         }
-                        self.phase = GamePhase::Turn(super::phase::TurnPhase::PostDevCardAction);
+                        self.phase = GamePhase::Turn(super::phase::TurnPhase::PostDevCardCommand);
                         self.open_decision(
                             decision.player_id,
-                            DecisionKind::PostDevCardAction,
+                            DecisionKind::PostDevCardCommand,
                             DecisionLifetime::OneShot,
                             sink,
                         );
@@ -586,7 +586,7 @@ impl GameEngine {
                         );
                         self.open_decision(
                             decision.player_id,
-                            DecisionKind::InitAction,
+                            DecisionKind::InitCommand,
                             DecisionLifetime::OneShot,
                             sink,
                         );
@@ -600,18 +600,18 @@ impl GameEngine {
     fn apply_post_dev_card_action(
         &mut self,
         decision: OpenDecision,
-        action: PostDevCardAction,
+        action: PostDevCardCommand,
         sink: &mut impl OutputSink,
     ) -> GameStatus {
         self.close_decision(decision.id, sink);
         match action {
-            PostDevCardAction::RollDice => {
+            PostDevCardCommand::RollDice => {
                 if self.execute_dice_roll(decision.player_id, sink) == GameStatus::Ended {
                     return GameStatus::Ended;
                 }
                 if matches!(
                     self.phase,
-                    GamePhase::Turn(super::phase::TurnPhase::RegularAction)
+                    GamePhase::Turn(super::phase::TurnPhase::RegularCommand)
                 ) {
                     self.open_regular_decision(decision.player_id, sink);
                 }
@@ -623,12 +623,12 @@ impl GameEngine {
     fn apply_post_dice_action(
         &mut self,
         decision: OpenDecision,
-        action: PostDiceAction,
+        action: PostDiceCommand,
         sink: &mut impl OutputSink,
     ) -> GameStatus {
         self.close_decision(decision.id, sink);
         match action {
-            PostDiceAction::UseDevCard(usage) => {
+            PostDiceCommand::UseDevCard(usage) => {
                 match self.execute_dev_card(decision.player_id, usage, sink) {
                     Ok(()) => {
                         if self.end_if_won(sink) {
@@ -645,14 +645,14 @@ impl GameEngine {
                         );
                         self.open_decision(
                             decision.player_id,
-                            DecisionKind::PostDiceAction,
+                            DecisionKind::PostDiceCommand,
                             DecisionLifetime::OneShot,
                             sink,
                         );
                     }
                 }
             }
-            PostDiceAction::RegularAction(action) => {
+            PostDiceCommand::RegularCommand(action) => {
                 self.apply_regular_action_after_closed(decision.player_id, action, sink);
             }
         }
@@ -662,7 +662,7 @@ impl GameEngine {
     fn apply_regular_action(
         &mut self,
         decision: OpenDecision,
-        action: RegularAction,
+        action: RegularCommand,
         sink: &mut impl OutputSink,
     ) -> GameStatus {
         self.close_decision(decision.id, sink);
@@ -672,12 +672,12 @@ impl GameEngine {
     fn apply_regular_action_after_closed(
         &mut self,
         player_id: PlayerId,
-        action: RegularAction,
+        action: RegularCommand,
         sink: &mut impl OutputSink,
     ) -> GameStatus {
         self.stats.regular_actions += 1;
         match action {
-            RegularAction::Build(build) => match self.execute_build(player_id, build, sink) {
+            RegularCommand::Build(build) => match self.execute_build(player_id, build, sink) {
                 Ok(()) => {
                     if self.end_if_won(sink) {
                         GameStatus::Ended
@@ -692,7 +692,7 @@ impl GameEngine {
                     GameStatus::Waiting
                 }
             },
-            RegularAction::TradeWithBank(trade) => {
+            RegularCommand::TradeWithBank(trade) => {
                 match self.execute_trade_with_bank(player_id, trade) {
                     Ok(()) => {
                         self.emit_event(GameEvent::BankTradeCompleted { player_id, trade }, sink);
@@ -706,7 +706,7 @@ impl GameEngine {
                     }
                 }
             }
-            RegularAction::BuyDevCard => match self.game.buy_dev_card(player_id) {
+            RegularCommand::BuyDevCard => match self.game.buy_dev_card(player_id) {
                 Ok(card) => {
                     self.emit_event(GameEvent::DevCardBought { player_id }, sink);
                     self.emit_event(GameEvent::DevCardDrawn { player_id, card }, sink);
@@ -728,7 +728,7 @@ impl GameEngine {
                     GameStatus::Waiting
                 }
             },
-            RegularAction::OfferPublicTrade(offer) => {
+            RegularCommand::OfferPublicTrade(offer) => {
                 let decision = self.synthetic_regular_decision(player_id);
                 self.open_trade_from_offer(
                     decision,
@@ -737,12 +737,12 @@ impl GameEngine {
                     sink,
                 )
             }
-            RegularAction::OfferPersonalTrade(offer) => {
+            RegularCommand::OfferPersonalTrade(offer) => {
                 let (scope, trade) = super::trade::trade_from_personal_offer(offer);
                 let decision = self.synthetic_regular_decision(player_id);
                 self.open_trade_from_offer(decision, scope, trade, sink)
             }
-            RegularAction::EndMove => {
+            RegularCommand::EndMove => {
                 let turn_no = self.game.turn.get_turns_played();
                 self.emit_event(GameEvent::TurnEnded { player_id, turn_no }, sink);
                 self.game.turn.next();
@@ -1063,10 +1063,10 @@ impl GameEngine {
                     },
                     sink,
                 );
-                self.phase = GamePhase::Turn(super::phase::TurnPhase::RegularAction);
+                self.phase = GamePhase::Turn(super::phase::TurnPhase::RegularCommand);
                 self.open_decision(
                     session.proposer,
-                    DecisionKind::RegularAction,
+                    DecisionKind::RegularCommand,
                     DecisionLifetime::OneShot,
                     sink,
                 );
@@ -1107,10 +1107,10 @@ impl GameEngine {
             },
             sink,
         );
-        self.phase = GamePhase::Turn(super::phase::TurnPhase::RegularAction);
+        self.phase = GamePhase::Turn(super::phase::TurnPhase::RegularCommand);
         self.open_decision(
             proposer_id,
-            DecisionKind::RegularAction,
+            DecisionKind::RegularCommand,
             DecisionLifetime::OneShot,
             sink,
         );
@@ -1140,11 +1140,11 @@ impl GameEngine {
 
         let player_id = self.game.turn.get_turn_index();
         self.game.players.get_mut(player_id).dev_cards_reset_queue();
-        self.phase = GamePhase::Turn(super::phase::TurnPhase::InitAction);
+        self.phase = GamePhase::Turn(super::phase::TurnPhase::InitCommand);
         self.emit_event(GameEvent::TurnStarted { player_id, turn_no }, sink);
         self.open_decision(
             player_id,
-            DecisionKind::InitAction,
+            DecisionKind::InitCommand,
             DecisionLifetime::OneShot,
             sink,
         );
@@ -1152,10 +1152,10 @@ impl GameEngine {
     }
 
     fn open_regular_decision(&mut self, player_id: PlayerId, sink: &mut impl OutputSink) {
-        self.phase = GamePhase::Turn(super::phase::TurnPhase::RegularAction);
+        self.phase = GamePhase::Turn(super::phase::TurnPhase::RegularCommand);
         self.open_decision(
             player_id,
-            DecisionKind::RegularAction,
+            DecisionKind::RegularCommand,
             DecisionLifetime::OneShot,
             sink,
         );
@@ -1167,7 +1167,7 @@ impl GameEngine {
         OpenDecision {
             id,
             player_id,
-            kind: DecisionKind::RegularAction,
+            kind: DecisionKind::RegularCommand,
             lifetime: DecisionLifetime::OneShot,
         }
     }
@@ -1185,7 +1185,7 @@ impl GameEngine {
             DiceOutcome::Harvest(num) => {
                 let by_player = self.execute_harvesting(player_id, num);
                 self.emit_event(GameEvent::ResourcesDistributed { by_player }, sink);
-                self.phase = GamePhase::Turn(super::phase::TurnPhase::RegularAction);
+                self.phase = GamePhase::Turn(super::phase::TurnPhase::RegularCommand);
             }
             DiceOutcome::Seven => self.execute_seven(player_id, sink),
         }
@@ -1715,13 +1715,13 @@ fn invalid_trade_scope_reason(
 #[cfg(test)]
 impl GameEngine {
     pub fn test_force_regular_action_phase(&mut self, player_id: PlayerId) {
-        self.phase = GamePhase::Turn(super::phase::TurnPhase::RegularAction);
+        self.phase = GamePhase::Turn(super::phase::TurnPhase::RegularCommand);
         self.pending = PendingDecisions::default();
         self.next_decision_id = self.next_decision_id.max(100);
         let mut sink = Vec::new();
         self.open_decision(
             player_id,
-            DecisionKind::RegularAction,
+            DecisionKind::RegularCommand,
             DecisionLifetime::OneShot,
             &mut sink,
         );

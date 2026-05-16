@@ -8,7 +8,7 @@ use std::io;
 use catan_agents::remote_agent::{DecisionRequestEnvelope, UiModel};
 use catan_core::{
     constants,
-    gameplay::game::action::{InitAction, PostDiceAction, RegularAction},
+    gameplay::game::command::{InitCommand, PostDiceCommand, RegularCommand},
     gameplay::primitives::{
         build::{Build, Establishment, EstablishmentType, Road},
         dev_card::{DevCardUsage, UsableDevCard},
@@ -30,7 +30,7 @@ use super::{
 pub(crate) fn read_init_action(
     ui: &mut CliUi,
     envelope: &DecisionRequestEnvelope,
-) -> io::Result<InitAction> {
+) -> io::Result<InitCommand> {
     log::trace!("Reading init action");
     loop {
         let model = &envelope.view;
@@ -38,18 +38,18 @@ pub(crate) fn read_init_action(
         let line = line.trim();
         if line.is_empty() || matches!(line, "roll" | "r") {
             log::trace!("Init action: RollDice");
-            return Ok(InitAction::RollDice);
+            return Ok(InitCommand::RollDice);
         }
         if let Some(usage) = handle_interactive_dev_card_action(ui, envelope, line)? {
             log::trace!("Init interactive action: UseDevCard({:?})", usage);
-            return Ok(InitAction::UseDevCard(usage));
+            return Ok(InitCommand::UseDevCard(usage));
         }
         if partial_dev_card_command(line).is_some() {
             continue;
         }
         if let Some(usage) = parse_dev_card_usage(line) {
             log::trace!("Init action: UseDevCard({:?})", usage);
-            return Ok(InitAction::UseDevCard(usage));
+            return Ok(InitCommand::UseDevCard(usage));
         }
         log::warn!("Could not parse init action: {}", line);
         ui.set_message("could not parse action".to_owned())?;
@@ -59,33 +59,33 @@ pub(crate) fn read_init_action(
 pub(crate) fn read_post_dice_action(
     ui: &mut CliUi,
     envelope: &DecisionRequestEnvelope,
-) -> io::Result<PostDiceAction> {
+) -> io::Result<PostDiceCommand> {
     log::trace!("Reading post-dice action");
     loop {
         let model = &envelope.view;
         let line = ui.prompt(model, "action: ")?;
         if let Some(usage) = parse_dev_card_usage(&line) {
             log::trace!("Post-dice action: UseDevCard({:?})", usage);
-            return Ok(PostDiceAction::UseDevCard(usage));
+            return Ok(PostDiceCommand::UseDevCard(usage));
         }
         if let Some(usage) = handle_interactive_dev_card_action(ui, envelope, &line)? {
             log::trace!("Post-dice interactive action: UseDevCard({:?})", usage);
-            return Ok(PostDiceAction::UseDevCard(usage));
+            return Ok(PostDiceCommand::UseDevCard(usage));
         }
         if partial_dev_card_command(&line).is_some() {
             continue;
         }
         match handle_interactive_regular_action(ui, envelope, &line)? {
             CommandOutcome::Accepted(action) => {
-                log::trace!("Post-dice interactive action: RegularAction({:?})", action);
-                return Ok(PostDiceAction::RegularAction(action));
+                log::trace!("Post-dice interactive action: RegularCommand({:?})", action);
+                return Ok(PostDiceCommand::RegularCommand(action));
             }
             CommandOutcome::Handled => continue,
             CommandOutcome::NotMatched => {}
         }
         if let Some(action) = parse_regular_action(&line) {
-            log::trace!("Post-dice action: RegularAction({:?})", action);
-            return Ok(PostDiceAction::RegularAction(action));
+            log::trace!("Post-dice action: RegularCommand({:?})", action);
+            return Ok(PostDiceCommand::RegularCommand(action));
         }
         log::warn!("Could not parse post-dice action: {}", line);
         ui.set_message("could not parse action".to_owned())?;
@@ -95,7 +95,7 @@ pub(crate) fn read_post_dice_action(
 pub(crate) fn read_regular_action(
     ui: &mut CliUi,
     envelope: &DecisionRequestEnvelope,
-) -> io::Result<RegularAction> {
+) -> io::Result<RegularCommand> {
     log::trace!("Reading regular action");
     loop {
         let model = &envelope.view;
@@ -127,7 +127,7 @@ fn handle_interactive_regular_action(
     ui: &mut CliUi,
     envelope: &DecisionRequestEnvelope,
     line: &str,
-) -> io::Result<CommandOutcome<RegularAction>> {
+) -> io::Result<CommandOutcome<RegularCommand>> {
     let model = &envelope.view;
     if let Some(kind) = partial_build_command(line) {
         let builds = legal_builds_for_mode(&envelope.legal, kind);
@@ -142,7 +142,7 @@ fn handle_interactive_regular_action(
             return Ok(CommandOutcome::Handled);
         }
         return Ok(match ui.select_build(model, builds, "build: ")? {
-            Some(build) => CommandOutcome::Accepted(RegularAction::Build(build)),
+            Some(build) => CommandOutcome::Accepted(RegularCommand::Build(build)),
             None => CommandOutcome::Handled,
         });
     }
@@ -157,7 +157,7 @@ fn handle_interactive_regular_action(
             return Ok(CommandOutcome::Handled);
         }
         return Ok(match ui.select_bank_trade(model, &envelope.legal)? {
-            Some(trade) => CommandOutcome::Accepted(RegularAction::TradeWithBank(trade)),
+            Some(trade) => CommandOutcome::Accepted(RegularCommand::TradeWithBank(trade)),
             None => CommandOutcome::Handled,
         });
     }
@@ -444,19 +444,19 @@ fn player_piece_count(model: &UiModel, actor: PlayerId, kind: PartialBuildMode) 
     }
 }
 
-pub(crate) fn parse_regular_action(line: &str) -> Option<RegularAction> {
+pub(crate) fn parse_regular_action(line: &str) -> Option<RegularCommand> {
     let line = line.trim();
     if matches!(line, "end" | "e") || line.is_empty() {
-        return Some(RegularAction::EndMove);
+        return Some(RegularCommand::EndMove);
     }
     if matches!(line, "buy dev" | "buy-dev" | "bd") {
-        return Some(RegularAction::BuyDevCard);
+        return Some(RegularCommand::BuyDevCard);
     }
     if let Some(build) = parse_build(line) {
-        return Some(RegularAction::Build(build));
+        return Some(RegularCommand::Build(build));
     }
     if let Some(trade) = parse_bank_trade(line) {
-        return Some(RegularAction::TradeWithBank(trade));
+        return Some(RegularCommand::TradeWithBank(trade));
     }
     None
 }
@@ -659,7 +659,7 @@ pub(crate) fn read_robbed_player(
 
 #[cfg(test)]
 mod tests {
-    use catan_core::gameplay::game::action::RegularAction;
+    use catan_core::gameplay::game::command::RegularCommand;
 
     use super::{
         PartialBuildMode, PartialDevCardMode, parse_regular_action, partial_build_command,
@@ -694,11 +694,11 @@ mod tests {
         assert!(partial_regular_command("bt"));
         assert!(matches!(
             parse_regular_action("bd"),
-            Some(RegularAction::BuyDevCard)
+            Some(RegularCommand::BuyDevCard)
         ));
         assert!(matches!(
             parse_regular_action("e"),
-            Some(RegularAction::EndMove)
+            Some(RegularCommand::EndMove)
         ));
         assert_eq!(
             partial_dev_card_command("kn"),

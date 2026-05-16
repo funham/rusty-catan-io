@@ -5,9 +5,9 @@ use crate::{
 use catan_core::{
     gameplay::{
         game::{
-            action::{
-                ChoosePlayerToRobAction, DropHalfAction, InitAction, InitStageAction,
-                MoveRobbersAction, PostDevCardAction, PostDiceAction, RegularAction,
+            command::{
+                ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, InitialPlacementCommand,
+                MoveRobberCommand, PostDevCardCommand, PostDiceCommand, RegularCommand,
             },
             decision::{DecisionKind, OpenDecision},
             input::PlayerCommand,
@@ -57,27 +57,27 @@ impl<R> RandomAgent<R> {
 }
 
 impl<R: Rng> RandomAgent<R> {
-    fn init_stage_action(&mut self, context: PlayerDecisionContext<'_>) -> InitStageAction {
+    fn init_stage_action(&mut self, context: PlayerDecisionContext<'_>) -> InitialPlacementCommand {
         rand_init_stage_action(context, &mut self.rng)
     }
 
-    fn init_action(&mut self, context: PlayerDecisionContext<'_>) -> InitAction {
+    fn init_action(&mut self, context: PlayerDecisionContext<'_>) -> InitCommand {
         rand_init_action(context, &mut self.rng)
     }
 
-    fn after_dice_action(&mut self, context: PlayerDecisionContext<'_>) -> PostDiceAction {
+    fn after_dice_action(&mut self, context: PlayerDecisionContext<'_>) -> PostDiceCommand {
         rand_after_dice_action(context, &mut self.rng)
     }
 
-    fn after_dev_card_action(&mut self, _context: PlayerDecisionContext<'_>) -> PostDevCardAction {
-        PostDevCardAction::RollDice
+    fn after_dev_card_action(&mut self, _context: PlayerDecisionContext<'_>) -> PostDevCardCommand {
+        PostDevCardCommand::RollDice
     }
 
-    fn regular_action(&mut self, context: PlayerDecisionContext<'_>) -> RegularAction {
+    fn regular_action(&mut self, context: PlayerDecisionContext<'_>) -> RegularCommand {
         rand_regular_action(context, &mut self.rng)
     }
 
-    fn move_robbers(&mut self, context: PlayerDecisionContext<'_>) -> MoveRobbersAction {
+    fn move_robbers(&mut self, context: PlayerDecisionContext<'_>) -> MoveRobberCommand {
         rand_move_robbers(context, &mut self.rng)
     }
 
@@ -85,11 +85,11 @@ impl<R: Rng> RandomAgent<R> {
         &mut self,
         context: PlayerDecisionContext<'_>,
         robber_pos: Hex,
-    ) -> ChoosePlayerToRobAction {
+    ) -> ChooseRobbedPlayerCommand {
         rand_choose_player_to_rob(context, robber_pos, &mut self.rng)
     }
 
-    fn drop_half(&mut self, context: PlayerDecisionContext<'_>) -> DropHalfAction {
+    fn drop_half(&mut self, context: PlayerDecisionContext<'_>) -> DropHalfCommand {
         rand_drop_half(context, &mut self.rng)
     }
 }
@@ -108,14 +108,14 @@ impl<R: Rng> BotPolicy for RandomAgent<R> {
             DecisionKind::InitPlacement => Some(PlayerCommand::InitialPlacement(
                 self.init_stage_action(context),
             )),
-            DecisionKind::InitAction => Some(PlayerCommand::InitAction(self.init_action(context))),
-            DecisionKind::PostDiceAction => {
+            DecisionKind::InitCommand => Some(PlayerCommand::InitCommand(self.init_action(context))),
+            DecisionKind::PostDiceCommand => {
                 Some(PlayerCommand::PostDice(self.after_dice_action(context)))
             }
-            DecisionKind::PostDevCardAction => Some(PlayerCommand::PostDevCard(
+            DecisionKind::PostDevCardCommand => Some(PlayerCommand::PostDevCard(
                 self.after_dev_card_action(context),
             )),
-            DecisionKind::RegularAction => {
+            DecisionKind::RegularCommand => {
                 Some(PlayerCommand::Regular(self.regular_action(context)))
             }
             DecisionKind::MoveRobber => {
@@ -135,7 +135,7 @@ impl<R: Rng> BotPolicy for RandomAgent<R> {
 pub fn rand_init_stage_action(
     context: PlayerDecisionContext<'_>,
     rng: &mut impl Rng,
-) -> InitStageAction {
+) -> InitialPlacementCommand {
     *context
         .public
         .builds
@@ -145,40 +145,40 @@ pub fn rand_init_stage_action(
         .unwrap()
 }
 
-pub fn rand_init_action(context: PlayerDecisionContext<'_>, rng: &mut impl Rng) -> InitAction {
+pub fn rand_init_action(context: PlayerDecisionContext<'_>, rng: &mut impl Rng) -> InitCommand {
     if rng.random_bool(0.8)
         && let Some(usage) = rand_dev_card_usage(&context, rng)
     {
-        return InitAction::UseDevCard(usage);
+        return InitCommand::UseDevCard(usage);
     }
 
-    InitAction::RollDice
+    InitCommand::RollDice
 }
 
 pub fn rand_after_dice_action(
     context: PlayerDecisionContext<'_>,
     rng: &mut impl Rng,
-) -> PostDiceAction {
+) -> PostDiceCommand {
     if rng.random_bool(0.8)
         && let Some(usage) = rand_dev_card_usage(&context, rng)
     {
-        return PostDiceAction::UseDevCard(usage);
+        return PostDiceCommand::UseDevCard(usage);
     }
 
-    PostDiceAction::RegularAction(rand_regular_action(context, rng))
+    PostDiceCommand::RegularCommand(rand_regular_action(context, rng))
 }
 
 pub fn rand_regular_action(
     context: PlayerDecisionContext<'_>,
     rng: &mut impl Rng,
-) -> RegularAction {
+) -> RegularCommand {
     let categories = [
-        RandomRegularActionCategory::EndMove,
-        RandomRegularActionCategory::BuyDevCard,
-        RandomRegularActionCategory::BuildRoad,
-        RandomRegularActionCategory::BuildSettlement,
-        RandomRegularActionCategory::BuildCity,
-        RandomRegularActionCategory::TradeWithBank,
+        RandomRegularCommandCategory::EndMove,
+        RandomRegularCommandCategory::BuyDevCard,
+        RandomRegularCommandCategory::BuildRoad,
+        RandomRegularCommandCategory::BuildSettlement,
+        RandomRegularCommandCategory::BuildCity,
+        RandomRegularCommandCategory::TradeWithBank,
     ];
     let start = rng.random_range(0..categories.len());
 
@@ -189,27 +189,27 @@ pub fn rand_regular_action(
         }
     }
 
-    RegularAction::EndMove
+    RegularCommand::EndMove
 }
 
 pub fn rand_move_robbers(
     context: PlayerDecisionContext<'_>,
     rng: &mut impl Rng,
-) -> MoveRobbersAction {
+) -> MoveRobberCommand {
     let n = context.public.board.arrangement.len();
     let tile_index = match rng.random_range(0..n - 1) {
         index if index == context.public.board_state.robber_pos.index().to_spiral() => n - 1,
         index => index,
     };
 
-    MoveRobbersAction(HexIndex::spiral_to_hex(tile_index))
+    MoveRobberCommand(HexIndex::spiral_to_hex(tile_index))
 }
 
 pub fn rand_choose_player_to_rob(
     context: PlayerDecisionContext<'_>,
     robber_pos: Hex,
     rng: &mut impl Rng,
-) -> ChoosePlayerToRobAction {
+) -> ChooseRobbedPlayerCommand {
     let id = context
         .public
         .players_on_hex(robber_pos)
@@ -218,11 +218,11 @@ pub fn rand_choose_player_to_rob(
         .choose(rng)
         .expect("controller must forbid this case");
 
-    ChoosePlayerToRobAction(id)
+    ChooseRobbedPlayerCommand(id)
 }
 
 #[derive(Debug, Clone, Copy)]
-enum RandomRegularActionCategory {
+enum RandomRegularCommandCategory {
     EndMove,
     BuyDevCard,
     BuildRoad,
@@ -233,31 +233,31 @@ enum RandomRegularActionCategory {
 
 fn rand_regular_action_in_category(
     context: &PlayerDecisionContext<'_>,
-    category: RandomRegularActionCategory,
+    category: RandomRegularCommandCategory,
     rng: &mut impl Rng,
-) -> Option<RegularAction> {
+) -> Option<RegularCommand> {
     match category {
-        RandomRegularActionCategory::EndMove => Some(RegularAction::EndMove),
-        RandomRegularActionCategory::BuyDevCard => {
-            legal::can_buy_dev_card(context).then_some(RegularAction::BuyDevCard)
+        RandomRegularCommandCategory::EndMove => Some(RegularCommand::EndMove),
+        RandomRegularCommandCategory::BuyDevCard => {
+            legal::can_buy_dev_card(context).then_some(RegularCommand::BuyDevCard)
         }
-        RandomRegularActionCategory::BuildRoad => {
+        RandomRegularCommandCategory::BuildRoad => {
             legal::legal_road_spots_iter(context, context.actor)
                 .choose(rng)
-                .map(RegularAction::Build)
+                .map(RegularCommand::Build)
         }
-        RandomRegularActionCategory::BuildSettlement => {
+        RandomRegularCommandCategory::BuildSettlement => {
             legal::legal_settlement_spots_iter(context, context.actor)
                 .choose(rng)
-                .map(RegularAction::Build)
+                .map(RegularCommand::Build)
         }
-        RandomRegularActionCategory::BuildCity => {
+        RandomRegularCommandCategory::BuildCity => {
             legal::legal_city_spots_iter(context, context.actor)
                 .choose(rng)
-                .map(RegularAction::Build)
+                .map(RegularCommand::Build)
         }
-        RandomRegularActionCategory::TradeWithBank => {
-            rand_bank_trade(context, rng).map(RegularAction::TradeWithBank)
+        RandomRegularCommandCategory::TradeWithBank => {
+            rand_bank_trade(context, rng).map(RegularCommand::TradeWithBank)
         }
     }
 }
@@ -437,7 +437,7 @@ fn rand_road_extension_with_extra_roads<const N: usize>(
         .choose(rng)
 }
 
-pub fn rand_drop_half(context: PlayerDecisionContext<'_>, rng: &mut impl Rng) -> DropHalfAction {
+pub fn rand_drop_half(context: PlayerDecisionContext<'_>, rng: &mut impl Rng) -> DropHalfCommand {
     let number_to_drop = context.private.resources.total() / 2;
 
     match context.search {
@@ -458,7 +458,7 @@ pub fn rand_drop_half(context: PlayerDecisionContext<'_>, rng: &mut impl Rng) ->
                 to_drop[card] += 1;
             }
 
-            DropHalfAction(to_drop)
+            DropHalfCommand(to_drop)
         }
         None => {
             log::error!("couldn't find search context for random agent");

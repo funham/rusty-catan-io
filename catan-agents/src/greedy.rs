@@ -4,9 +4,9 @@ use catan_core::{
     gameplay::{
         constants,
         game::{
-            action::{
-                ChoosePlayerToRobAction, DropHalfAction, InitAction, InitStageAction,
-                MoveRobbersAction, PostDevCardAction, PostDiceAction, RegularAction,
+            command::{
+                ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, InitialPlacementCommand,
+                MoveRobberCommand, PostDevCardCommand, PostDiceCommand, RegularCommand,
             },
             decision::{DecisionKind, OpenDecision},
             input::PlayerCommand,
@@ -44,7 +44,7 @@ impl GreedyAgent {
 }
 
 impl GreedyAgent {
-    fn init_stage_action(&mut self, context: PlayerDecisionContext<'_>) -> InitStageAction {
+    fn init_stage_action(&mut self, context: PlayerDecisionContext<'_>) -> InitialPlacementCommand {
         let action =
             greedy_init_stage_action(&context, self.id, self.first_initial_resources.as_ref());
         if self.first_initial_resources.is_none() {
@@ -56,23 +56,23 @@ impl GreedyAgent {
         action
     }
 
-    fn init_action(&mut self, context: PlayerDecisionContext<'_>) -> InitAction {
+    fn init_action(&mut self, context: PlayerDecisionContext<'_>) -> InitCommand {
         greedy_init_action(context, self.id)
     }
 
-    fn after_dice_action(&mut self, context: PlayerDecisionContext<'_>) -> PostDiceAction {
+    fn after_dice_action(&mut self, context: PlayerDecisionContext<'_>) -> PostDiceCommand {
         greedy_after_dice_action(context, self.id)
     }
 
-    fn after_dev_card_action(&mut self, _context: PlayerDecisionContext<'_>) -> PostDevCardAction {
-        PostDevCardAction::RollDice
+    fn after_dev_card_action(&mut self, _context: PlayerDecisionContext<'_>) -> PostDevCardCommand {
+        PostDevCardCommand::RollDice
     }
 
-    fn regular_action(&mut self, context: PlayerDecisionContext<'_>) -> RegularAction {
+    fn regular_action(&mut self, context: PlayerDecisionContext<'_>) -> RegularCommand {
         greedy_regular_action(&context, self.id)
     }
 
-    fn move_robbers(&mut self, context: PlayerDecisionContext<'_>) -> MoveRobbersAction {
+    fn move_robbers(&mut self, context: PlayerDecisionContext<'_>) -> MoveRobberCommand {
         greedy_move_robbers(context)
     }
 
@@ -80,11 +80,11 @@ impl GreedyAgent {
         &mut self,
         context: PlayerDecisionContext<'_>,
         robber_pos: Hex,
-    ) -> ChoosePlayerToRobAction {
+    ) -> ChooseRobbedPlayerCommand {
         greedy_choose_player_to_rob(context, robber_pos)
     }
 
-    fn drop_half(&mut self, context: PlayerDecisionContext<'_>) -> DropHalfAction {
+    fn drop_half(&mut self, context: PlayerDecisionContext<'_>) -> DropHalfCommand {
         greedy_drop_half(context)
     }
 }
@@ -103,14 +103,14 @@ impl BotPolicy for GreedyAgent {
             DecisionKind::InitPlacement => Some(PlayerCommand::InitialPlacement(
                 self.init_stage_action(context),
             )),
-            DecisionKind::InitAction => Some(PlayerCommand::InitAction(self.init_action(context))),
-            DecisionKind::PostDiceAction => {
+            DecisionKind::InitCommand => Some(PlayerCommand::InitCommand(self.init_action(context))),
+            DecisionKind::PostDiceCommand => {
                 Some(PlayerCommand::PostDice(self.after_dice_action(context)))
             }
-            DecisionKind::PostDevCardAction => Some(PlayerCommand::PostDevCard(
+            DecisionKind::PostDevCardCommand => Some(PlayerCommand::PostDevCard(
                 self.after_dev_card_action(context),
             )),
-            DecisionKind::RegularAction => {
+            DecisionKind::RegularCommand => {
                 Some(PlayerCommand::Regular(self.regular_action(context)))
             }
             DecisionKind::MoveRobber => {
@@ -127,25 +127,25 @@ impl BotPolicy for GreedyAgent {
     }
 }
 
-pub fn greedy_drop_half(context: PlayerDecisionContext<'_>) -> DropHalfAction {
+pub fn greedy_drop_half(context: PlayerDecisionContext<'_>) -> DropHalfCommand {
     lazy::lazy_drop_half(context) // TODO: rank cards
 }
 
 pub fn greedy_choose_player_to_rob(
     context: PlayerDecisionContext<'_>,
     robber_pos: Hex,
-) -> ChoosePlayerToRobAction {
+) -> ChooseRobbedPlayerCommand {
     lazy::lazy_choose_player_to_rob(context, robber_pos) // TODO: try to peek the most wanted card
 }
 
-pub fn greedy_move_robbers(context: PlayerDecisionContext<'_>) -> MoveRobbersAction {
+pub fn greedy_move_robbers(context: PlayerDecisionContext<'_>) -> MoveRobberCommand {
     let hex = match context.counting() {
         // blocking max amount of players with the most producing hex
         CountingMode::Human => most_occupied_producing_tile(context),
         CountingMode::Counting => most_occupied_producing_tile(context), // TODO: try to peek the most wanted card
     };
 
-    MoveRobbersAction(hex)
+    MoveRobberCommand(hex)
 }
 
 pub fn most_occupied_producing_tile(context: PlayerDecisionContext<'_>) -> Hex {
@@ -183,41 +183,41 @@ pub fn most_occupied_producing_tile(context: PlayerDecisionContext<'_>) -> Hex {
 pub fn greedy_after_dice_action(
     context: PlayerDecisionContext<'_>,
     player_id: PlayerId,
-) -> PostDiceAction {
+) -> PostDiceCommand {
     if let Some(usage) = legal::first_legal_dev_card_usage(&context) {
-        PostDiceAction::UseDevCard(usage)
+        PostDiceCommand::UseDevCard(usage)
     } else {
-        PostDiceAction::RegularAction(greedy_regular_action(&context, player_id))
+        PostDiceCommand::RegularCommand(greedy_regular_action(&context, player_id))
     }
 }
 
 pub fn greedy_regular_action(
     context: &PlayerDecisionContext<'_>,
     player_id: PlayerId,
-) -> RegularAction {
+) -> RegularCommand {
     if let Some(build) = best_city_build(context, player_id) {
-        return RegularAction::Build(build);
+        return RegularCommand::Build(build);
     }
     if let Some(build) = best_settlement_build(context, player_id) {
-        return RegularAction::Build(build);
+        return RegularCommand::Build(build);
     }
     if let Some(build) = best_road_build(context, player_id) {
-        return RegularAction::Build(build);
+        return RegularCommand::Build(build);
     }
     if legal::can_buy_dev_card(context) {
-        return RegularAction::BuyDevCard;
+        return RegularCommand::BuyDevCard;
     }
     if let Some(trade) = best_bank_trade(context, player_id) {
-        return RegularAction::TradeWithBank(trade);
+        return RegularCommand::TradeWithBank(trade);
     }
-    RegularAction::EndMove
+    RegularCommand::EndMove
 }
 
-pub fn greedy_init_action(context: PlayerDecisionContext<'_>, _player_id: PlayerId) -> InitAction {
+pub fn greedy_init_action(context: PlayerDecisionContext<'_>, _player_id: PlayerId) -> InitCommand {
     if let Some(usage) = legal::first_legal_dev_card_usage(&context) {
-        InitAction::UseDevCard(usage)
+        InitCommand::UseDevCard(usage)
     } else {
-        InitAction::RollDice
+        InitCommand::RollDice
     }
 }
 
@@ -225,7 +225,7 @@ pub fn greedy_init_stage_action(
     context: &PlayerDecisionContext<'_>,
     player_id: PlayerId,
     already_acquired: Option<&BTreeSet<Resource>>,
-) -> InitStageAction {
+) -> InitialPlacementCommand {
     context
         .public
         .builds

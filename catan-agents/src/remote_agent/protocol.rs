@@ -4,9 +4,9 @@ use std::{
 };
 
 use catan_core::{
-    gameplay::game::action::{
-        ChoosePlayerToRobAction, DropHalfAction, InitAction, InitStageAction, MoveRobbersAction,
-        PostDevCardAction, PostDiceAction, RegularAction, TradeAnswer,
+    gameplay::game::command::{
+        ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, InitialPlacementCommand, MoveRobberCommand,
+        PostDevCardCommand, PostDiceCommand, RegularCommand, TradeAnswer,
     },
     gameplay::{
         game::{
@@ -133,7 +133,7 @@ pub enum RemoteLogLevel {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DecisionRequestFrame {
     InitStage(DecisionRequestEnvelope),
-    InitAction(DecisionRequestEnvelope),
+    InitCommand(DecisionRequestEnvelope),
     PostDice(DecisionRequestEnvelope),
     PostDevCard(DecisionRequestEnvelope),
     Regular(DecisionRequestEnvelope),
@@ -145,15 +145,15 @@ pub enum DecisionRequestFrame {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DecisionResponseFrame {
-    InitStage(InitStageAction),
-    InitAction(InitAction),
-    PostDice(PostDiceAction),
-    PostDevCard(PostDevCardAction),
-    Regular(RegularAction),
-    MoveRobbers(MoveRobbersAction),
-    ChoosePlayerToRob(ChoosePlayerToRobAction),
+    InitStage(InitialPlacementCommand),
+    InitCommand(InitCommand),
+    PostDice(PostDiceCommand),
+    PostDevCard(PostDevCardCommand),
+    Regular(RegularCommand),
+    MoveRobbers(MoveRobberCommand),
+    ChoosePlayerToRob(ChooseRobbedPlayerCommand),
     AnswerTrade(TradeAnswer),
-    DropHalf(DropHalfAction),
+    DropHalf(DropHalfCommand),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -165,9 +165,9 @@ pub struct DecisionRequestEnvelope {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LegalDecisionOptions {
-    pub initial_placements: Vec<InitStageAction>,
+    pub initial_placements: Vec<InitialPlacementCommand>,
     pub builds: LegalBuildOptions,
-    pub regular_actions: Vec<RegularAction>,
+    pub regular_actions: Vec<RegularCommand>,
     pub bank_trades: Vec<BankTrade>,
     pub dev_card_usages: Vec<DevCardUsage>,
     pub robber_hexes: Vec<Hex>,
@@ -190,7 +190,7 @@ impl DecisionRequestFrame {
     pub fn kind(&self) -> &'static str {
         match self {
             Self::InitStage(_) => "init_stage",
-            Self::InitAction(_) => "init_action",
+            Self::InitCommand(_) => "init_action",
             Self::PostDice(_) => "post_dice",
             Self::PostDevCard(_) => "post_dev_card",
             Self::Regular(_) => "regular",
@@ -204,7 +204,7 @@ impl DecisionRequestFrame {
     pub fn envelope(&self) -> &DecisionRequestEnvelope {
         match self {
             Self::InitStage(envelope)
-            | Self::InitAction(envelope)
+            | Self::InitCommand(envelope)
             | Self::PostDice(envelope)
             | Self::PostDevCard(envelope)
             | Self::Regular(envelope)

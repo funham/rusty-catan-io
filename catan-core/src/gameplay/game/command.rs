@@ -12,12 +12,12 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct InitStageAction {
+pub struct InitialPlacementCommand {
     settlement: Intersection,
     road: Path,
 }
 
-impl InitStageAction {
+impl InitialPlacementCommand {
     pub fn try_new(settlement: Intersection, road: Path) -> Option<Self> {
         match settlement.paths().contains(&road) {
             true => Some(Self { settlement, road }),
@@ -45,13 +45,13 @@ impl InitStageAction {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct ChoosePlayerToRobAction(pub PlayerId);
+pub struct ChooseRobbedPlayerCommand(pub PlayerId);
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct DropHalfAction(pub ResourceCollection);
+pub struct DropHalfCommand(pub ResourceCollection);
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct MoveRobbersAction(pub Hex);
+pub struct MoveRobberCommand(pub Hex);
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum TradeAnswer {
@@ -60,24 +60,24 @@ pub enum TradeAnswer {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub enum InitAction {
+pub enum InitCommand {
     RollDice,
     UseDevCard(DevCardUsage),
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub enum PostDevCardAction {
+pub enum PostDevCardCommand {
     RollDice,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub enum PostDiceAction {
+pub enum PostDiceCommand {
     UseDevCard(DevCardUsage),
-    RegularAction(RegularAction),
+    RegularCommand(RegularCommand),
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub enum RegularAction {
+pub enum RegularCommand {
     OfferPublicTrade(PublicTradeOffer),
     OfferPersonalTrade(PersonalTradeOffer),
     TradeWithBank(BankTrade),

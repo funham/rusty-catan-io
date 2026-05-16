@@ -321,7 +321,7 @@ pub fn reduce(lifecycle: &mut EngineCore, event: &GameEvent) -> Result<(), Repla
                 .game
                 .players_resource_exchange((*proposer_id, offer.trade.give), (*peer_id, offer.trade.take))
                 .map_err(|_| ReplayError::InvalidResourceTransfer)?;
-            active.phase = GamePhase::Turn(crate::gameplay::game::phase::TurnPhase::RegularAction);
+            active.phase = GamePhase::Turn(crate::gameplay::game::phase::TurnPhase::RegularCommand);
         }
         GameEvent::TradeCancelled { session_id, .. } => {
             let active = lifecycle
@@ -332,7 +332,7 @@ pub fn reduce(lifecycle: &mut EngineCore, event: &GameEvent) -> Result<(), Repla
                 .get_mut(session_id.0 as usize)
                 .ok_or(ReplayError::InvalidTradeSession)?;
             session.open = false;
-            active.phase = GamePhase::Turn(crate::gameplay::game::phase::TurnPhase::RegularAction);
+            active.phase = GamePhase::Turn(crate::gameplay::game::phase::TurnPhase::RegularCommand);
         }
         GameEvent::PlayerDiscarded {
             player_id,

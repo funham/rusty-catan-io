@@ -501,7 +501,7 @@ mod tests {
     use super::{DevCardUsageError, GameState};
     use crate::topology::Hex;
     use crate::{
-        gameplay::game::action::InitStageAction,
+        gameplay::game::command::InitialPlacementCommand,
         gameplay::{
             game::init::GameInitializationState,
             primitives::{
@@ -522,7 +522,7 @@ mod tests {
                 .query()
                 .possible_initial_placements(&init.board, player_id)
                 .iter()
-                .map(InitStageAction::as_builds)
+                .map(InitialPlacementCommand::as_builds)
                 .next()
                 .expect("default board should have initial placements");
 

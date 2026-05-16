@@ -3,9 +3,9 @@ use std::{io, os::unix::net::UnixStream};
 use catan_core::{
     gameplay::{
         game::{
-            action::{
-                ChoosePlayerToRobAction, DropHalfAction, InitAction, InitStageAction,
-                MoveRobbersAction, PostDevCardAction, PostDiceAction, RegularAction, TradeAnswer,
+            command::{
+                ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, InitialPlacementCommand,
+                MoveRobberCommand, PostDevCardCommand, PostDiceCommand, RegularCommand, TradeAnswer,
             },
             decision::{DecisionKind, OpenDecision},
             event::{
@@ -109,7 +109,7 @@ impl RemoteCliAgent {
         self.player_id
     }
 
-    fn init_stage_action(&mut self, context: PlayerDecisionContext<'_>) -> InitStageAction {
+    fn init_stage_action(&mut self, context: PlayerDecisionContext<'_>) -> InitialPlacementCommand {
         let envelope = self.envelope(&context, None);
         match self.request(DecisionRequestFrame::InitStage(envelope)) {
             DecisionResponseFrame::InitStage(action) => action,
@@ -117,15 +117,15 @@ impl RemoteCliAgent {
         }
     }
 
-    fn init_action(&mut self, context: PlayerDecisionContext<'_>) -> InitAction {
+    fn init_action(&mut self, context: PlayerDecisionContext<'_>) -> InitCommand {
         let envelope = self.envelope(&context, None);
-        match self.request(DecisionRequestFrame::InitAction(envelope)) {
-            DecisionResponseFrame::InitAction(action) => action,
+        match self.request(DecisionRequestFrame::InitCommand(envelope)) {
+            DecisionResponseFrame::InitCommand(action) => action,
             other => panic!("unexpected CLI response: {other:?}"),
         }
     }
 
-    fn after_dice_action(&mut self, context: PlayerDecisionContext<'_>) -> PostDiceAction {
+    fn after_dice_action(&mut self, context: PlayerDecisionContext<'_>) -> PostDiceCommand {
         let envelope = self.envelope(&context, None);
         match self.request(DecisionRequestFrame::PostDice(envelope)) {
             DecisionResponseFrame::PostDice(action) => action,
@@ -133,7 +133,7 @@ impl RemoteCliAgent {
         }
     }
 
-    fn after_dev_card_action(&mut self, context: PlayerDecisionContext<'_>) -> PostDevCardAction {
+    fn after_dev_card_action(&mut self, context: PlayerDecisionContext<'_>) -> PostDevCardCommand {
         let envelope = self.envelope(&context, None);
         match self.request(DecisionRequestFrame::PostDevCard(envelope)) {
             DecisionResponseFrame::PostDevCard(action) => action,
@@ -141,7 +141,7 @@ impl RemoteCliAgent {
         }
     }
 
-    fn regular_action(&mut self, context: PlayerDecisionContext<'_>) -> RegularAction {
+    fn regular_action(&mut self, context: PlayerDecisionContext<'_>) -> RegularCommand {
         let envelope = self.envelope(&context, None);
         match self.request(DecisionRequestFrame::Regular(envelope)) {
             DecisionResponseFrame::Regular(action) => action,
@@ -149,7 +149,7 @@ impl RemoteCliAgent {
         }
     }
 
-    fn move_robbers(&mut self, context: PlayerDecisionContext<'_>) -> MoveRobbersAction {
+    fn move_robbers(&mut self, context: PlayerDecisionContext<'_>) -> MoveRobberCommand {
         let envelope = self.envelope(&context, None);
         match self.request(DecisionRequestFrame::MoveRobbers(envelope)) {
             DecisionResponseFrame::MoveRobbers(action) => action,
@@ -161,7 +161,7 @@ impl RemoteCliAgent {
         &mut self,
         context: PlayerDecisionContext<'_>,
         robber_pos: Hex,
-    ) -> ChoosePlayerToRobAction {
+    ) -> ChooseRobbedPlayerCommand {
         let envelope = self.envelope(&context, Some(robber_pos));
         match self.request(DecisionRequestFrame::ChoosePlayerToRob(envelope)) {
             DecisionResponseFrame::ChoosePlayerToRob(action) => action,
@@ -177,7 +177,7 @@ impl RemoteCliAgent {
         }
     }
 
-    fn drop_half(&mut self, context: PlayerDecisionContext<'_>) -> DropHalfAction {
+    fn drop_half(&mut self, context: PlayerDecisionContext<'_>) -> DropHalfCommand {
         let envelope = self.envelope(&context, None);
         match self.request(DecisionRequestFrame::DropHalf(envelope)) {
             DecisionResponseFrame::DropHalf(action) => action,
@@ -200,14 +200,14 @@ impl BotPolicy for RemoteCliAgent {
             DecisionKind::InitPlacement => Some(PlayerCommand::InitialPlacement(
                 self.init_stage_action(context),
             )),
-            DecisionKind::InitAction => Some(PlayerCommand::InitAction(self.init_action(context))),
-            DecisionKind::PostDiceAction => {
+            DecisionKind::InitCommand => Some(PlayerCommand::InitCommand(self.init_action(context))),
+            DecisionKind::PostDiceCommand => {
                 Some(PlayerCommand::PostDice(self.after_dice_action(context)))
             }
-            DecisionKind::PostDevCardAction => Some(PlayerCommand::PostDevCard(
+            DecisionKind::PostDevCardCommand => Some(PlayerCommand::PostDevCard(
                 self.after_dev_card_action(context),
             )),
-            DecisionKind::RegularAction => {
+            DecisionKind::RegularCommand => {
                 Some(PlayerCommand::Regular(self.regular_action(context)))
             }
             DecisionKind::MoveRobber => {

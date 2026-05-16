@@ -20,7 +20,7 @@ mod tests {
         RemoteCliObserver, RemoteLogLevel, UiBoard, UiModel, read_frame, write_frame,
     };
     use catan_core::{
-        gameplay::game::action::InitStageAction,
+        gameplay::game::command::InitialPlacementCommand,
         gameplay::{
             game::{
                 event::{GameEvent, GameObserver, ObserverKind, ObserverNotificationContext},
@@ -187,7 +187,7 @@ mod tests {
                 .query()
                 .possible_initial_placements(&init.board, player_id)
                 .iter()
-                .map(InitStageAction::as_builds)
+                .map(InitialPlacementCommand::as_builds)
                 .next()
                 .expect("default board should have initial placements");
             if player_id == 1 {
@@ -297,7 +297,7 @@ mod tests {
             .query()
             .possible_initial_placements(&init.board, 0)
             .iter()
-            .map(InitStageAction::as_builds)
+            .map(InitialPlacementCommand::as_builds)
             .next()
             .expect("default board should have an initial placement");
         init.builds

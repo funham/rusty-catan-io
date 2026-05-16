@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    gameplay::game::action::{
-        ChoosePlayerToRobAction, DropHalfAction, InitAction, InitStageAction, MoveRobbersAction,
-        PostDevCardAction, PostDiceAction, RegularAction,
+    gameplay::game::command::{
+        ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, InitialPlacementCommand, MoveRobberCommand,
+        PostDevCardCommand, PostDiceCommand, RegularCommand,
     },
     gameplay::primitives::{
         player::PlayerId,
@@ -28,14 +28,14 @@ pub enum GameInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PlayerCommand {
-    InitialPlacement(InitStageAction),
-    InitAction(InitAction),
-    PostDice(PostDiceAction),
-    PostDevCard(PostDevCardAction),
-    Regular(RegularAction),
-    MoveRobbers(MoveRobbersAction),
-    ChooseRobbedPlayer(ChoosePlayerToRobAction),
-    DropHalf(DropHalfAction),
+    InitialPlacement(InitialPlacementCommand),
+    InitCommand(InitCommand),
+    PostDice(PostDiceCommand),
+    PostDevCard(PostDevCardCommand),
+    Regular(RegularCommand),
+    MoveRobbers(MoveRobberCommand),
+    ChooseRobbedPlayer(ChooseRobbedPlayerCommand),
+    DropHalf(DropHalfCommand),
     Trade(TradeCommand),
 }
 

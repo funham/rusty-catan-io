@@ -823,7 +823,7 @@ pub mod data {
 
 /// Read-only query utilities over the build data.
 pub mod query {
-    use crate::gameplay::game::action::InitStageAction;
+    use crate::gameplay::game::command::InitialPlacementCommand;
 
     use super::*;
 
@@ -881,7 +881,7 @@ pub mod query {
             &self,
             field: &BoardLayout,
             _player_id: PlayerId,
-        ) -> Vec<InitStageAction> {
+        ) -> Vec<InitialPlacementCommand> {
             let intersections = field
                 .arrangement
                 .intersections()
@@ -903,7 +903,7 @@ pub mod query {
             });
 
             possible_placements
-                .flat_map(|(v, p)| InitStageAction::try_new(v, p))
+                .flat_map(|(v, p)| InitialPlacementCommand::try_new(v, p))
                 .collect()
         }
     }
