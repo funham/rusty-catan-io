@@ -27,9 +27,7 @@ impl<'a> GameQuery<'a> {
     }
 
     pub fn player_ids_starting_from(&self, start_id: PlayerId) -> Vec<PlayerId> {
-        (start_id..self.state.players.count())
-            .chain(0..start_id)
-            .collect::<Vec<_>>()
+        algorithm::player_order_from(start_id, self.state.players.count()).collect::<Vec<_>>()
     }
 
     pub fn is_player_on_hex(&self, player_id: PlayerId, hex: Hex) -> bool {

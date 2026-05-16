@@ -137,7 +137,7 @@ pub struct PublicGameView<'a> {
     pub builds: &'a BoardBuildData,
     pub longest_road_owner: Option<PlayerId>,
     pub largest_army_owner: Option<PlayerId>,
-    ports_aquired: &'a [SmallSet<PortKind, PLAYER_PORTS_INLINE>],
+    ports_acquired: &'a [SmallSet<PortKind, PLAYER_PORTS_INLINE>],
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -206,15 +206,15 @@ impl<'a> PublicGameView<'a> {
         algorithm::players_on_hex(hex, self.builds.players().iter())
     }
 
-    pub fn get_ports_aquired(&self) -> Vec<SmallSet<PortKind, PLAYER_PORTS_INLINE>> {
-        algorithm::get_ports_aquired(self.board.ports_intersection(), self.builds)
+    pub fn get_ports_acquired(&self) -> Vec<SmallSet<PortKind, PLAYER_PORTS_INLINE>> {
+        algorithm::get_ports_acquired(self.board.ports_intersection(), self.builds)
     }
 
-    pub fn ports_aquired_for(
+    pub fn ports_acquired_for(
         &self,
         player_id: PlayerId,
     ) -> &'a SmallSet<PortKind, PLAYER_PORTS_INLINE> {
-        &self.ports_aquired[player_id]
+        &self.ports_acquired[player_id]
     }
 }
 
@@ -288,7 +288,7 @@ impl<'a> ContextFactory<'a> {
             builds: &self.state.builds,
             longest_road_owner: query.longest_road_owner(),
             largest_army_owner: query.largest_army_owner(),
-            ports_aquired: &self.index.ports_aquired,
+            ports_acquired: &self.index.ports_acquired,
         }
     }
 

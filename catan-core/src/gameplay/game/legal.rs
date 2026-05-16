@@ -690,7 +690,7 @@ pub fn legal_bank_trades_iter<'a>(
         resource_trades_at_rate_iter(context, BankTradeKind::BankGeneric, Resource::iter(), 4);
     let port_trades = context
         .public
-        .ports_aquired_for(context.actor)
+        .ports_acquired_for(context.actor)
         .iter()
         .map(move |port| -> Box<dyn Iterator<Item = BankTrade> + 'a> {
             match port {
@@ -716,7 +716,7 @@ pub fn legal_bank_trades_iter<'a>(
 pub fn legal_bank_trade_count(context: &PlayerDecisionContext<'_>) -> usize {
     let mut count = resource_trades_count_at_rate(context, Resource::iter(), 4);
 
-    for port in context.public.ports_aquired_for(context.actor) {
+    for port in context.public.ports_acquired_for(context.actor) {
         count += match port {
             PortKind::Special(resource) => {
                 resource_trades_count_at_rate(context, std::iter::once(*resource), 2)
@@ -742,7 +742,7 @@ pub fn legal_bank_trade_at(
         return Some(trade);
     }
 
-    for port in context.public.ports_aquired_for(context.actor) {
+    for port in context.public.ports_acquired_for(context.actor) {
         let trade = match port {
             PortKind::Special(resource) => resource_trade_at_rate(
                 context,

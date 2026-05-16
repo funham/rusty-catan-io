@@ -21,7 +21,7 @@ pub struct GameIndex {
     pub longest_road_lengths: Vec<u16>,
     pub longest_road_owner: Option<PlayerId>,
     pub largest_army_owner: Option<PlayerId>,
-    pub ports_aquired: Vec<SmallSet<PortKind, PLAYER_PORTS_INLINE>>,
+    pub ports_acquired: Vec<SmallSet<PortKind, PLAYER_PORTS_INLINE>>,
 }
 
 impl GameIndex {
@@ -35,12 +35,12 @@ impl GameIndex {
             longest_road_lengths,
             longest_road_owner,
             largest_army_owner: state.players.best_army(),
-            ports_aquired: Self::get_ports_aquired(state),
+            ports_acquired: Self::get_ports_acquired(state),
         }
     }
 
-    fn get_ports_aquired(state: &GameState) -> Vec<SmallSet<PortKind, PLAYER_PORTS_INLINE>> {
-        algorithm::get_ports_aquired(state.board.ports_intersection(), &state.builds)
+    fn get_ports_acquired(state: &GameState) -> Vec<SmallSet<PortKind, PLAYER_PORTS_INLINE>> {
+        algorithm::get_ports_acquired(state.board.ports_intersection(), &state.builds)
     }
 
     pub fn refresh_after_build(&mut self, state: &GameState, player_id: PlayerId, build: Build) {
@@ -151,7 +151,7 @@ impl GameIndex {
         settlement: Establishment,
     ) {
         if let Some(port) = state.board.ports_intersection().get(&settlement.vtx) {
-            self.ports_aquired[player_id].insert(*port);
+            self.ports_acquired[player_id].insert(*port);
         }
     }
 
@@ -366,7 +366,7 @@ mod tests {
             rebuilt.longest_road_lengths
         );
         assert_eq!(incremental.longest_road_owner, rebuilt.longest_road_owner);
-        assert_eq!(incremental.ports_aquired, rebuilt.ports_aquired);
+        assert_eq!(incremental.ports_acquired, rebuilt.ports_acquired);
     }
 
     #[test]
@@ -406,7 +406,7 @@ mod tests {
         incremental.refresh_after_build(&state, 0, Build::Establishment(settlement));
 
         assert_matches_rebuild(&incremental, &state);
-        assert!(!incremental.ports_aquired[0].is_empty());
+        assert!(!incremental.ports_acquired[0].is_empty());
     }
 
     #[test]
@@ -476,7 +476,7 @@ mod tests {
         let mut incremental = GameIndex::rebuild(&state);
         let before_builds = incremental.all_builds.clone();
         let before_roads = incremental.longest_road_lengths.clone();
-        let before_ports = incremental.ports_aquired.clone();
+        let before_ports = incremental.ports_acquired.clone();
 
         for _ in 0..3 {
             state
@@ -505,7 +505,7 @@ mod tests {
         assert_eq!(incremental.largest_army_owner, Some(0));
         assert_eq!(incremental.all_builds, before_builds);
         assert_eq!(incremental.longest_road_lengths, before_roads);
-        assert_eq!(incremental.ports_aquired, before_ports);
+        assert_eq!(incremental.ports_acquired, before_ports);
         assert_matches_rebuild(&incremental, &state);
     }
 

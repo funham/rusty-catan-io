@@ -4,6 +4,7 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    algorithm,
     constants::costs,
     gameplay::{
         field::state::{BoardLayout, BoardState},
@@ -278,9 +279,7 @@ impl GameState {
     }
 
     fn player_ids_starting_from(&self, start_id: PlayerId) -> Vec<PlayerId> {
-        (start_id..self.players.count())
-            .chain(0..start_id)
-            .collect::<Vec<_>>()
+        algorithm::player_order_from(start_id, self.players.count()).collect::<Vec<_>>()
     }
 
     pub fn use_robbers_with_rng<R: Rng + ?Sized>(
@@ -321,17 +320,7 @@ impl GameState {
     }
 
     fn robbery_candidates(&self, rob_hex: Hex, robber_id: PlayerId) -> Vec<PlayerId> {
-        self.builds
-            .query()
-            .builds_on_hex(rob_hex)
-            .into_iter()
-            .filter(|(id, builds)| {
-                *id != robber_id
-                    && !builds.establishments.is_empty()
-                    && !self.players.get(*id).resources().is_empty()
-            })
-            .map(|(id, _)| id)
-            .collect()
+        algorithm::robbery_candidates(rob_hex, robber_id, &self.builds, &self.players).collect()
     }
 
     pub fn use_dev_card_with_rng<R: Rng + ?Sized>(

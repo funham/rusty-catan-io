@@ -3,6 +3,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    algorithm,
     constants,
     gameplay::game::action::{
         ChoosePlayerToRobAction, DropHalfAction, InitAction, InitStageAction, MoveRobbersAction,
@@ -1196,44 +1197,11 @@ impl GameEngine {
     }
 
     fn execute_harvesting(&mut self, player: PlayerId, num: TileNum) -> ResourceDistribution {
-        let hexes = self.game.board.hexes_by_num(num).clone();
-        let player_ids = (player..self.game.players.count()).chain(0..player);
-        let mut by_player = ResourceDistribution::new();
-
-        for pid in player_ids {
-            for est in self.game.builds[pid].establishments.clone() {
-                let coinc = est.vtx.as_set();
-
-                for hex in hexes.iter().filter(|hex| coinc.contains(hex)) {
-                    if *hex == self.game.board_state.robber_pos {
-                        continue;
-                    }
-                    if let Tile::Resource { resource, .. } = self.game.board.arrangement[*hex] {
-                        let amount = est.stage.harvest_amount() as u16;
-                        let resources = (resource, amount).into();
-                        if self.game.transfer_from_bank(resources, pid).is_ok() {
-                            Self::add_distribution(&mut by_player, pid, resources);
-                        }
-                    }
-                }
-            }
+        let by_player = algorithm::resource_distribution_for_roll(&self.game, player, num);
+        for (player_id, resources) in &by_player {
+            let _ = self.game.transfer_from_bank(*resources, *player_id);
         }
         by_player
-    }
-
-    fn add_distribution(
-        by_player: &mut ResourceDistribution,
-        player_id: PlayerId,
-        resources: ResourceCollection,
-    ) {
-        if let Some((_, existing)) = by_player
-            .iter_mut()
-            .find(|(existing_id, _)| *existing_id == player_id)
-        {
-            *existing += &resources;
-        } else {
-            by_player.push((player_id, resources));
-        }
     }
 
     fn execute_seven(&mut self, player_id: PlayerId, sink: &mut impl OutputSink) {
@@ -1388,17 +1356,7 @@ impl GameEngine {
     }
 
     fn robbery_candidates(&self, rob_hex: Hex, robber_id: PlayerId) -> Vec<PlayerId> {
-        self.game
-            .builds
-            .query()
-            .builds_on_hex(rob_hex)
-            .into_iter()
-            .filter(|(id, builds)| {
-                *id != robber_id
-                    && !builds.establishments.is_empty()
-                    && !self.game.players.get(*id).resources().is_empty()
-            })
-            .map(|(id, _)| id)
+        algorithm::robbery_candidates(rob_hex, robber_id, &self.game.builds, &self.game.players)
             .collect()
     }
 
@@ -1518,7 +1476,7 @@ impl GameEngine {
         player_id: PlayerId,
         trade: BankTrade,
     ) -> Result<(), String> {
-        let ports = &self.index.ports_aquired[player_id];
+        let ports = &self.index.ports_acquired[player_id];
         let required_port = match trade.kind {
             BankTradeKind::BankGeneric => None,
             BankTradeKind::PortGeneric => Some(PortKind::Universal),

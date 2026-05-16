@@ -276,7 +276,7 @@ fn rand_bank_trade(context: &PlayerDecisionContext<'_>, rng: &mut impl Rng) -> O
         rng,
     );
 
-    for port in context.public.ports_aquired_for(context.actor) {
+    for port in context.public.ports_acquired_for(context.actor) {
         match port {
             catan_core::gameplay::primitives::PortKind::Special(resource) => {
                 sample_resource_trades_at_rate(
