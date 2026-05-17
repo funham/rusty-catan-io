@@ -19,10 +19,10 @@ pub struct InitialPlacementCommand {
 
 impl InitialPlacementCommand {
     pub fn try_new(settlement: Intersection, road: Path) -> Option<Self> {
-        match settlement.paths().contains(&road) {
-            true => Some(Self { settlement, road }),
-            false => None,
-        }
+        settlement
+            .paths()
+            .contains(&road)
+            .then_some(Self { settlement, road })
     }
 
     pub fn as_builds(&self) -> (Establishment, Road) {

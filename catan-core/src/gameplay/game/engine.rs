@@ -4,10 +4,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     algorithm,
-    gameplay::game::command::InitialPlacementCommand,
     gameplay::{
         field::state::{BoardLayout, BoardState},
         game::{
+            command::{self, InitialPlacementCommand},
+            decider,
             event::{EventCause, EventTransaction, GameEvent},
             index::GameIndex,
             init::GameInitializationState,
@@ -16,7 +17,7 @@ use crate::{
             run::{GameResult, GameRunStats, RunOptions},
             state::GameState,
         },
-        primitives::player::PlayerId,
+        primitives::{self, player::PlayerId, turn},
         random::GameRandom,
     },
     math::dice::{DiceRoll, DiceRoller, RandomDiceRoller},
@@ -38,7 +39,7 @@ use super::{
 #[cfg(test)]
 use crate::gameplay::game::lifecycle::FinishedEngine;
 #[cfg(test)]
-use crate::gameplay::primitives::{
+use primitives::{
     bank::BankResourceExchangeError, resource::ResourceCollection, trade::PlayerTrade,
 };
 
@@ -95,10 +96,10 @@ impl EngineRuntime {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameStateSnapshot {
     pub board_state: BoardState,
-    pub turn: crate::gameplay::primitives::turn::GameTurn,
-    pub bank: crate::gameplay::primitives::bank::Bank,
-    pub players: crate::gameplay::primitives::player::PlayerDataContainer,
-    pub builds: crate::gameplay::primitives::build::BoardBuildData,
+    pub turn: turn::GameTurn,
+    pub bank: primitives::Bank,
+    pub players: primitives::PlayerDataContainer,
+    pub builds: primitives::BoardBuildData,
 }
 
 impl GameStateSnapshot {
@@ -130,11 +131,7 @@ pub struct GameEngineSnapshot {
     pub state: GameStateSnapshot,
     pub phase: GamePhase,
     #[serde(default)]
-    pub setup_turn: Option<
-        crate::gameplay::primitives::turn::GameTurn<
-            crate::gameplay::primitives::turn::BackAndForthCycle,
-        >,
-    >,
+    pub setup_turn: Option<turn::GameTurn<turn::BackAndForthCycle>>,
     pub pending: PendingDecisions,
     pub next_decision_id: u64,
     pub trade_sessions: SmallVec<[TradeSession; 16]>,
@@ -232,7 +229,7 @@ impl GameEngine {
         let transaction = EventTransaction {
             tx_id,
             cause: EventCause::Start,
-            events: crate::gameplay::game::decider::decide(&self.core, GameInput::Start),
+            events: decider::decide(&self.core, GameInput::Start),
         };
         for event in &transaction.events {
             reducer::reduce(&mut self.core, event)?;
@@ -257,17 +254,15 @@ impl GameEngine {
         };
         let tx_id = self.begin_transaction(cause.clone());
         let events = match input {
-            GameInput::Start => {
-                crate::gameplay::game::decider::decide(&self.core, GameInput::Start)
-            }
+            GameInput::Start => decider::decide(&self.core, GameInput::Start),
             submit @ GameInput::Submit { .. } => {
-                let context = crate::gameplay::game::decider::DecisionContext {
+                let context = decider::DecisionContext {
                     max_turns: self.runtime.max_turns,
                     max_invalid_actions: self.runtime.max_invalid_actions,
                     dice_roll: self.dice_roll_for_decider(&submit),
                     stolen_resource: self.stolen_resource_for_decider(&submit),
                 };
-                crate::gameplay::game::decider::decide_with_context(&self.core, submit, context)
+                decider::decide_with_context(&self.core, submit, context)
             }
         };
         let transaction = EventTransaction {
@@ -309,22 +304,17 @@ impl GameEngine {
         match (decision.kind, command) {
             (
                 DecisionKind::InitCommand,
-                PlayerCommand::InitCommand(crate::gameplay::game::command::InitCommand::RollDice),
+                PlayerCommand::InitCommand(command::InitCommand::RollDice),
             )
             | (
                 DecisionKind::PostDevCardCommand,
-                PlayerCommand::PostDevCard(
-                    crate::gameplay::game::command::PostDevCardCommand::RollDice,
-                ),
+                PlayerCommand::PostDevCard(command::PostDevCardCommand::RollDice),
             ) => Some(self.runtime.dice.roll()),
             _ => None,
         }
     }
 
-    fn stolen_resource_for_decider(
-        &mut self,
-        input: &GameInput,
-    ) -> Option<crate::gameplay::primitives::resource::Resource> {
+    fn stolen_resource_for_decider(&mut self, input: &GameInput) -> Option<primitives::Resource> {
         let GameInput::Submit {
             player_id,
             decision_id,
@@ -341,23 +331,17 @@ impl GameEngine {
         let usage = match (decision.kind, command) {
             (
                 DecisionKind::InitCommand,
-                PlayerCommand::InitCommand(
-                    crate::gameplay::game::command::InitCommand::UseDevCard(usage),
-                ),
+                PlayerCommand::InitCommand(command::InitCommand::UseDevCard(usage)),
             )
             | (
                 DecisionKind::PostDiceCommand,
-                PlayerCommand::PostDice(
-                    crate::gameplay::game::command::PostDiceCommand::UseDevCard(usage),
-                ),
+                PlayerCommand::PostDice(command::PostDiceCommand::UseDevCard(usage)),
             ) => usage,
             _ => {
                 let robbed_id = match (decision.kind, command) {
                     (
                         DecisionKind::MoveRobber,
-                        PlayerCommand::MoveRobber(
-                            crate::gameplay::game::command::MoveRobberCommand(hex),
-                        ),
+                        PlayerCommand::MoveRobber(command::MoveRobberCommand(hex)),
                     ) => {
                         let mut candidates = algorithm::robbery_candidates(
                             *hex,
@@ -370,9 +354,9 @@ impl GameEngine {
                     }
                     (
                         DecisionKind::ChooseRobbedPlayer { .. },
-                        PlayerCommand::ChooseRobbedPlayer(
-                            crate::gameplay::game::command::ChooseRobbedPlayerCommand(robbed_id),
-                        ),
+                        PlayerCommand::ChooseRobbedPlayer(command::ChooseRobbedPlayerCommand(
+                            robbed_id,
+                        )),
                     ) => *robbed_id,
                     _ => return None,
                 };
@@ -383,7 +367,7 @@ impl GameEngine {
                     .with_rng(|rng| resources.peek_random(rng));
             }
         };
-        let crate::gameplay::primitives::dev_card::DevCardUsage::Knight {
+        let primitives::DevCardUsage::Knight {
             robbed_id: Some(robbed_id),
             ..
         } = usage

@@ -78,9 +78,9 @@ pub(crate) fn game_ended_lines(
         )),
         Line::from(""),
         Line::from("final stats"),
-        Line::from("┌───┬──┬──┬──┬──┬──┬──┬──┬──┬─────────┐"),
-        Line::from("│P  │VP│B │A │S │C │R │L │K │Tags     │"),
-        Line::from("├───┼──┼──┼──┼──┼──┼──┼──┼──┼─────────┤"),
+        Line::from("┌───┬──┬──┬──┬──┬──┬──┬──┬──┬──┬─────────┐"),
+        Line::from("│P  │VP│B │DC│A │S │C │R │L │K │Tags     │"),
+        Line::from("├───┼──┼──┼──┼──┼──┼──┼──┼──┼──┼─────────┤"),
     ];
 
     let mut sorted = stats.to_vec();
@@ -97,10 +97,11 @@ pub(crate) fn game_ended_lines(
             tags.push("LA");
         }
         lines.push(Line::from(format!(
-            "│p{:<2}│{:>2}│{:>2}│{:>2}│{:>2}│{:>2}│{:>2}│{:>2}│{:>2}│{:<9}│",
+            "│p{:<2}│{:>2}│{:>2}│{:>2}│{:>2}│{:>2}│{:>2}│{:>2}│{:>2}│{:>2}│{:<9}│",
             stats.player_id,
             stats.total_vp,
-            stats.build_and_dev_card_vp,
+            stats.build_vp,
+            stats.dev_card_vp,
             stats.award_vp,
             stats.settlements,
             stats.cities,
@@ -112,11 +113,11 @@ pub(crate) fn game_ended_lines(
     }
 
     lines.extend([
-        Line::from("└───┴──┴──┴──┴──┴──┴──┴──┴──┴─────────┘"),
+        Line::from("└───┴──┴──┴──┴──┴──┴──┴──┴──┴──┴─────────┘"),
         Line::from(""),
-        Line::from("B=base VP  A=award VP"),
-        Line::from("S=set C=city R=road"),
-        Line::from("L=longest K=knights"),
+        Line::from("B=build VP,     A=award VP, DC=dev card VP"),
+        Line::from("S=setllement,   C=city count, R=road count"),
+        Line::from("L=longest road, K=knights played"),
         Line::from(Span::styled(
             "[press esc to quit]",
             Style::default().fg(Color::Yellow),

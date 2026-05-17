@@ -27,8 +27,8 @@ pub enum EngineCore {
 #[derive(Debug, Clone)]
 pub struct ActiveEngine {
     pub game: GameState,
-    pub setup_turn: Option<GameTurn<BackAndForthCycle>>,
     pub index: GameIndex,
+    pub setup_turn: Option<GameTurn<BackAndForthCycle>>,
     pub phase: GamePhase,
     pub pending: PendingDecisions,
     pub next_decision_id: u64,

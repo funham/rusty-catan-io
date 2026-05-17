@@ -90,7 +90,8 @@ impl EventVisibility {
 pub struct GameEndPlayerStats {
     pub player_id: PlayerId,
     pub total_vp: u16,
-    pub build_and_dev_card_vp: u16,
+    pub build_vp: u16,
+    pub dev_card_vp: u16,
     pub award_vp: u16,
     pub settlements: u16,
     pub cities: u16,

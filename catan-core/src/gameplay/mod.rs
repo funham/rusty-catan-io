@@ -43,4 +43,7 @@ pub mod constants {
 
     pub const LONGEST_ROAD_VP: u16 = 2;
     pub const LARGEST_ARMY_VP: u16 = 2;
+    pub const VP_TO_WIN: u16 = 10;
+    pub const SETTLEMENT_VP: u16 = 1;
+    pub const CITY_VP: u16 = 2;
 }

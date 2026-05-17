@@ -1049,7 +1049,8 @@ fn game_end_stats(
     let query = GameQuery::new(game, index);
     player_ids(game.players.count())
         .map(|player_id| {
-            let build_and_dev_card_vp = query.count_dev_card_build_vp(player_id);
+            let build_vp = query.count_build_vp(player_id);
+            let dev_card_vp = query.count_dev_card_vp(player_id);
             let has_longest_road = query.longest_road_owner() == Some(player_id);
             let has_largest_army = query.largest_army_owner() == Some(player_id);
             let award_vp = u16::from(has_longest_road) * constants::LONGEST_ROAD_VP
@@ -1057,8 +1058,9 @@ fn game_end_stats(
             let builds = game.builds.by_player(player_id);
             GameEndPlayerStats {
                 player_id,
-                total_vp: build_and_dev_card_vp + award_vp,
-                build_and_dev_card_vp,
+                total_vp: build_vp + dev_card_vp + award_vp,
+                build_vp,
+                dev_card_vp,
                 award_vp,
                 settlements: builds.settlements_count() as u16,
                 cities: builds.cities_count() as u16,

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
-use crate::gameplay::primitives::player::PlayerId;
+use crate::{gameplay::primitives::player::PlayerId, topology::Hex};
 
 use super::trade::TradeSessionId;
 
@@ -30,7 +30,7 @@ pub enum DecisionKind {
     PostDevCardCommand,
     RegularCommand,
     MoveRobber,
-    ChooseRobbedPlayer { robber_pos: crate::topology::Hex },
+    ChooseRobbedPlayer { robber_pos: Hex },
     DropHalf { required: u16 },
     TradeResponse { session: TradeSessionId },
     TradeOwnerAction { session: TradeSessionId },
