@@ -16,6 +16,7 @@ use crate::{
             trade::TradeScope,
         },
         primitives::{
+            build::{Build, Road},
             dev_card::DevCardKind,
             player::PlayerId,
             resource::{Resource, ResourceCollection},
@@ -443,6 +444,75 @@ fn decider_valid_bank_trade_emits_trade_and_reopens_regular_decision() {
             && emitted.kind == trade.kind
             && emitted.give == trade.give
             && emitted.take == trade.take
+            && id.0 == 8
+    ));
+}
+
+#[test]
+fn decider_valid_build_emits_build_and_reopens_regular_decision() {
+    let init = GameInitializationState::default();
+    let mut game = init.finish();
+    let first_placement = game
+        .builds
+        .query()
+        .possible_initial_placements(&game.board, P0)
+        .into_iter()
+        .next()
+        .expect("default board should have an initial placement");
+    let (settlement, road) = first_placement.as_builds();
+    game.builds
+        .try_init_place(P0, road, settlement)
+        .expect("initial placement should be valid");
+    game.transfer_from_bank(crate::constants::costs::ROAD, P0)
+        .unwrap();
+    let build = game
+        .board
+        .paths()
+        .iter()
+        .copied()
+        .map(|path| Build::Road(Road { path }))
+        .find(|build| {
+            let mut candidate = game.clone();
+            candidate.build(P0, *build).is_ok()
+        })
+        .expect("player should have a valid road extension");
+    let mut lifecycle = EngineCore::active(game);
+    let decision = OpenDecision {
+        id: crate::gameplay::game::decision::DecisionId(7),
+        player_id: P0,
+        kind: DecisionKind::RegularCommand,
+        lifetime: DecisionLifetime::OneShot,
+    };
+    let active = lifecycle.active_mut().expect("lifecycle should be active");
+    active.phase = GamePhase::Turn(crate::gameplay::game::phase::TurnPhase::RegularCommand);
+    active.next_decision_id = 8;
+    active.pending.push(decision.clone());
+
+    let events = decider::decide(
+        &lifecycle,
+        GameInput::Submit {
+            player_id: P0,
+            decision_id: decision.id,
+            command: PlayerCommand::Regular(RegularCommand::Build(build)),
+        },
+    );
+
+    assert!(matches!(
+        events.as_slice(),
+        [
+            GameEvent::DecisionClosed { decision_id },
+            GameEvent::Built {
+                player_id: P0,
+                build: emitted,
+            },
+            GameEvent::DecisionOpened(OpenDecision {
+                id,
+                player_id: P0,
+                kind: DecisionKind::RegularCommand,
+                lifetime: DecisionLifetime::OneShot,
+            }),
+        ] if *decision_id == decision.id
+            && matches!((emitted, build), (Build::Road(left), Build::Road(right)) if left.path == right.path)
             && id.0 == 8
     ));
 }

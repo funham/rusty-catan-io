@@ -9,9 +9,10 @@ use crate::gameplay::game::{
 };
 use crate::gameplay::{
     game::command::RegularCommand,
+    game::{index::GameIndex, query::GameQuery},
     primitives::{
         PortKind, Tile,
-        build::Establishment,
+        build::{Build, Establishment},
         resource::ResourceCollection,
         trade::{BankTrade, BankTradeKind},
     },
@@ -113,10 +114,44 @@ fn decide_submit(
         ) => {
             decide_bank_trade(active, decision, trade, &mut events);
         }
+        (DecisionKind::RegularCommand, PlayerCommand::Regular(RegularCommand::Build(build))) => {
+            decide_build(active, decision, build, &mut events);
+        }
         _ => {}
     }
 
     events
+}
+
+fn decide_build(
+    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    decision: OpenDecision,
+    build: Build,
+    events: &mut EventBatch,
+) {
+    let player_id = decision.player_id;
+    let mut candidate = active.game.clone();
+    if candidate.build(player_id, build).is_err() {
+        return;
+    }
+    let candidate_index = GameIndex::rebuild(&candidate);
+    if GameQuery::new(&candidate, &candidate_index)
+        .check_win_condition()
+        .is_some()
+    {
+        return;
+    }
+
+    events.push(GameEvent::DecisionClosed {
+        decision_id: decision.id,
+    });
+    events.push(GameEvent::Built { player_id, build });
+    events.push(GameEvent::DecisionOpened(OpenDecision {
+        id: DecisionId(active.next_decision_id),
+        player_id,
+        kind: DecisionKind::RegularCommand,
+        lifetime: DecisionLifetime::OneShot,
+    }));
 }
 
 fn decide_bank_trade(

@@ -232,6 +232,7 @@ pub fn reduce(lifecycle: &mut EngineCore, event: &GameEvent) -> Result<(), Repla
             active
                 .index
                 .refresh_after_build(&active.game, *player_id, *build);
+            active.stats.regular_actions += 1;
             active.stats.builds += 1;
         }
         GameEvent::DevCardBought { player_id } => {
