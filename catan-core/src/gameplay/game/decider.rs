@@ -1,7 +1,7 @@
 use crate::gameplay::game::{
     decision::{DecisionId, DecisionKind, DecisionLifetime, OpenDecision},
     event::{EventBatch, GameEndPlayerStats, GameEndStats, GameEvent},
-    input::{GameInput, PlayerCommand},
+    input::{GameInput, PlayerCommand, TradeCommand, TradeResponseCommand},
     lifecycle::EngineCore,
     output::CommandRejectionReason,
     phase::GamePhase,
@@ -16,7 +16,7 @@ use crate::gameplay::{
         dev_card::UsableDevCard,
         player::player_ids,
         resource::ResourceCollection,
-        trade::{BankTrade, BankTradeKind},
+        trade::{BankTrade, BankTradeKind, PersonalTradeOffer, PublicTradeOffer},
     },
 };
 use crate::{
@@ -130,6 +130,33 @@ fn decide_submit(
             decide_buy_dev_card(active, decision, &mut events);
         }
         (
+            DecisionKind::RegularCommand,
+            PlayerCommand::Regular(RegularCommand::OfferPublicTrade(offer)),
+        ) => decide_open_trade(
+            active,
+            decision,
+            crate::gameplay::game::trade::TradeScope::Public,
+            trade_from_public_offer(offer),
+            &mut events,
+        ),
+        (
+            DecisionKind::RegularCommand,
+            PlayerCommand::Regular(RegularCommand::OfferPersonalTrade(offer)),
+        ) => {
+            let (scope, trade) = trade_from_personal_offer(offer);
+            decide_open_trade(active, decision, scope, trade, &mut events);
+        }
+        (
+            DecisionKind::RegularCommand,
+            PlayerCommand::Trade(TradeCommand::Propose { scope, offer }),
+        ) => decide_open_trade(
+            active,
+            decision,
+            scope,
+            trade_from_public_offer(offer),
+            &mut events,
+        ),
+        (
             DecisionKind::InitCommand,
             PlayerCommand::InitCommand(crate::gameplay::game::command::InitCommand::RollDice),
         ) => {
@@ -212,10 +239,238 @@ fn decide_submit(
                 &mut events,
             );
         }
+        (DecisionKind::TradeResponse { session }, PlayerCommand::Trade(command)) => {
+            decide_trade_response(active, decision, session, command, &mut events);
+        }
+        (DecisionKind::TradeOwnerAction { session }, PlayerCommand::Trade(command)) => {
+            decide_trade_owner(active, decision, session, command, &mut events);
+        }
         _ => {}
     }
 
     events
+}
+
+fn decide_open_trade(
+    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    decision: OpenDecision,
+    scope: crate::gameplay::game::trade::TradeScope,
+    trade: crate::gameplay::primitives::trade::PlayerTrade,
+    events: &mut EventBatch,
+) {
+    if crate::gameplay::game::trade::trade_has_overlapping_resources(&trade)
+        || invalid_trade_scope_reason(scope, decision.player_id, active.game.players.count())
+            .is_some()
+    {
+        return;
+    }
+    let session_id =
+        crate::gameplay::game::trade::TradeSessionId(active.trade_sessions.len() as u64);
+    let offer_id = crate::gameplay::game::trade::TradeOfferId(0);
+    events.push(GameEvent::DecisionClosed {
+        decision_id: decision.id,
+    });
+    events.push(GameEvent::TradeOpened {
+        session_id,
+        proposer_id: decision.player_id,
+        scope,
+        offer_id,
+        offer: trade,
+    });
+    events.push(GameEvent::DecisionOpened(OpenDecision {
+        id: DecisionId(active.next_decision_id),
+        player_id: decision.player_id,
+        kind: DecisionKind::TradeOwnerAction {
+            session: session_id,
+        },
+        lifetime: DecisionLifetime::UntilSessionClosed(session_id),
+    }));
+    let mut next_decision_id = active.next_decision_id + 1;
+    for player_id in player_ids(active.game.players.count()) {
+        if player_id != decision.player_id && scope.includes(player_id) {
+            events.push(GameEvent::DecisionOpened(OpenDecision {
+                id: DecisionId(next_decision_id),
+                player_id,
+                kind: DecisionKind::TradeResponse {
+                    session: session_id,
+                },
+                lifetime: DecisionLifetime::UntilSessionClosed(session_id),
+            }));
+            next_decision_id += 1;
+        }
+    }
+}
+
+fn trade_from_public_offer(
+    offer: PublicTradeOffer,
+) -> crate::gameplay::primitives::trade::PlayerTrade {
+    crate::gameplay::primitives::trade::PlayerTrade {
+        give: offer.give,
+        take: offer.take,
+    }
+}
+
+fn trade_from_personal_offer(
+    offer: PersonalTradeOffer,
+) -> (
+    crate::gameplay::game::trade::TradeScope,
+    crate::gameplay::primitives::trade::PlayerTrade,
+) {
+    (
+        crate::gameplay::game::trade::TradeScope::Targeted(offer.peer_id),
+        crate::gameplay::primitives::trade::PlayerTrade {
+            give: offer.give,
+            take: offer.take,
+        },
+    )
+}
+
+fn invalid_trade_scope_reason(
+    scope: crate::gameplay::game::trade::TradeScope,
+    proposer: crate::gameplay::primitives::player::PlayerId,
+    player_count: usize,
+) -> Option<()> {
+    match scope {
+        crate::gameplay::game::trade::TradeScope::Public => None,
+        crate::gameplay::game::trade::TradeScope::Targeted(peer)
+            if peer.index() >= player_count || peer == proposer =>
+        {
+            Some(())
+        }
+        crate::gameplay::game::trade::TradeScope::Targeted(_) => None,
+    }
+}
+
+fn decide_trade_response(
+    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    decision: OpenDecision,
+    session_id: crate::gameplay::game::trade::TradeSessionId,
+    command: TradeCommand,
+    events: &mut EventBatch,
+) {
+    let Some(session) = active.trade_sessions.get(session_id.0 as usize) else {
+        return;
+    };
+    if !session.open || !session.scope.includes(decision.player_id) {
+        return;
+    }
+    match command {
+        TradeCommand::Respond(TradeResponseCommand::Accept { offer_id }) => {
+            let Some(offer) = session.offer(offer_id) else {
+                return;
+            };
+            if let Some(peer) = offer.peer
+                && peer != decision.player_id
+            {
+                return;
+            }
+            events.push(GameEvent::TradeResponseUpdated {
+                session_id,
+                player_id: decision.player_id,
+                response: crate::gameplay::game::trade::TradeResponseState::Accepted { offer_id },
+            });
+        }
+        TradeCommand::Respond(TradeResponseCommand::Reject) => {
+            events.push(GameEvent::TradeResponseUpdated {
+                session_id,
+                player_id: decision.player_id,
+                response: crate::gameplay::game::trade::TradeResponseState::Rejected,
+            });
+        }
+        TradeCommand::Respond(TradeResponseCommand::Counter { offer }) => {
+            if crate::gameplay::game::trade::trade_has_overlapping_resources(&offer) {
+                return;
+            }
+            let offer_id = crate::gameplay::game::trade::TradeOfferId(session.offers.len() as u64);
+            events.push(GameEvent::TradeOfferAdded {
+                session_id,
+                player_id: decision.player_id,
+                offer_id,
+                offer,
+            });
+            events.push(GameEvent::TradeResponseUpdated {
+                session_id,
+                player_id: decision.player_id,
+                response: crate::gameplay::game::trade::TradeResponseState::Countered { offer_id },
+            });
+        }
+        _ => {}
+    }
+}
+
+fn decide_trade_owner(
+    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    decision: OpenDecision,
+    session_id: crate::gameplay::game::trade::TradeSessionId,
+    command: TradeCommand,
+    events: &mut EventBatch,
+) {
+    match command {
+        TradeCommand::Commit { offer_id } => {
+            decide_commit_trade(active, decision, session_id, offer_id, events);
+        }
+        TradeCommand::Cancel => {
+            close_session_decisions(active, session_id, events);
+            events.push(GameEvent::TradeCancelled {
+                session_id,
+                proposer_id: decision.player_id,
+            });
+            reopen_regular(active, decision.player_id, events);
+        }
+        _ => {}
+    }
+}
+
+fn decide_commit_trade(
+    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    _decision: OpenDecision,
+    session_id: crate::gameplay::game::trade::TradeSessionId,
+    offer_id: crate::gameplay::game::trade::TradeOfferId,
+    events: &mut EventBatch,
+) {
+    let Some(session) = active.trade_sessions.get(session_id.0 as usize) else {
+        return;
+    };
+    let Some(offer) = session.offer(offer_id) else {
+        return;
+    };
+    let Some(peer_id) = offer
+        .peer
+        .or_else(|| session.accepted_peer_for_offer(offer_id))
+    else {
+        return;
+    };
+    if !crate::gameplay::game::trade::trade_is_funded(
+        active.game.players.get(session.proposer).resources(),
+        active.game.players.get(peer_id).resources(),
+        &offer.trade,
+    ) {
+        return;
+    }
+    close_session_decisions(active, session_id, events);
+    events.push(GameEvent::TradeCompleted {
+        session_id,
+        proposer_id: session.proposer,
+        peer_id,
+        offer_id,
+    });
+    reopen_regular(active, session.proposer, events);
+}
+
+fn close_session_decisions(
+    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    session_id: crate::gameplay::game::trade::TradeSessionId,
+    events: &mut EventBatch,
+) {
+    for decision in active
+        .pending
+        .iter()
+        .filter(|decision| decision.lifetime == DecisionLifetime::UntilSessionClosed(session_id))
+    {
+        events.push(GameEvent::DecisionClosed {
+            decision_id: decision.id,
+        });
+    }
 }
 
 fn decide_drop_half(
