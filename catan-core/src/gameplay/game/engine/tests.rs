@@ -2,6 +2,7 @@ use super::{GameEngine, GameStatus};
 use crate::{
     gameplay::{
         game::{
+            command::RegularCommand,
             decider,
             decision::{DecisionKind, DecisionLifetime, OpenDecision},
             event::{EventBatch, GameEvent},
@@ -66,6 +67,10 @@ fn output_event(output: &GameOutput) -> Option<&GameEvent> {
         GameOutput::Event(record) => Some(&record.event),
         _ => None,
     }
+}
+
+fn output_events(outputs: &[GameOutput]) -> Vec<&GameEvent> {
+    outputs.iter().filter_map(output_event).collect()
 }
 
 fn add_two_initial_settlements(engine: &mut GameEngine) -> Hex {
@@ -363,6 +368,115 @@ fn start_emits_domain_decision_opened_event() {
             Some(GameEvent::DecisionOpened(decision))
                 if decision.player_id == 0 && matches!(decision.kind, DecisionKind::InitPlacement)
         )
+    }));
+}
+
+#[test]
+fn characterization_start_event_order_is_transaction_safe() {
+    let (_engine, outputs) = started_engine();
+    let events = output_events(&outputs);
+
+    assert!(matches!(
+        events.as_slice(),
+        [
+            GameEvent::GameStarted,
+            GameEvent::DecisionOpened(OpenDecision {
+                player_id: P0,
+                kind: DecisionKind::InitPlacement,
+                ..
+            }),
+        ]
+    ));
+}
+
+#[test]
+fn characterization_bank_trade_event_follows_decision_close() {
+    let (mut engine, _outputs) = started_engine();
+    engine.test_force_regular_action_phase(0);
+    engine.test_give_resources(
+        0,
+        ResourceCollection {
+            brick: 4,
+            ..ResourceCollection::ZERO
+        },
+    );
+    let decision = engine.open_decision_for_test(0, DecisionKind::RegularCommand);
+    let mut sink = VecOutputSink::default();
+
+    engine.apply(
+        GameInput::Submit {
+            player_id: P0,
+            decision_id: decision.id,
+            command: PlayerCommand::Regular(RegularCommand::TradeWithBank(BankTrade {
+                kind: BankTradeKind::BankGeneric,
+                give: Resource::Brick,
+                take: Resource::Wood,
+            })),
+        },
+        &mut sink,
+    );
+
+    let events = output_events(sink.as_slice());
+    assert!(matches!(
+        events.as_slice(),
+        [
+            GameEvent::DecisionClosed { decision_id },
+            GameEvent::BankTradeCompleted { player_id: P0, .. },
+            GameEvent::DecisionOpened(OpenDecision {
+                player_id: P0,
+                kind: DecisionKind::RegularCommand,
+                ..
+            }),
+        ] if *decision_id == decision.id
+    ));
+}
+
+#[test]
+fn characterization_trade_commit_event_order_closes_session_then_reopens_regular_decision() {
+    let (mut engine, _outputs) = started_engine();
+    engine.test_force_regular_action_phase(0);
+    engine.test_give_resources(0, one_brick());
+    engine.test_give_resources(1, one_wood());
+    let session = engine.test_open_trade_session(
+        0,
+        TradeScope::Public,
+        PlayerTrade {
+            give: one_brick(),
+            take: one_wood(),
+        },
+    );
+    let offer = engine.test_trade_original_offer(session);
+    engine.test_set_trade_response_accept(session, 1, offer);
+    let owner = engine.open_decision_for_test(0, DecisionKind::TradeOwnerAction { session });
+    let peer = engine.open_decision_for_test(1, DecisionKind::TradeResponse { session });
+    let mut sink = VecOutputSink::default();
+
+    engine.apply(
+        GameInput::Submit {
+            player_id: P0,
+            decision_id: owner.id,
+            command: PlayerCommand::Trade(TradeCommand::Commit { offer_id: offer }),
+        },
+        &mut sink,
+    );
+
+    let events = output_events(sink.as_slice());
+    assert!(matches!(
+        events.as_slice(),
+        [
+            GameEvent::TradeCompleted { session_id, proposer_id: P0, peer_id: P1, .. },
+            GameEvent::DecisionOpened(OpenDecision {
+                player_id: P0,
+                kind: DecisionKind::RegularCommand,
+                ..
+            }),
+        ] if *session_id == session
+    ));
+    assert!(sink.as_slice().iter().any(|output| {
+        matches!(output, GameOutput::DecisionClosed { decision_id } if *decision_id == owner.id)
+    }));
+    assert!(sink.as_slice().iter().any(|output| {
+        matches!(output, GameOutput::DecisionClosed { decision_id } if *decision_id == peer.id)
     }));
 }
 
