@@ -8,6 +8,7 @@ use crate::gameplay::game::{
     run::GameResult,
 };
 use crate::gameplay::{
+    field::state::BoardLayout,
     game::command::RegularCommand,
     game::{index::GameIndex, query::GameQuery},
     primitives::{
@@ -28,6 +29,7 @@ use rand::{SeedableRng, rngs::SmallRng};
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DecisionContext {
     pub max_turns: Option<u64>,
+    pub max_invalid_actions: Option<u64>,
     pub dice_roll: Option<DiceRoll>,
     pub stolen_resource: Option<crate::gameplay::primitives::resource::Resource>,
 }
@@ -63,7 +65,10 @@ fn decide_start(lifecycle: &EngineCore) -> EventBatch {
     events.push(GameEvent::GameStarted);
     events.push(GameEvent::DecisionOpened(OpenDecision {
         id: DecisionId(active.next_decision_id),
-        player_id: active.game.turn.get_turn_index(),
+        player_id: active.setup_turn.as_ref().map_or_else(
+            || active.game.turn.get_turn_index(),
+            |turn| turn.get_turn_index(),
+        ),
         kind: DecisionKind::InitPlacement,
         lifetime: DecisionLifetime::OneShot,
     }));
@@ -319,7 +324,44 @@ fn decide_submit(
         }
     }
 
+    finish_after_invalid_action_limit(active, context, &mut events);
     events
+}
+
+fn finish_after_invalid_action_limit(
+    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    context: DecisionContext,
+    events: &mut EventBatch,
+) {
+    let Some(limit) = context.max_invalid_actions else {
+        return;
+    };
+    let rejected_actions = events
+        .iter()
+        .filter(|event| {
+            matches!(
+                event,
+                GameEvent::CommandRejected {
+                    counts_toward_limit: true,
+                    ..
+                }
+            )
+        })
+        .count() as u64;
+    if rejected_actions == 0
+        || active.invalid_actions + rejected_actions < limit
+        || events
+            .iter()
+            .any(|event| matches!(event, GameEvent::GameFinished { .. }))
+    {
+        return;
+    }
+    events.push(GameEvent::GameFinished {
+        result: GameResult::Interrupted {
+            reason: format!("too many invalid actions ({limit})"),
+        },
+        stats: None,
+    });
 }
 
 fn reject(
@@ -1128,9 +1170,9 @@ fn decide_initial_placement(
     let player_id = decision.player_id;
     let (settlement, road) = command.as_builds();
 
-    if let Some(init) = &active.init {
-        let mut candidate = init.clone();
-        if let Err(err) = candidate.builds.try_init_place(player_id, road, settlement) {
+    if let Some(setup_turn) = &active.setup_turn {
+        let mut candidate_builds = active.game.builds.clone();
+        if let Err(err) = candidate_builds.try_init_place(player_id, road, settlement) {
             events.push(GameEvent::CommandRejected {
                 player_id,
                 decision_id: Some(decision.id),
@@ -1150,8 +1192,8 @@ fn decide_initial_placement(
             settlement: settlement.vtx,
             road,
         });
-        if init.turn.get_rounds_played() == 1 {
-            let resources = initial_resources(init, settlement);
+        if setup_turn.get_rounds_played() == 1 {
+            let resources = initial_resources(&active.game.board, settlement);
             if resources != ResourceCollection::ZERO {
                 events.push(GameEvent::InitialResourcesGranted {
                     player_id,
@@ -1160,16 +1202,17 @@ fn decide_initial_placement(
             }
         }
 
-        candidate.turn.next();
-        if candidate.turn.get_rounds_played() < 2 {
+        let mut candidate_turn = setup_turn.clone();
+        candidate_turn.next();
+        if candidate_turn.get_rounds_played() < 2 {
             events.push(GameEvent::DecisionOpened(OpenDecision {
                 id: DecisionId(active.next_decision_id),
-                player_id: candidate.turn.get_turn_index(),
+                player_id: candidate_turn.get_turn_index(),
                 kind: DecisionKind::InitPlacement,
                 lifetime: DecisionLifetime::OneShot,
             }));
         } else {
-            let regular_turn = candidate.turn.into_regular();
+            let regular_turn = candidate_turn.into_regular();
             let turn_no = regular_turn.get_turns_played();
             if let Some(max_turns) = context.max_turns
                 && turn_no >= max_turns
@@ -1216,18 +1259,15 @@ fn decide_initial_placement(
     });
 }
 
-fn initial_resources(
-    init: &crate::gameplay::game::init::GameInitializationState,
-    settlement: Establishment,
-) -> ResourceCollection {
+fn initial_resources(board: &BoardLayout, settlement: Establishment) -> ResourceCollection {
     let mut resources = ResourceCollection::ZERO;
     for hex in settlement
         .vtx
         .as_set()
         .into_iter()
-        .filter(|hex| hex.norm() <= init.board.arrangement.radius() as usize)
+        .filter(|hex| hex.norm() <= board.arrangement.radius() as usize)
     {
-        if let Tile::Resource { resource, .. } = init.board.arrangement[hex] {
+        if let Tile::Resource { resource, .. } = board.arrangement[hex] {
             resources += &resource.into();
         }
     }

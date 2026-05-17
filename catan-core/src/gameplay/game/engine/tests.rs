@@ -9,7 +9,7 @@ use crate::{
             init::GameInitializationState,
             input::{GameInput, PlayerCommand, TradeCommand, TradeResponseCommand},
             lifecycle::EngineCore,
-            output::{CommandRejectionReason, GameOutput, OutputSink, VecOutputSink},
+            output::{CommandRejectionReason, GameOutput},
             phase::GamePhase,
             projector, reducer,
             run::RunOptions,
@@ -69,7 +69,7 @@ fn apply_outputs(engine: &mut GameEngine, input: GameInput) -> (GameStatus, Vec<
 fn apply_to_sink(
     engine: &mut GameEngine,
     input: GameInput,
-    sink: &mut VecOutputSink,
+    sink: &mut Vec<GameOutput>,
 ) -> GameStatus {
     let (status, outputs) = apply_outputs(engine, input);
     for output in outputs {
@@ -102,25 +102,31 @@ fn output_events(outputs: &[GameOutput]) -> Vec<&GameEvent> {
 fn add_two_initial_settlements(engine: &mut GameEngine) -> Hex {
     let mut victim_hex = None;
 
-    for player_id in 0..2 {
-        let (establishment, road) = engine
-            .game
+    for player_id in [P0, P1] {
+        let state = engine.state();
+        let (establishment, road) = state
             .builds
             .query()
-            .possible_initial_placements(&engine.game.board, player_id)
+            .possible_initial_placements(&state.board, player_id)
             .iter()
             .map(crate::gameplay::game::command::InitialPlacementCommand::as_builds)
             .next()
             .expect("default board should have initial placements");
 
-        if player_id == 1 {
-            let board_hexes = engine.game.board.arrangement.hex_iter().collect::<Vec<_>>();
-            victim_hex = establishment.vtx.as_set().into_iter().find(|hex| {
-                *hex != engine.game.board_state.robber_pos && board_hexes.contains(hex)
-            });
+        if player_id == P1 {
+            let state = engine.state();
+            let board_hexes = state.board.arrangement.hex_iter().collect::<Vec<_>>();
+            victim_hex = establishment
+                .vtx
+                .as_set()
+                .into_iter()
+                .find(|hex| *hex != state.board_state.robber_pos && board_hexes.contains(hex));
         }
 
         engine
+            .core
+            .active_mut()
+            .expect("test engine should be active")
             .game
             .builds
             .try_init_place(player_id, road, establishment)
@@ -543,6 +549,7 @@ fn decider_roll_dice_harvest_emits_complete_facts() {
         },
         decider::DecisionContext {
             max_turns: None,
+            max_invalid_actions: None,
             dice_roll: Some(DiceRoll::eight()),
             stolen_resource: None,
         },
@@ -592,6 +599,7 @@ fn decider_roll_dice_seven_opens_discard_or_robber_decision() {
         },
         decider::DecisionContext {
             max_turns: None,
+            max_invalid_actions: None,
             dice_roll: Some(DiceRoll::seven()),
             stolen_resource: None,
         },
@@ -796,7 +804,7 @@ fn characterization_bank_trade_event_follows_decision_close() {
         },
     );
     let decision = engine.open_decision_for_test(0, DecisionKind::RegularCommand);
-    let mut sink = VecOutputSink::default();
+    let mut sink = Vec::new();
 
     apply_to_sink(
         &mut engine,
@@ -845,7 +853,7 @@ fn characterization_trade_commit_event_order_closes_session_then_reopens_regular
     engine.test_set_trade_response_accept(session, 1, offer);
     let owner = engine.open_decision_for_test(0, DecisionKind::TradeOwnerAction { session });
     let peer = engine.open_decision_for_test(1, DecisionKind::TradeResponse { session });
-    let mut sink = VecOutputSink::default();
+    let mut sink = Vec::new();
 
     apply_to_sink(
         &mut engine,
@@ -883,7 +891,7 @@ fn characterization_trade_commit_event_order_closes_session_then_reopens_regular
 fn wrong_player_is_rejected_without_closing_decision() {
     let (mut engine, outputs) = started_engine();
     let decision = first_open_decision(&outputs);
-    let mut sink = VecOutputSink::default();
+    let mut sink = Vec::new();
 
     let status = apply_to_sink(
         &mut engine,
@@ -898,7 +906,7 @@ fn wrong_player_is_rejected_without_closing_decision() {
     );
 
     assert_eq!(status, GameStatus::Waiting);
-    assert!(sink.into_vec().iter().any(|output| {
+    assert!(sink.iter().any(|output| {
         matches!(
             output,
             GameOutput::CommandRejected {
@@ -914,7 +922,7 @@ fn wrong_player_is_rejected_without_closing_decision() {
 fn wrong_player_rejection_emits_domain_command_rejected_event() {
     let (mut engine, outputs) = started_engine();
     let decision = first_open_decision(&outputs);
-    let mut sink = VecOutputSink::default();
+    let mut sink = Vec::new();
 
     apply_to_sink(
         &mut engine,
@@ -928,7 +936,7 @@ fn wrong_player_rejection_emits_domain_command_rejected_event() {
         &mut sink,
     );
 
-    assert!(sink.into_vec().iter().any(|output| {
+    assert!(sink.iter().any(|output| {
         matches!(
             output_event(output),
             Some(GameEvent::CommandRejected {
@@ -950,7 +958,7 @@ fn stale_decision_is_rejected_after_one_shot_closes() {
         .into_iter()
         .next()
         .expect("default board should have an initial placement");
-    let mut sink = VecOutputSink::default();
+    let mut sink = Vec::new();
 
     apply_to_sink(
         &mut engine,
@@ -961,7 +969,7 @@ fn stale_decision_is_rejected_after_one_shot_closes() {
         },
         &mut sink,
     );
-    let mut stale_sink = VecOutputSink::default();
+    let mut stale_sink = Vec::new();
     apply_to_sink(
         &mut engine,
         GameInput::Submit {
@@ -972,7 +980,7 @@ fn stale_decision_is_rejected_after_one_shot_closes() {
         &mut stale_sink,
     );
 
-    assert!(stale_sink.into_vec().iter().any(|output| {
+    assert!(stale_sink.iter().any(|output| {
         matches!(
             output,
             GameOutput::CommandRejected {
@@ -997,9 +1005,15 @@ fn buying_dev_card_emits_private_drawn_card_event() {
             ..ResourceCollection::ZERO
         },
     );
-    engine.game.bank.dev_cards = vec![DevCardKind::VictoryPoint];
+    engine
+        .core
+        .active_mut()
+        .expect("test engine should be active")
+        .game
+        .bank
+        .dev_cards = vec![DevCardKind::VictoryPoint];
     let decision = engine.open_decision_for_test(0, DecisionKind::RegularCommand);
-    let mut sink = VecOutputSink::default();
+    let mut sink = Vec::new();
 
     apply_to_sink(
         &mut engine,
@@ -1013,7 +1027,7 @@ fn buying_dev_card_emits_private_drawn_card_event() {
         &mut sink,
     );
 
-    assert!(sink.into_vec().iter().any(|output| {
+    assert!(sink.iter().any(|output| {
         matches!(
             output_event(output),
             Some(GameEvent::DevCardDrawn {
@@ -1030,7 +1044,7 @@ fn moving_robber_emits_stolen_resource_event() {
     let victim_hex = add_two_initial_settlements(&mut engine);
     engine.test_give_resources(1, Resource::Brick.into());
     let decision = engine.open_decision_for_test(0, DecisionKind::MoveRobber);
-    let mut sink = VecOutputSink::default();
+    let mut sink = Vec::new();
 
     apply_to_sink(
         &mut engine,
@@ -1044,7 +1058,7 @@ fn moving_robber_emits_stolen_resource_event() {
         &mut sink,
     );
 
-    assert!(sink.into_vec().iter().any(|output| {
+    assert!(sink.iter().any(|output| {
         matches!(
             output_event(output),
             Some(GameEvent::ResourceStolen {
@@ -1063,7 +1077,7 @@ fn reusable_trade_response_decision_can_be_updated_until_session_closes() {
     engine.test_give_resources(0, one_brick());
     engine.test_give_resources(1, one_wood());
 
-    let mut sink = VecOutputSink::default();
+    let mut sink = Vec::new();
     let owner_decision = engine.open_decision_for_test(0, DecisionKind::RegularCommand);
     apply_to_sink(
         &mut engine,
@@ -1095,7 +1109,7 @@ fn reusable_trade_response_decision_can_be_updated_until_session_closes() {
         })
         .expect("trade should open response decision for peer");
 
-    let mut update_sink = VecOutputSink::default();
+    let mut update_sink = Vec::new();
     apply_to_sink(
         &mut engine,
         GameInput::Submit {
@@ -1118,7 +1132,6 @@ fn reusable_trade_response_decision_can_be_updated_until_session_closes() {
     );
 
     let updates = update_sink
-        .into_vec()
         .into_iter()
         .filter(|output| {
             matches!(
@@ -1148,7 +1161,7 @@ fn trade_commit_revalidates_resources_and_rejects_missing_resources() {
     engine.test_set_trade_response_accept(session, 1, offer);
     engine.test_take_resources(1, one_wood());
     let owner = engine.open_decision_for_test(0, DecisionKind::TradeOwnerAction { session });
-    let mut sink = VecOutputSink::default();
+    let mut sink = Vec::new();
 
     apply_to_sink(
         &mut engine,
@@ -1160,7 +1173,7 @@ fn trade_commit_revalidates_resources_and_rejects_missing_resources() {
         &mut sink,
     );
 
-    assert!(sink.into_vec().iter().any(|output| {
+    assert!(sink.iter().any(|output| {
         matches!(
             output,
             GameOutput::CommandRejected {
@@ -1177,7 +1190,7 @@ fn same_resource_on_both_sides_is_rejected() {
     let (mut engine, _outputs) = started_engine();
     engine.test_force_regular_action_phase(0);
     let owner = engine.open_decision_for_test(0, DecisionKind::RegularCommand);
-    let mut sink = VecOutputSink::default();
+    let mut sink = Vec::new();
 
     apply_to_sink(
         &mut engine,
@@ -1195,7 +1208,7 @@ fn same_resource_on_both_sides_is_rejected() {
         &mut sink,
     );
 
-    assert!(sink.into_vec().iter().any(|output| {
+    assert!(sink.iter().any(|output| {
         matches!(
             output,
             GameOutput::CommandRejected {
@@ -1219,7 +1232,7 @@ fn player_can_reject_trade() {
         },
     );
     let response = engine.open_decision_for_test(1, DecisionKind::TradeResponse { session });
-    let mut sink = VecOutputSink::default();
+    let mut sink = Vec::new();
 
     apply_to_sink(
         &mut engine,
@@ -1231,7 +1244,7 @@ fn player_can_reject_trade() {
         &mut sink,
     );
 
-    assert!(sink.into_vec().iter().any(|output| {
+    assert!(sink.iter().any(|output| {
         matches!(
             output_event(output),
             Some(GameEvent::TradeResponseUpdated {
@@ -1256,7 +1269,7 @@ fn player_can_counter_trade() {
         },
     );
     let response = engine.open_decision_for_test(1, DecisionKind::TradeResponse { session });
-    let mut sink = VecOutputSink::default();
+    let mut sink = Vec::new();
 
     apply_to_sink(
         &mut engine,
@@ -1273,7 +1286,7 @@ fn player_can_counter_trade() {
         &mut sink,
     );
 
-    let outputs = sink.into_vec();
+    let outputs = sink;
     assert!(outputs.iter().any(|output| {
         matches!(
             output_event(output),
@@ -1313,7 +1326,7 @@ fn active_player_can_commit_accepted_offer() {
     let offer = engine.test_trade_original_offer(session);
     engine.test_set_trade_response_accept(session, 1, offer);
     let owner = engine.open_decision_for_test(0, DecisionKind::TradeOwnerAction { session });
-    let mut sink = VecOutputSink::default();
+    let mut sink = Vec::new();
 
     apply_to_sink(
         &mut engine,
@@ -1327,7 +1340,7 @@ fn active_player_can_commit_accepted_offer() {
 
     assert_eq!(*engine.state().players.get(0).resources(), one_wood());
     assert_eq!(*engine.state().players.get(1).resources(), one_brick());
-    assert!(sink.into_vec().iter().any(|output| {
+    assert!(sink.iter().any(|output| {
         matches!(
             output_event(output),
             Some(GameEvent::TradeCompleted {
@@ -1354,7 +1367,7 @@ fn active_player_can_cancel_trade_and_close_trade_decisions() {
     );
     let owner = engine.open_decision_for_test(0, DecisionKind::TradeOwnerAction { session });
     let peer = engine.open_decision_for_test(1, DecisionKind::TradeResponse { session });
-    let mut sink = VecOutputSink::default();
+    let mut sink = Vec::new();
 
     apply_to_sink(
         &mut engine,
@@ -1366,7 +1379,7 @@ fn active_player_can_cancel_trade_and_close_trade_decisions() {
         &mut sink,
     );
 
-    let outputs = sink.into_vec();
+    let outputs = sink;
     assert!(outputs.iter().any(|output| {
         matches!(
             output,
@@ -1404,7 +1417,7 @@ fn player_cannot_accept_another_players_counteroffer() {
     );
     let countering_player =
         engine.open_decision_for_test(1, DecisionKind::TradeResponse { session });
-    let mut counter_sink = VecOutputSink::default();
+    let mut counter_sink = Vec::new();
 
     apply_to_sink(
         &mut engine,
@@ -1432,7 +1445,7 @@ fn player_cannot_accept_another_players_counteroffer() {
         })
         .expect("countering should add an offer");
     let other_player = engine.open_decision_for_test(2, DecisionKind::TradeResponse { session });
-    let mut accept_sink = VecOutputSink::default();
+    let mut accept_sink = Vec::new();
 
     apply_to_sink(
         &mut engine,
@@ -1446,7 +1459,7 @@ fn player_cannot_accept_another_players_counteroffer() {
         &mut accept_sink,
     );
 
-    assert!(accept_sink.into_vec().iter().any(|output| {
+    assert!(accept_sink.iter().any(|output| {
         matches!(
             output,
             GameOutput::CommandRejected {
@@ -1463,7 +1476,7 @@ fn targeted_trade_rejects_invalid_target() {
     let (mut engine, _outputs) = started_engine();
     engine.test_force_regular_action_phase(0);
     let owner = engine.open_decision_for_test(0, DecisionKind::RegularCommand);
-    let mut sink = VecOutputSink::default();
+    let mut sink = Vec::new();
 
     apply_to_sink(
         &mut engine,
@@ -1481,7 +1494,7 @@ fn targeted_trade_rejects_invalid_target() {
         &mut sink,
     );
 
-    assert!(sink.into_vec().iter().any(|output| {
+    assert!(sink.iter().any(|output| {
         matches!(
             output,
             GameOutput::CommandRejected {
@@ -1498,7 +1511,7 @@ fn submit_after_game_end_is_rejected_without_mutation() {
     let (mut engine, _outputs) = started_engine();
     let decision = engine.open_decision_for_test(0, DecisionKind::RegularCommand);
     engine.test_mark_ended();
-    let mut sink = VecOutputSink::default();
+    let mut sink = Vec::new();
 
     let status = apply_to_sink(
         &mut engine,
@@ -1513,7 +1526,7 @@ fn submit_after_game_end_is_rejected_without_mutation() {
     );
 
     assert_eq!(status, GameStatus::Ended);
-    assert!(sink.into_vec().iter().any(|output| {
+    assert!(sink.iter().any(|output| {
         matches!(
             output,
             GameOutput::CommandRejected {

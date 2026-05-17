@@ -10,7 +10,6 @@ pub enum GamePhase {
     InitialPlacement,
     Turn(TurnPhase),
     Trade(TradePhase),
-    Ended,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

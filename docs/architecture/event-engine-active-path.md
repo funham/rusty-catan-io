@@ -15,10 +15,8 @@ Persistence writes committed event records rather than serialized output envelop
 
 ## Legacy path
 
-No submitted player command routes through the legacy imperative helper path.
-
-Remaining cleanup is mechanical: delete obsolete helper functions from `engine.rs`, remove
-compatibility aliases, and replace old test-only sink helpers with transaction helpers.
+Empty. Submitted player commands no longer route through the legacy imperative helper path, and
+`GameEngine` no longer exposes sink-based apply/start APIs.
 
 ## Retired path
 
@@ -30,5 +28,7 @@ is represented by `GameFinished`.
 The `GameEngine` duplicate lifecycle mirror has been retired. `EngineCore::Active` and
 `EngineCore::Finished` are the current lifecycle facts.
 
-`game::action` is retired as an implementation module and remains only as a compatibility re-export
-shim for old external callers. Canonical command payloads live under `game::command`.
+`game::action` is retired. Canonical command payloads live under `game::command`.
+
+`OutputSink`, `VecOutputSink`, `GamePhase::Ended`, `Deref` access to `ActiveEngine`, and
+`ActiveEngine::init` have been retired.

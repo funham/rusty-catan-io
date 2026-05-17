@@ -9,7 +9,10 @@ use crate::gameplay::{
         state::GameState,
         trade::TradeSession,
     },
-    primitives::player::PlayerId,
+    primitives::{
+        player::PlayerId,
+        turn::{BackAndForthCycle, GameTurn},
+    },
 };
 
 pub type TradeSessions = SmallVec<[TradeSession; 16]>;
@@ -24,7 +27,7 @@ pub enum EngineCore {
 #[derive(Debug, Clone)]
 pub struct ActiveEngine {
     pub game: GameState,
-    pub init: Option<crate::gameplay::game::init::GameInitializationState>,
+    pub setup_turn: Option<GameTurn<BackAndForthCycle>>,
     pub index: GameIndex,
     pub phase: GamePhase,
     pub pending: PendingDecisions,
@@ -48,7 +51,7 @@ impl EngineCore {
         let index = GameIndex::rebuild(&game);
         Self::Active(ActiveEngine {
             game,
-            init: None,
+            setup_turn: None,
             index,
             phase: GamePhase::NotStarted,
             pending: PendingDecisions::default(),
@@ -63,6 +66,7 @@ impl EngineCore {
     pub fn from_snapshot_parts(
         game: GameState,
         phase: GamePhase,
+        setup_turn: Option<GameTurn<BackAndForthCycle>>,
         pending: PendingDecisions,
         next_decision_id: u64,
         trade_sessions: TradeSessions,
@@ -81,7 +85,7 @@ impl EngineCore {
             }),
             None => Self::Active(ActiveEngine {
                 game,
-                init: None,
+                setup_turn,
                 index,
                 phase,
                 pending,

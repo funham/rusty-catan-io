@@ -77,10 +77,10 @@ This framework implements the complete logic of Settlers of Catan, exposing a cl
 ```rust
 let init = GameInitializationState::default();
 let mut engine = GameEngine::from_init(init, RunOptions::default());
-let mut sink = VecOutputSink::default();
-engine.start(&mut sink);
+let transition = engine.start()?;
+let outputs = projector::project_transaction(&transition.transaction);
 
-for output in sink.into_vec() {
+for output in outputs {
     match output {
         GameOutput::DecisionOpened(decision) => {
             // Submit a matching GameInput::Submit later.

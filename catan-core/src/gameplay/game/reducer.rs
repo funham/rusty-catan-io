@@ -11,7 +11,6 @@ use crate::gameplay::{
     primitives::{
         build::{Build, Establishment, EstablishmentType, Road},
         player::player_ids,
-        resource::ResourceCollection,
     },
 };
 use crate::{algorithm, math::dice::DiceOutcome};
@@ -119,32 +118,19 @@ pub fn reduce(lifecycle: &mut EngineCore, event: &GameEvent) -> Result<(), Repla
                 .active_mut()
                 .ok_or(ReplayError::ExpectedActiveLifecycle)?;
             active
-                .init
-                .as_mut()
-                .map(|init| {
-                    init.builds.try_init_place(
-                        *player_id,
-                        *road,
-                        Establishment {
-                            vtx: *settlement,
-                            stage: EstablishmentType::Settlement,
-                        },
-                    )
-                })
-                .unwrap_or_else(|| {
-                    active.game.builds.try_init_place(
-                        *player_id,
-                        *road,
-                        Establishment {
-                            vtx: *settlement,
-                            stage: EstablishmentType::Settlement,
-                        },
-                    )
-                })
+                .game
+                .builds
+                .try_init_place(
+                    *player_id,
+                    *road,
+                    Establishment {
+                        vtx: *settlement,
+                        stage: EstablishmentType::Settlement,
+                    },
+                )
                 .map_err(|_| ReplayError::InvalidInitialPlacement)?;
-            if let Some(init) = active.init.as_mut() {
-                init.turn.next();
-                active.game = init.clone().finish();
+            if let Some(setup_turn) = active.setup_turn.as_mut() {
+                setup_turn.next();
             }
             active.index = GameIndex::rebuild(&active.game);
         }
@@ -155,21 +141,10 @@ pub fn reduce(lifecycle: &mut EngineCore, event: &GameEvent) -> Result<(), Repla
             let active = lifecycle
                 .active_mut()
                 .ok_or(ReplayError::ExpectedActiveLifecycle)?;
-            if let Some(init) = active.init.as_mut() {
-                ResourceCollection::transfer(
-                    &mut init.bank.resources,
-                    init.players.get_mut(*player_id).resources(),
-                    *resources,
-                )
+            active
+                .game
+                .transfer_from_bank(*resources, *player_id)
                 .map_err(|_| ReplayError::InvalidResourceTransfer)?;
-                active.game = init.clone().finish();
-                active.index = GameIndex::rebuild(&active.game);
-            } else {
-                active
-                    .game
-                    .transfer_from_bank(*resources, *player_id)
-                    .map_err(|_| ReplayError::InvalidResourceTransfer)?;
-            }
         }
         GameEvent::ResourcesDistributed { by_player } => {
             let active = lifecycle
@@ -209,8 +184,8 @@ pub fn reduce(lifecycle: &mut EngineCore, event: &GameEvent) -> Result<(), Repla
             let active = lifecycle
                 .active_mut()
                 .ok_or(ReplayError::ExpectedActiveLifecycle)?;
-            if let Some(init) = active.init.take() {
-                active.game = init.finish();
+            if let Some(setup_turn) = active.setup_turn.take() {
+                active.game.turn = setup_turn.into_regular();
                 active.index = GameIndex::rebuild(&active.game);
             }
             active

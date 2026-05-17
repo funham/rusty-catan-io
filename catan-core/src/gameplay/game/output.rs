@@ -52,37 +52,6 @@ pub enum CommandRejectionReason {
     IllegalCommand(String),
 }
 
-pub trait OutputSink {
-    fn push(&mut self, output: GameOutput);
-}
-
-#[derive(Debug, Default, Clone)]
-pub struct VecOutputSink {
-    outputs: Vec<GameOutput>,
-}
-
-impl VecOutputSink {
-    pub fn into_vec(self) -> Vec<GameOutput> {
-        self.outputs
-    }
-
-    pub fn as_slice(&self) -> &[GameOutput] {
-        &self.outputs
-    }
-}
-
-impl OutputSink for VecOutputSink {
-    fn push(&mut self, output: GameOutput) {
-        self.outputs.push(output);
-    }
-}
-
-impl OutputSink for Vec<GameOutput> {
-    fn push(&mut self, output: GameOutput) {
-        self.push(output);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::gameplay::{
