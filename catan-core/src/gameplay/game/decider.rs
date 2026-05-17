@@ -122,6 +122,9 @@ fn decide_submit(
         (DecisionKind::RegularCommand, PlayerCommand::Regular(RegularCommand::Build(build))) => {
             decide_build(active, decision, build, &mut events);
         }
+        (DecisionKind::RegularCommand, PlayerCommand::Regular(RegularCommand::BuyDevCard)) => {
+            decide_buy_dev_card(active, decision, &mut events);
+        }
         (
             DecisionKind::InitCommand,
             PlayerCommand::InitCommand(crate::gameplay::game::command::InitCommand::RollDice),
@@ -152,6 +155,38 @@ fn decide_submit(
     }
 
     events
+}
+
+fn decide_buy_dev_card(
+    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    decision: OpenDecision,
+    events: &mut EventBatch,
+) {
+    let player_id = decision.player_id;
+    let Some(card) = active.game.bank.dev_cards.last().copied() else {
+        return;
+    };
+    if !active
+        .game
+        .players
+        .get(player_id)
+        .resources()
+        .has_enough(&crate::gameplay::constants::costs::DEV_CARD)
+    {
+        return;
+    }
+
+    events.push(GameEvent::DecisionClosed {
+        decision_id: decision.id,
+    });
+    events.push(GameEvent::DevCardBought { player_id });
+    events.push(GameEvent::DevCardDrawn { player_id, card });
+    events.push(GameEvent::DecisionOpened(OpenDecision {
+        id: DecisionId(active.next_decision_id),
+        player_id,
+        kind: DecisionKind::RegularCommand,
+        lifetime: DecisionLifetime::OneShot,
+    }));
 }
 
 fn decide_roll_dice(

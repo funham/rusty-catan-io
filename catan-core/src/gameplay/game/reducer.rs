@@ -250,6 +250,7 @@ pub fn reduce(lifecycle: &mut EngineCore, event: &GameEvent) -> Result<(), Repla
                 .game
                 .transfer_to_bank(costs::DEV_CARD, *player_id)
                 .map_err(|_| ReplayError::InvalidResourceTransfer)?;
+            active.stats.regular_actions += 1;
             active.stats.dev_cards_bought += 1;
         }
         GameEvent::DevCardDrawn { player_id, card } => {

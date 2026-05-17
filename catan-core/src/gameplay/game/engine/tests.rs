@@ -614,6 +614,53 @@ fn decider_roll_dice_seven_opens_discard_or_robber_decision() {
 }
 
 #[test]
+fn decider_buy_dev_card_emits_private_draw_fact_and_reopens_regular_decision() {
+    let mut lifecycle = EngineCore::active(GameInitializationState::default().finish());
+    let decision = OpenDecision {
+        id: crate::gameplay::game::decision::DecisionId(7),
+        player_id: P0,
+        kind: DecisionKind::RegularCommand,
+        lifetime: DecisionLifetime::OneShot,
+    };
+    let active = lifecycle.active_mut().expect("lifecycle should be active");
+    active.phase = GamePhase::Turn(crate::gameplay::game::phase::TurnPhase::RegularCommand);
+    active.next_decision_id = 8;
+    active
+        .game
+        .transfer_from_bank(crate::constants::costs::DEV_CARD, P0)
+        .unwrap();
+    active.game.bank.dev_cards = vec![DevCardKind::VictoryPoint];
+    active.pending.push(decision.clone());
+
+    let events = decider::decide(
+        &lifecycle,
+        GameInput::Submit {
+            player_id: P0,
+            decision_id: decision.id,
+            command: PlayerCommand::Regular(RegularCommand::BuyDevCard),
+        },
+    );
+
+    assert!(matches!(
+        events.as_slice(),
+        [
+            GameEvent::DecisionClosed { decision_id },
+            GameEvent::DevCardBought { player_id: P0 },
+            GameEvent::DevCardDrawn {
+                player_id: P0,
+                card: DevCardKind::VictoryPoint,
+            },
+            GameEvent::DecisionOpened(OpenDecision {
+                id,
+                player_id: P0,
+                kind: DecisionKind::RegularCommand,
+                lifetime: DecisionLifetime::OneShot,
+            }),
+        ] if *decision_id == decision.id && id.0 == 8
+    ));
+}
+
+#[test]
 fn start_opens_one_shot_init_decision() {
     let (_engine, outputs) = started_engine();
 
