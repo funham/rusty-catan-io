@@ -118,15 +118,39 @@ fn decide_submit(
             decide_end_move(active, decision, context, &mut events);
         }
         (
-            DecisionKind::RegularCommand,
-            PlayerCommand::Regular(RegularCommand::TradeWithBank(trade)),
+            DecisionKind::PostDiceCommand,
+            PlayerCommand::PostDice(
+                crate::gameplay::game::command::PostDiceCommand::RegularCommand(
+                    RegularCommand::EndMove,
+                ),
+            ),
         ) => {
-            decide_bank_trade(active, decision, trade, &mut events);
+            decide_end_move(active, decision, context, &mut events);
         }
         (DecisionKind::RegularCommand, PlayerCommand::Regular(RegularCommand::Build(build))) => {
             decide_build(active, decision, build, &mut events);
         }
+        (
+            DecisionKind::PostDiceCommand,
+            PlayerCommand::PostDice(
+                crate::gameplay::game::command::PostDiceCommand::RegularCommand(
+                    RegularCommand::Build(build),
+                ),
+            ),
+        ) => {
+            decide_build(active, decision, build, &mut events);
+        }
         (DecisionKind::RegularCommand, PlayerCommand::Regular(RegularCommand::BuyDevCard)) => {
+            decide_buy_dev_card(active, decision, &mut events);
+        }
+        (
+            DecisionKind::PostDiceCommand,
+            PlayerCommand::PostDice(
+                crate::gameplay::game::command::PostDiceCommand::RegularCommand(
+                    RegularCommand::BuyDevCard,
+                ),
+            ),
+        ) => {
             decide_buy_dev_card(active, decision, &mut events);
         }
         (
@@ -140,11 +164,50 @@ fn decide_submit(
             &mut events,
         ),
         (
+            DecisionKind::PostDiceCommand,
+            PlayerCommand::PostDice(
+                crate::gameplay::game::command::PostDiceCommand::RegularCommand(
+                    RegularCommand::OfferPublicTrade(offer),
+                ),
+            ),
+        ) => decide_open_trade(
+            active,
+            decision,
+            crate::gameplay::game::trade::TradeScope::Public,
+            trade_from_public_offer(offer),
+            &mut events,
+        ),
+        (
             DecisionKind::RegularCommand,
             PlayerCommand::Regular(RegularCommand::OfferPersonalTrade(offer)),
         ) => {
             let (scope, trade) = trade_from_personal_offer(offer);
             decide_open_trade(active, decision, scope, trade, &mut events);
+        }
+        (
+            DecisionKind::PostDiceCommand,
+            PlayerCommand::PostDice(
+                crate::gameplay::game::command::PostDiceCommand::RegularCommand(
+                    RegularCommand::OfferPersonalTrade(offer),
+                ),
+            ),
+        ) => {
+            let (scope, trade) = trade_from_personal_offer(offer);
+            decide_open_trade(active, decision, scope, trade, &mut events);
+        }
+        (
+            DecisionKind::PostDiceCommand,
+            PlayerCommand::PostDice(
+                crate::gameplay::game::command::PostDiceCommand::RegularCommand(
+                    RegularCommand::TradeWithBank(trade),
+                ),
+            ),
+        )
+        | (
+            DecisionKind::RegularCommand,
+            PlayerCommand::Regular(RegularCommand::TradeWithBank(trade)),
+        ) => {
+            decide_bank_trade(active, decision, trade, &mut events);
         }
         (
             DecisionKind::RegularCommand,
@@ -245,10 +308,43 @@ fn decide_submit(
         (DecisionKind::TradeOwnerAction { session }, PlayerCommand::Trade(command)) => {
             decide_trade_owner(active, decision, session, command, &mut events);
         }
-        _ => {}
+        _ => {
+            reject(
+                &mut events,
+                decision.player_id,
+                Some(decision.id),
+                CommandRejectionReason::WrongPhase,
+                false,
+            );
+        }
     }
 
     events
+}
+
+fn reject(
+    events: &mut EventBatch,
+    player_id: crate::gameplay::primitives::player::PlayerId,
+    decision_id: Option<DecisionId>,
+    reason: CommandRejectionReason,
+    counts_toward_limit: bool,
+) {
+    events.push(GameEvent::CommandRejected {
+        player_id,
+        decision_id,
+        reason,
+        counts_toward_limit,
+    });
+}
+
+fn reject_illegal(events: &mut EventBatch, decision: &OpenDecision, reason: impl Into<String>) {
+    reject(
+        events,
+        decision.player_id,
+        Some(decision.id),
+        CommandRejectionReason::IllegalCommand(reason.into()),
+        true,
+    );
 }
 
 fn decide_open_trade(
@@ -262,6 +358,7 @@ fn decide_open_trade(
         || invalid_trade_scope_reason(scope, decision.player_id, active.game.players.count())
             .is_some()
     {
+        reject_illegal(events, &decision, "invalid player trade proposal");
         return;
     }
     let session_id =
@@ -349,19 +446,39 @@ fn decide_trade_response(
     events: &mut EventBatch,
 ) {
     let Some(session) = active.trade_sessions.get(session_id.0 as usize) else {
+        reject(
+            events,
+            decision.player_id,
+            Some(decision.id),
+            CommandRejectionReason::StaleDecision,
+            false,
+        );
         return;
     };
     if !session.open || !session.scope.includes(decision.player_id) {
+        reject(
+            events,
+            decision.player_id,
+            Some(decision.id),
+            CommandRejectionReason::WrongPhase,
+            false,
+        );
         return;
     }
     match command {
         TradeCommand::Respond(TradeResponseCommand::Accept { offer_id }) => {
             let Some(offer) = session.offer(offer_id) else {
+                reject_illegal(events, &decision, "unknown trade offer");
                 return;
             };
             if let Some(peer) = offer.peer
                 && peer != decision.player_id
             {
+                reject_illegal(
+                    events,
+                    &decision,
+                    "only the counteroffer owner can accept that counteroffer",
+                );
                 return;
             }
             events.push(GameEvent::TradeResponseUpdated {
@@ -379,6 +496,7 @@ fn decide_trade_response(
         }
         TradeCommand::Respond(TradeResponseCommand::Counter { offer }) => {
             if crate::gameplay::game::trade::trade_has_overlapping_resources(&offer) {
+                reject_illegal(events, &decision, "invalid counter offer");
                 return;
             }
             let offer_id = crate::gameplay::game::trade::TradeOfferId(session.offers.len() as u64);
@@ -394,7 +512,13 @@ fn decide_trade_response(
                 response: crate::gameplay::game::trade::TradeResponseState::Countered { offer_id },
             });
         }
-        _ => {}
+        _ => reject(
+            events,
+            decision.player_id,
+            Some(decision.id),
+            CommandRejectionReason::WrongPhase,
+            false,
+        ),
     }
 }
 
@@ -417,27 +541,46 @@ fn decide_trade_owner(
             });
             reopen_regular(active, decision.player_id, events);
         }
-        _ => {}
+        _ => reject(
+            events,
+            decision.player_id,
+            Some(decision.id),
+            CommandRejectionReason::WrongPhase,
+            false,
+        ),
     }
 }
 
 fn decide_commit_trade(
     active: &crate::gameplay::game::lifecycle::ActiveEngine,
-    _decision: OpenDecision,
+    decision: OpenDecision,
     session_id: crate::gameplay::game::trade::TradeSessionId,
     offer_id: crate::gameplay::game::trade::TradeOfferId,
     events: &mut EventBatch,
 ) {
     let Some(session) = active.trade_sessions.get(session_id.0 as usize) else {
+        reject(
+            events,
+            decision.player_id,
+            Some(decision.id),
+            CommandRejectionReason::StaleDecision,
+            false,
+        );
         return;
     };
     let Some(offer) = session.offer(offer_id) else {
+        reject_illegal(events, &decision, "unknown trade offer");
         return;
     };
     let Some(peer_id) = offer
         .peer
         .or_else(|| session.accepted_peer_for_offer(offer_id))
     else {
+        reject_illegal(
+            events,
+            &decision,
+            "no player has accepted the selected trade offer",
+        );
         return;
     };
     if !crate::gameplay::game::trade::trade_is_funded(
@@ -445,6 +588,7 @@ fn decide_commit_trade(
         active.game.players.get(peer_id).resources(),
         &offer.trade,
     ) {
+        reject_illegal(events, &decision, "trade resources are no longer available");
         return;
     }
     close_session_decisions(active, session_id, events);
@@ -489,6 +633,11 @@ fn decide_drop_half(
             .resources()
             .has_enough(&resources)
     {
+        reject_illegal(
+            events,
+            &decision,
+            format!("must discard exactly {required} available cards"),
+        );
         return;
     }
     events.push(GameEvent::DecisionClosed {
@@ -531,6 +680,7 @@ fn decide_move_robber(
 ) {
     let player_id = decision.player_id;
     if hex == active.game.board_state.robber_pos {
+        reject_illegal(events, &decision, "robber must move to a new hex");
         return;
     }
     let candidates: EventBatch =
@@ -608,6 +758,11 @@ fn decide_choose_robbed_player(
     )
     .any(|candidate| candidate == robbed_id)
     {
+        reject_illegal(
+            events,
+            &decision,
+            "chosen player cannot be robbed from the selected hex",
+        );
         return;
     }
     events.push(GameEvent::DecisionClosed {
@@ -656,16 +811,10 @@ fn decide_use_dev_card(
         .use_dev_card_with_rng(usage, player_id, &mut rng)
         .is_err()
     {
+        reject_illegal(events, &decision, "invalid dev-card usage");
         return;
     }
     let candidate_index = GameIndex::rebuild(&candidate);
-    if GameQuery::new(&candidate, &candidate_index)
-        .check_win_condition()
-        .is_some()
-    {
-        return;
-    }
-
     events.push(GameEvent::DecisionClosed {
         decision_id: decision.id,
     });
@@ -686,6 +835,16 @@ fn decide_use_dev_card(
             });
         }
     }
+    if GameQuery::new(&candidate, &candidate_index)
+        .check_win_condition()
+        .is_some()
+    {
+        events.push(GameEvent::GameFinished {
+            result: GameResult::Win(player_id),
+            stats: Some(game_end_stats(&candidate, &candidate_index)),
+        });
+        return;
+    }
     events.push(GameEvent::DecisionOpened(OpenDecision {
         id: DecisionId(active.next_decision_id),
         player_id,
@@ -701,6 +860,7 @@ fn decide_buy_dev_card(
 ) {
     let player_id = decision.player_id;
     let Some(card) = active.game.bank.dev_cards.last().copied() else {
+        reject_illegal(events, &decision, "development card bank is empty");
         return;
     };
     if !active
@@ -710,20 +870,38 @@ fn decide_buy_dev_card(
         .resources()
         .has_enough(&crate::gameplay::constants::costs::DEV_CARD)
     {
+        reject_illegal(
+            events,
+            &decision,
+            "not enough resources to buy development card",
+        );
         return;
     }
+    let mut candidate = active.game.clone();
+    if candidate.buy_dev_card(player_id).is_err() {
+        reject_illegal(events, &decision, "invalid buy-dev-card action");
+        return;
+    }
+    let candidate_index = GameIndex::rebuild(&candidate);
 
     events.push(GameEvent::DecisionClosed {
         decision_id: decision.id,
     });
     events.push(GameEvent::DevCardBought { player_id });
     events.push(GameEvent::DevCardDrawn { player_id, card });
-    events.push(GameEvent::DecisionOpened(OpenDecision {
-        id: DecisionId(active.next_decision_id),
-        player_id,
-        kind: DecisionKind::RegularCommand,
-        lifetime: DecisionLifetime::OneShot,
-    }));
+    if let Some(winner) = GameQuery::new(&candidate, &candidate_index).check_win_condition() {
+        events.push(GameEvent::GameFinished {
+            result: GameResult::Win(winner),
+            stats: Some(game_end_stats(&candidate, &candidate_index)),
+        });
+    } else {
+        events.push(GameEvent::DecisionOpened(OpenDecision {
+            id: DecisionId(active.next_decision_id),
+            player_id,
+            kind: DecisionKind::RegularCommand,
+            lifetime: DecisionLifetime::OneShot,
+        }));
+    }
 }
 
 fn decide_roll_dice(
@@ -734,6 +912,7 @@ fn decide_roll_dice(
     events: &mut EventBatch,
 ) {
     let Some(roll) = context.dice_roll else {
+        reject_illegal(events, &decision, "dice roll is missing");
         return;
     };
     let player_id = decision.player_id;
@@ -798,6 +977,7 @@ fn decide_build(
     let player_id = decision.player_id;
     let mut candidate = active.game.clone();
     if candidate.build(player_id, build).is_err() {
+        reject_illegal(events, &decision, "invalid build action");
         return;
     }
     let candidate_index = GameIndex::rebuild(&candidate);
@@ -858,6 +1038,7 @@ fn decide_bank_trade(
 ) {
     let player_id = decision.player_id;
     if !can_trade_with_bank(active, player_id, trade) {
+        reject_illegal(events, &decision, "invalid bank trade action");
         return;
     }
 

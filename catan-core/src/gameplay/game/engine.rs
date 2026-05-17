@@ -307,36 +307,34 @@ impl GameEngine {
                 input.clone(),
                 context,
             );
-            if !events.is_empty() {
-                let tx_id = self.runtime.current_tx_id;
-                let transaction = EventTransaction {
-                    tx_id,
-                    cause: match input {
-                        GameInput::Submit {
-                            player_id,
-                            decision_id,
-                            ..
-                        } => EventCause::PlayerCommand {
-                            player_id,
-                            decision_id,
-                        },
-                        GameInput::Start => EventCause::Start,
+            let tx_id = self.runtime.current_tx_id;
+            let transaction = EventTransaction {
+                tx_id,
+                cause: match input {
+                    GameInput::Submit {
+                        player_id,
+                        decision_id,
+                        ..
+                    } => EventCause::PlayerCommand {
+                        player_id,
+                        decision_id,
                     },
-                    events,
-                };
-                for event in &transaction.events {
-                    reducer::reduce(&mut self.core, event)?;
-                }
-                for output in projector::project_transaction(&transaction) {
-                    sink.push(output);
-                }
-                let status = if self.core.result().is_some() {
-                    GameStatus::Ended
-                } else {
-                    GameStatus::Waiting
-                };
-                return Ok(status);
+                    GameInput::Start => EventCause::Start,
+                },
+                events,
+            };
+            for event in &transaction.events {
+                reducer::reduce(&mut self.core, event)?;
             }
+            for output in projector::project_transaction(&transaction) {
+                sink.push(output);
+            }
+            let status = if self.core.result().is_some() {
+                GameStatus::Ended
+            } else {
+                GameStatus::Waiting
+            };
+            return Ok(status);
         }
         Ok(match input {
             GameInput::Start => return self.start_projected(sink),
