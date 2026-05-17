@@ -5,9 +5,10 @@
 `SyncGameHost -> GameEngine -> EngineCore -> decider -> reducer -> projector -> runtime observers`
 
 `GameEngine` now owns a single `EngineCore` source of truth instead of mirrored legacy fields plus a
-lifecycle copy. Initialized `Start`, initial placement, regular `EndMove`, and valid bank-trade
-commands are reducer-driven. `GameOutput::Event` carries transaction metadata and event visibility.
-Persistence writes committed event records rather than serialized output envelopes.
+lifecycle copy. Initialized `Start`, initial placement, regular `EndMove`, valid bank-trade
+commands, and non-winning regular builds are reducer-driven. `GameOutput::Event` carries
+transaction metadata and event visibility. Persistence writes committed event records rather than
+serialized output envelopes.
 
 ## Target path
 
@@ -20,8 +21,9 @@ helpers while emitting committed event records. These helpers mutate the single 
 so the old duplicated state mirror is gone, but command decision logic has not yet moved fully into
 `decider`.
 
-Remaining groups are dice/harvest/seven turn lifecycle, build commands, dev-card purchase/use,
-robber/discard flow, full rejection handling for migrated commands, and player trades.
+Remaining groups are dice/harvest/seven turn lifecycle, winning build finish projection, dev-card
+purchase/use, robber/discard flow, full rejection handling for migrated commands, and player
+trades.
 
 ## Retired path
 
