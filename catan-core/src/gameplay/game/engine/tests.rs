@@ -292,6 +292,7 @@ fn reducer_applies_discard_robber_and_turn_events() {
     assert_eq!(active.game.bank.resources.brick, 19);
     assert_eq!(active.game.board_state.robber_pos, target_hex);
     assert_eq!(active.game.turn.get_turn_index(), 1);
+    assert_eq!(active.stats.regular_actions, 1);
 }
 
 #[test]
@@ -339,6 +340,51 @@ fn decider_start_emits_game_started_and_initial_decision() {
         GameEvent::DecisionOpened(decision),
     ] if decision.player_id == 0 && matches!(decision.kind, DecisionKind::InitPlacement)));
     assert!(!events.spilled());
+}
+
+#[test]
+fn decider_end_move_emits_turn_transition_events() {
+    let mut lifecycle = EngineCore::active(GameInitializationState::default().finish());
+    let decision = OpenDecision {
+        id: crate::gameplay::game::decision::DecisionId(7),
+        player_id: P0,
+        kind: DecisionKind::RegularCommand,
+        lifetime: DecisionLifetime::OneShot,
+    };
+    let active = lifecycle.active_mut().expect("lifecycle should be active");
+    active.phase = GamePhase::Turn(crate::gameplay::game::phase::TurnPhase::RegularCommand);
+    active.next_decision_id = 8;
+    active.pending.push(decision.clone());
+
+    let events = decider::decide(
+        &lifecycle,
+        GameInput::Submit {
+            player_id: P0,
+            decision_id: decision.id,
+            command: PlayerCommand::Regular(RegularCommand::EndMove),
+        },
+    );
+
+    assert!(matches!(
+        events.as_slice(),
+        [
+            GameEvent::DecisionClosed { decision_id },
+            GameEvent::TurnEnded {
+                player_id: P0,
+                turn_no: 0,
+            },
+            GameEvent::TurnStarted {
+                player_id: P1,
+                turn_no: 1,
+            },
+            GameEvent::DecisionOpened(OpenDecision {
+                id,
+                player_id: P1,
+                kind: DecisionKind::InitCommand,
+                lifetime: DecisionLifetime::OneShot,
+            }),
+        ] if *decision_id == decision.id && id.0 == 8
+    ));
 }
 
 #[test]

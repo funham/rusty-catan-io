@@ -219,6 +219,7 @@ pub fn reduce(lifecycle: &mut EngineCore, event: &GameEvent) -> Result<(), Repla
                 .ok_or(ReplayError::ExpectedActiveLifecycle)?;
             active.game.turn.next();
             active.stats.turns_ended += 1;
+            active.stats.regular_actions += 1;
         }
         GameEvent::Built { player_id, build } => {
             let active = lifecycle

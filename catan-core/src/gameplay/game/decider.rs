@@ -7,7 +7,10 @@ use crate::gameplay::game::{
     phase::GamePhase,
     run::GameResult,
 };
-use crate::gameplay::primitives::{Tile, build::Establishment, resource::ResourceCollection};
+use crate::gameplay::{
+    game::command::RegularCommand,
+    primitives::{Tile, build::Establishment, resource::ResourceCollection},
+};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DecisionContext {
@@ -96,10 +99,52 @@ fn decide_submit(
         (DecisionKind::InitPlacement, PlayerCommand::InitialPlacement(command)) => {
             decide_initial_placement(active, decision, command, context, &mut events);
         }
+        (DecisionKind::RegularCommand, PlayerCommand::Regular(RegularCommand::EndMove)) => {
+            decide_end_move(active, decision, context, &mut events);
+        }
         _ => {}
     }
 
     events
+}
+
+fn decide_end_move(
+    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    decision: OpenDecision,
+    context: DecisionContext,
+    events: &mut EventBatch,
+) {
+    let player_id = decision.player_id;
+    let turn_no = active.game.turn.get_turns_played();
+    let mut next_turn = active.game.turn.clone();
+    next_turn.next();
+    let next_turn_no = next_turn.get_turns_played();
+
+    events.push(GameEvent::DecisionClosed {
+        decision_id: decision.id,
+    });
+    events.push(GameEvent::TurnEnded { player_id, turn_no });
+    if let Some(max_turns) = context.max_turns
+        && next_turn_no >= max_turns
+    {
+        events.push(GameEvent::GameFinished {
+            result: GameResult::LimitReached {
+                turns: next_turn_no,
+            },
+            stats: None,
+        });
+        return;
+    }
+    events.push(GameEvent::TurnStarted {
+        player_id: next_turn.get_turn_index(),
+        turn_no: next_turn_no,
+    });
+    events.push(GameEvent::DecisionOpened(OpenDecision {
+        id: DecisionId(active.next_decision_id),
+        player_id: next_turn.get_turn_index(),
+        kind: DecisionKind::InitCommand,
+        lifetime: DecisionLifetime::OneShot,
+    }));
 }
 
 fn decide_initial_placement(
