@@ -247,9 +247,11 @@ mod tests {
     }
 
     fn unique_test_dir() -> std::path::PathBuf {
+        static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         std::env::temp_dir().join(format!(
-            "rusty-catan-persistence-test-{}-{}",
+            "rusty-catan-persistence-test-{}-{}-{}",
             std::process::id(),
+            NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
