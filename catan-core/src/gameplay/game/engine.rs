@@ -259,7 +259,6 @@ impl GameEngine {
                 crate::gameplay::game::decider::decide(&self.core, GameInput::Start);
             for event in &transaction.events {
                 reducer::reduce(&mut self.core, event)?;
-                self.record_event(event);
             }
             for output in projector::project_transaction(&transaction) {
                 sink.push(output);
@@ -285,6 +284,9 @@ impl GameEngine {
                 decision_id: *decision_id,
             },
         };
+        if !matches!(input, GameInput::Start) {
+            self.begin_transaction(cause.clone());
+        }
         let status = self.apply_projected(input, &mut sink)?;
         Ok(self.transition_from_outputs(cause, status, sink.into_vec()))
     }
@@ -294,19 +296,52 @@ impl GameEngine {
         input: GameInput,
         sink: &mut impl OutputSink,
     ) -> Result<GameStatus, EngineError> {
+        if matches!(input, GameInput::Submit { .. }) {
+            let events = crate::gameplay::game::decider::decide_with_context(
+                &self.core,
+                input.clone(),
+                crate::gameplay::game::decider::DecisionContext {
+                    max_turns: self.runtime.max_turns,
+                },
+            );
+            if !events.is_empty() {
+                let tx_id = self.runtime.current_tx_id;
+                let transaction = EventTransaction {
+                    tx_id,
+                    cause: match input {
+                        GameInput::Submit {
+                            player_id,
+                            decision_id,
+                            ..
+                        } => EventCause::PlayerCommand {
+                            player_id,
+                            decision_id,
+                        },
+                        GameInput::Start => EventCause::Start,
+                    },
+                    events,
+                };
+                for event in &transaction.events {
+                    reducer::reduce(&mut self.core, event)?;
+                }
+                for output in projector::project_transaction(&transaction) {
+                    sink.push(output);
+                }
+                let status = if self.core.result().is_some() {
+                    GameStatus::Ended
+                } else {
+                    GameStatus::Waiting
+                };
+                return Ok(status);
+            }
+        }
         Ok(match input {
             GameInput::Start => return self.start_projected(sink),
             GameInput::Submit {
                 player_id,
                 decision_id,
                 command,
-            } => {
-                self.begin_transaction(EventCause::PlayerCommand {
-                    player_id,
-                    decision_id,
-                });
-                self.apply_submit(player_id, decision_id, command, sink)
-            }
+            } => self.apply_submit(player_id, decision_id, command, sink),
         })
     }
 

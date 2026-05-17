@@ -11,6 +11,7 @@ use crate::gameplay::{
     primitives::{
         build::{Build, Establishment, EstablishmentType, Road},
         player::player_ids,
+        resource::ResourceCollection,
     },
 };
 
@@ -39,11 +40,52 @@ pub fn reduce(lifecycle: &mut EngineCore, event: &GameEvent) -> Result<(), Repla
                 .ok_or(ReplayError::ExpectedActiveLifecycle)?;
             active.next_decision_id = active.next_decision_id.max(decision.id.0 + 1);
             active.pending.push(decision.clone());
-            if matches!(
-                decision.kind,
-                crate::gameplay::game::decision::DecisionKind::InitPlacement
-            ) {
-                active.phase = crate::gameplay::game::phase::GamePhase::InitialPlacement;
+            match decision.kind {
+                crate::gameplay::game::decision::DecisionKind::InitPlacement => {
+                    active.phase = crate::gameplay::game::phase::GamePhase::InitialPlacement;
+                }
+                crate::gameplay::game::decision::DecisionKind::InitCommand => {
+                    active.phase = crate::gameplay::game::phase::GamePhase::Turn(
+                        crate::gameplay::game::phase::TurnPhase::InitCommand,
+                    );
+                }
+                crate::gameplay::game::decision::DecisionKind::PostDiceCommand => {
+                    active.phase = crate::gameplay::game::phase::GamePhase::Turn(
+                        crate::gameplay::game::phase::TurnPhase::PostDiceCommand,
+                    );
+                }
+                crate::gameplay::game::decision::DecisionKind::PostDevCardCommand => {
+                    active.phase = crate::gameplay::game::phase::GamePhase::Turn(
+                        crate::gameplay::game::phase::TurnPhase::PostDevCardCommand,
+                    );
+                }
+                crate::gameplay::game::decision::DecisionKind::RegularCommand => {
+                    active.phase = crate::gameplay::game::phase::GamePhase::Turn(
+                        crate::gameplay::game::phase::TurnPhase::RegularCommand,
+                    );
+                }
+                crate::gameplay::game::decision::DecisionKind::MoveRobber => {
+                    active.phase = crate::gameplay::game::phase::GamePhase::Turn(
+                        crate::gameplay::game::phase::TurnPhase::MoveRobber,
+                    );
+                }
+                crate::gameplay::game::decision::DecisionKind::ChooseRobbedPlayer {
+                    robber_pos,
+                } => {
+                    active.phase = crate::gameplay::game::phase::GamePhase::Turn(
+                        crate::gameplay::game::phase::TurnPhase::ChooseRobbedPlayer { robber_pos },
+                    );
+                }
+                crate::gameplay::game::decision::DecisionKind::DropHalf { required } => {
+                    active.phase = crate::gameplay::game::phase::GamePhase::Turn(
+                        crate::gameplay::game::phase::TurnPhase::DropHalf {
+                            player_id: decision.player_id,
+                            required,
+                        },
+                    );
+                }
+                crate::gameplay::game::decision::DecisionKind::TradeResponse { .. }
+                | crate::gameplay::game::decision::DecisionKind::TradeOwnerAction { .. } => {}
             }
             if !matches!(
                 decision.kind,
@@ -62,10 +104,7 @@ pub fn reduce(lifecycle: &mut EngineCore, event: &GameEvent) -> Result<(), Repla
             counts_toward_limit,
             ..
         } => {
-            let active = lifecycle
-                .active_mut()
-                .ok_or(ReplayError::ExpectedActiveLifecycle)?;
-            if *counts_toward_limit {
+            if let (true, Some(active)) = (*counts_toward_limit, lifecycle.active_mut()) {
                 active.invalid_actions += 1;
                 active.stats.action_rejections += 1;
             }
@@ -79,17 +118,33 @@ pub fn reduce(lifecycle: &mut EngineCore, event: &GameEvent) -> Result<(), Repla
                 .active_mut()
                 .ok_or(ReplayError::ExpectedActiveLifecycle)?;
             active
-                .game
-                .builds
-                .try_init_place(
-                    *player_id,
-                    *road,
-                    Establishment {
-                        vtx: *settlement,
-                        stage: EstablishmentType::Settlement,
-                    },
-                )
+                .init
+                .as_mut()
+                .map(|init| {
+                    init.builds.try_init_place(
+                        *player_id,
+                        *road,
+                        Establishment {
+                            vtx: *settlement,
+                            stage: EstablishmentType::Settlement,
+                        },
+                    )
+                })
+                .unwrap_or_else(|| {
+                    active.game.builds.try_init_place(
+                        *player_id,
+                        *road,
+                        Establishment {
+                            vtx: *settlement,
+                            stage: EstablishmentType::Settlement,
+                        },
+                    )
+                })
                 .map_err(|_| ReplayError::InvalidInitialPlacement)?;
+            if let Some(init) = active.init.as_mut() {
+                init.turn.next();
+                active.game = init.clone().finish();
+            }
             active.index = GameIndex::rebuild(&active.game);
         }
         GameEvent::InitialResourcesGranted {
@@ -99,10 +154,21 @@ pub fn reduce(lifecycle: &mut EngineCore, event: &GameEvent) -> Result<(), Repla
             let active = lifecycle
                 .active_mut()
                 .ok_or(ReplayError::ExpectedActiveLifecycle)?;
-            active
-                .game
-                .transfer_from_bank(*resources, *player_id)
+            if let Some(init) = active.init.as_mut() {
+                ResourceCollection::transfer(
+                    &mut init.bank.resources,
+                    init.players.get_mut(*player_id).resources(),
+                    *resources,
+                )
                 .map_err(|_| ReplayError::InvalidResourceTransfer)?;
+                active.game = init.clone().finish();
+                active.index = GameIndex::rebuild(&active.game);
+            } else {
+                active
+                    .game
+                    .transfer_from_bank(*resources, *player_id)
+                    .map_err(|_| ReplayError::InvalidResourceTransfer)?;
+            }
         }
         GameEvent::ResourcesDistributed { by_player } => {
             let active = lifecycle
@@ -136,6 +202,10 @@ pub fn reduce(lifecycle: &mut EngineCore, event: &GameEvent) -> Result<(), Repla
             let active = lifecycle
                 .active_mut()
                 .ok_or(ReplayError::ExpectedActiveLifecycle)?;
+            if let Some(init) = active.init.take() {
+                active.game = init.finish();
+                active.index = GameIndex::rebuild(&active.game);
+            }
             active
                 .game
                 .players
@@ -368,9 +438,15 @@ pub fn reduce(lifecycle: &mut EngineCore, event: &GameEvent) -> Result<(), Repla
 }
 
 fn finish(lifecycle: &mut EngineCore, result: GameResult) -> Result<(), ReplayError> {
-    let active = lifecycle
+    let mut active = lifecycle
         .take_active()
         .ok_or(ReplayError::ExpectedActiveLifecycle)?;
+    match &result {
+        GameResult::Win(_) => active.stats.games_ended += 1,
+        GameResult::Interrupted { .. } | GameResult::LimitReached { .. } => {
+            active.stats.games_interrupted += 1;
+        }
+    }
     *lifecycle = EngineCore::Finished(FinishedEngine {
         game: active.game,
         index: active.index,
