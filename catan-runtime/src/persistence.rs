@@ -107,6 +107,12 @@ impl OutputObserver for PersistenceObserver {
         let GameOutput::Event(record) = frame.output else {
             return;
         };
+        if self.event_seq == 0
+            && let Some(policy) = self.checkpoints.as_mut()
+            && let Err(err) = policy.store.write_checkpoint_at(frame.engine, 0)
+        {
+            log::warn!("failed to write initial checkpoint: {err}");
+        }
         self.event_seq += 1;
         let record = JournalRecord {
             schema: "rusty-catan.journal.v1".to_owned(),

@@ -486,6 +486,11 @@ impl GameEngine {
         &self.core
     }
 
+    pub fn replay_event(&mut self, event: &GameEvent) -> Result<(), EngineError> {
+        reducer::reduce(&mut self.core, event)?;
+        Ok(())
+    }
+
     pub fn is_started(&self) -> bool {
         self.core
             .as_active()
