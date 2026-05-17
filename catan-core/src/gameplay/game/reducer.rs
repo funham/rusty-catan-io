@@ -14,6 +14,7 @@ use crate::gameplay::{
         resource::ResourceCollection,
     },
 };
+use crate::{algorithm, math::dice::DiceOutcome};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReplayError {
@@ -179,10 +180,16 @@ pub fn reduce(lifecycle: &mut EngineCore, event: &GameEvent) -> Result<(), Repla
             }
             active.stats.resources_distributed += 1;
         }
-        GameEvent::DiceRolled { .. } => {
+        GameEvent::DiceRolled { player_id, value } => {
             let active = lifecycle
                 .active_mut()
                 .ok_or(ReplayError::ExpectedActiveLifecycle)?;
+            if matches!(value.resolve(), DiceOutcome::Seven) {
+                active.pending_discards =
+                    algorithm::player_order_from(*player_id, active.game.players.count())
+                        .filter(|pid| active.game.players.get(*pid).resources().total() > 7)
+                        .collect();
+            }
             active.stats.dice_rolls += 1;
         }
         GameEvent::ResourceStolen {
@@ -426,6 +433,9 @@ pub fn reduce(lifecycle: &mut EngineCore, event: &GameEvent) -> Result<(), Repla
                 .game
                 .transfer_to_bank(*resources, *player_id)
                 .map_err(|_| ReplayError::InvalidResourceTransfer)?;
+            if active.pending_discards.first() == Some(player_id) {
+                active.pending_discards.remove(0);
+            }
             active.stats.player_discards += 1;
         }
         GameEvent::RobberMoved { hex, .. } => {

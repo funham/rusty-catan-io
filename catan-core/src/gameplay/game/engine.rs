@@ -297,12 +297,14 @@ impl GameEngine {
         sink: &mut impl OutputSink,
     ) -> Result<GameStatus, EngineError> {
         if matches!(input, GameInput::Submit { .. }) {
+            let context = crate::gameplay::game::decider::DecisionContext {
+                max_turns: self.runtime.max_turns,
+                dice_roll: self.dice_roll_for_decider(&input),
+            };
             let events = crate::gameplay::game::decider::decide_with_context(
                 &self.core,
                 input.clone(),
-                crate::gameplay::game::decider::DecisionContext {
-                    max_turns: self.runtime.max_turns,
-                },
+                context,
             );
             if !events.is_empty() {
                 let tx_id = self.runtime.current_tx_id;
@@ -343,6 +345,35 @@ impl GameEngine {
                 command,
             } => self.apply_submit(player_id, decision_id, command, sink),
         })
+    }
+
+    fn dice_roll_for_decider(&mut self, input: &GameInput) -> Option<DiceRoll> {
+        let GameInput::Submit {
+            player_id,
+            decision_id,
+            command,
+        } = input
+        else {
+            return None;
+        };
+        let active = self.core.as_active()?;
+        let decision = active.pending.get(*decision_id)?;
+        if decision.player_id != *player_id {
+            return None;
+        }
+        match (decision.kind, command) {
+            (
+                DecisionKind::InitCommand,
+                PlayerCommand::InitCommand(crate::gameplay::game::command::InitCommand::RollDice),
+            )
+            | (
+                DecisionKind::PostDevCardCommand,
+                PlayerCommand::PostDevCard(
+                    crate::gameplay::game::command::PostDevCardCommand::RollDice,
+                ),
+            ) => Some(self.roll_dice()),
+            _ => None,
+        }
     }
 
     fn transition_from_outputs(

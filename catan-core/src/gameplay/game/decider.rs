@@ -17,10 +17,15 @@ use crate::gameplay::{
         trade::{BankTrade, BankTradeKind},
     },
 };
+use crate::{
+    algorithm,
+    math::dice::{DiceOutcome, DiceRoll},
+};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DecisionContext {
     pub max_turns: Option<u64>,
+    pub dice_roll: Option<DiceRoll>,
 }
 
 pub fn decide(lifecycle: &EngineCore, input: GameInput) -> EventBatch {
@@ -117,10 +122,99 @@ fn decide_submit(
         (DecisionKind::RegularCommand, PlayerCommand::Regular(RegularCommand::Build(build))) => {
             decide_build(active, decision, build, &mut events);
         }
+        (
+            DecisionKind::InitCommand,
+            PlayerCommand::InitCommand(crate::gameplay::game::command::InitCommand::RollDice),
+        ) => {
+            decide_roll_dice(
+                active,
+                decision,
+                DecisionKind::PostDiceCommand,
+                context,
+                &mut events,
+            );
+        }
+        (
+            DecisionKind::PostDevCardCommand,
+            PlayerCommand::PostDevCard(
+                crate::gameplay::game::command::PostDevCardCommand::RollDice,
+            ),
+        ) => {
+            decide_roll_dice(
+                active,
+                decision,
+                DecisionKind::RegularCommand,
+                context,
+                &mut events,
+            );
+        }
         _ => {}
     }
 
     events
+}
+
+fn decide_roll_dice(
+    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    decision: OpenDecision,
+    next_kind: DecisionKind,
+    context: DecisionContext,
+    events: &mut EventBatch,
+) {
+    let Some(roll) = context.dice_roll else {
+        return;
+    };
+    let player_id = decision.player_id;
+    events.push(GameEvent::DecisionClosed {
+        decision_id: decision.id,
+    });
+    events.push(GameEvent::DiceRolled {
+        player_id,
+        value: roll,
+    });
+    match roll.resolve() {
+        DiceOutcome::Harvest(num) => {
+            events.push(GameEvent::ResourcesDistributed {
+                by_player: algorithm::resource_distribution_for_roll(&active.game, player_id, num),
+            });
+            events.push(GameEvent::DecisionOpened(OpenDecision {
+                id: DecisionId(active.next_decision_id),
+                player_id,
+                kind: next_kind,
+                lifetime: DecisionLifetime::OneShot,
+            }));
+        }
+        DiceOutcome::Seven => {
+            open_next_discard_or_robber(active, player_id, events);
+        }
+    }
+}
+
+fn open_next_discard_or_robber(
+    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    robber_player: crate::gameplay::primitives::player::PlayerId,
+    events: &mut EventBatch,
+) {
+    let first_discard = active.pending_discards.first().copied().or_else(|| {
+        algorithm::player_order_from(robber_player, active.game.players.count())
+            .find(|pid| active.game.players.get(*pid).resources().total() > 7)
+    });
+    if let Some(player_id) = first_discard {
+        let required = active.game.players.get(player_id).resources().total() / 2;
+        events.push(GameEvent::DecisionOpened(OpenDecision {
+            id: DecisionId(active.next_decision_id),
+            player_id,
+            kind: DecisionKind::DropHalf { required },
+            lifetime: DecisionLifetime::OneShot,
+        }));
+    } else {
+        events.push(GameEvent::DecisionOpened(OpenDecision {
+            id: DecisionId(active.next_decision_id),
+            player_id: robber_player,
+            kind: DecisionKind::MoveRobber,
+            lifetime: DecisionLifetime::OneShot,
+        }));
+    }
 }
 
 fn decide_build(

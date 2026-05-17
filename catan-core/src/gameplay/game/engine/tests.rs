@@ -23,6 +23,7 @@ use crate::{
             trade::{BankTrade, BankTradeKind, PlayerTrade, PublicTradeOffer},
         },
     },
+    math::dice::DiceRoll,
     topology::Hex,
 };
 
@@ -514,6 +515,101 @@ fn decider_valid_build_emits_build_and_reopens_regular_decision() {
         ] if *decision_id == decision.id
             && matches!((emitted, build), (Build::Road(left), Build::Road(right)) if left.path == right.path)
             && id.0 == 8
+    ));
+}
+
+#[test]
+fn decider_roll_dice_harvest_emits_complete_facts() {
+    let mut lifecycle = EngineCore::active(GameInitializationState::default().finish());
+    let decision = OpenDecision {
+        id: crate::gameplay::game::decision::DecisionId(7),
+        player_id: P0,
+        kind: DecisionKind::InitCommand,
+        lifetime: DecisionLifetime::OneShot,
+    };
+    let active = lifecycle.active_mut().expect("lifecycle should be active");
+    active.phase = GamePhase::Turn(crate::gameplay::game::phase::TurnPhase::InitCommand);
+    active.next_decision_id = 8;
+    active.pending.push(decision.clone());
+
+    let events = decider::decide_with_context(
+        &lifecycle,
+        GameInput::Submit {
+            player_id: P0,
+            decision_id: decision.id,
+            command: PlayerCommand::InitCommand(
+                crate::gameplay::game::command::InitCommand::RollDice,
+            ),
+        },
+        decider::DecisionContext {
+            max_turns: None,
+            dice_roll: Some(DiceRoll::eight()),
+        },
+    );
+
+    assert!(matches!(
+        events.as_slice(),
+        [
+            GameEvent::DecisionClosed { decision_id },
+            GameEvent::DiceRolled {
+                player_id: P0,
+                value,
+            },
+            GameEvent::ResourcesDistributed { .. },
+            GameEvent::DecisionOpened(OpenDecision {
+                id,
+                player_id: P0,
+                kind: DecisionKind::PostDiceCommand,
+                lifetime: DecisionLifetime::OneShot,
+            }),
+        ] if *decision_id == decision.id && *value == DiceRoll::eight() && id.0 == 8
+    ));
+}
+
+#[test]
+fn decider_roll_dice_seven_opens_discard_or_robber_decision() {
+    let mut lifecycle = EngineCore::active(GameInitializationState::default().finish());
+    let decision = OpenDecision {
+        id: crate::gameplay::game::decision::DecisionId(7),
+        player_id: P0,
+        kind: DecisionKind::InitCommand,
+        lifetime: DecisionLifetime::OneShot,
+    };
+    let active = lifecycle.active_mut().expect("lifecycle should be active");
+    active.phase = GamePhase::Turn(crate::gameplay::game::phase::TurnPhase::InitCommand);
+    active.next_decision_id = 8;
+    active.pending.push(decision.clone());
+
+    let events = decider::decide_with_context(
+        &lifecycle,
+        GameInput::Submit {
+            player_id: P0,
+            decision_id: decision.id,
+            command: PlayerCommand::InitCommand(
+                crate::gameplay::game::command::InitCommand::RollDice,
+            ),
+        },
+        decider::DecisionContext {
+            max_turns: None,
+            dice_roll: Some(DiceRoll::seven()),
+        },
+    );
+
+    assert!(matches!(
+        events.as_slice(),
+        [
+            GameEvent::DecisionClosed { decision_id },
+            GameEvent::DiceRolled {
+                player_id: P0,
+                value,
+            },
+            GameEvent::DecisionOpened(OpenDecision {
+                id,
+                player_id: P0,
+                kind: DecisionKind::MoveRobber,
+                lifetime: DecisionLifetime::OneShot,
+            }),
+        ] if *decision_id == decision.id && *value == DiceRoll::seven() && id.0 == 8
     ));
 }
 
