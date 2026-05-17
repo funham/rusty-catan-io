@@ -235,6 +235,8 @@ mod tests {
         event::GameEvent,
     };
 
+    const P0: PlayerId = PlayerId::new(0);
+
     #[test]
     fn bot_seat_responds_immediately() {
         let init = GameInitializationState::default();
@@ -281,7 +283,7 @@ mod tests {
     fn human_like_seat_can_submit_later() {
         let init = GameInitializationState::default();
         let seats: Vec<Box<dyn Seat>> = vec![Box::new(RecordingSeat {
-            id: 0,
+            id: P0,
             decision: None,
         })];
         let mut host = SyncGameHost::new(init, seats, RunOptions::default());

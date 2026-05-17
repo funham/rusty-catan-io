@@ -30,10 +30,15 @@ mod tests {
             },
             primitives::{
                 dev_card::{DevCardKind, DevCardUsage, UsableDevCard},
+                player::PlayerId,
                 resource::{Resource, ResourceCollection},
             },
         },
     };
+
+    const P0: PlayerId = PlayerId::new(0);
+    const P1: PlayerId = PlayerId::new(1);
+    const P2: PlayerId = PlayerId::new(2);
 
     #[test]
     fn frame_round_trip() {
@@ -92,11 +97,11 @@ mod tests {
 
     #[test]
     fn cli_role_helpers_describe_observer_and_snapshot_behavior() {
-        assert!(!CliRole::Player { player_id: 0 }.is_observer());
+        assert!(!CliRole::Player { player_id: P0 }.is_observer());
         assert!(CliRole::SnapshotObserver.is_observer());
         assert_eq!(
-            CliRole::PlayerObserver { player_id: 2 }.observer_kind(),
-            Some(ObserverKind::Player(2))
+            CliRole::PlayerObserver { player_id: P2 }.observer_kind(),
+            Some(ObserverKind::Player(P2))
         );
         assert_eq!(
             CliRole::SnapshotObserver.observer_kind(),
@@ -119,7 +124,7 @@ mod tests {
             index: &index,
             visibility: &visibility,
         };
-        let model = UiModel::from_decision(&factory.player_decision_context(0, None));
+        let model = UiModel::from_decision(&factory.player_decision_context(P0, None));
         let msg = HostToCli::Hello {
             role: CliRole::Spectator,
         };
@@ -157,8 +162,8 @@ mod tests {
             index: &index,
             visibility: &visibility,
         };
-        let search = Some(SearchFactory::new(&state, visibility.player_policy(0), 0));
-        let context = factory.player_decision_context(0, search);
+        let search = Some(SearchFactory::new(&state, visibility.player_policy(P0), P0));
+        let context = factory.player_decision_context(P0, search);
         let legal = LegalDecisionOptions::from_context(&context, None);
 
         assert!(!legal.initial_placements.is_empty());
@@ -214,12 +219,12 @@ mod tests {
             index: &index,
             visibility: &visibility,
         };
-        let search = Some(SearchFactory::new(&state, visibility.player_policy(0), 0));
-        let context = factory.player_decision_context(0, search);
+        let search = Some(SearchFactory::new(&state, visibility.player_policy(P0), P0));
+        let context = factory.player_decision_context(P0, search);
         let legal = LegalDecisionOptions::from_context(&context, Some(victim_hex));
 
         assert_eq!(legal.robber_pos, Some(victim_hex));
-        assert!(legal.rob_targets.contains(&1));
+        assert!(legal.rob_targets.contains(&P1));
         assert!(!legal.robber_hexes.contains(&state.board_state.robber_pos));
     }
 
@@ -325,7 +330,7 @@ mod tests {
             &mut bytes,
             &HostToCli::Event {
                 event: GameEvent::InitialPlacementBuilt {
-                    player_id: 0,
+                    player_id: P0,
                     settlement: settlement.vtx,
                     road,
                 },

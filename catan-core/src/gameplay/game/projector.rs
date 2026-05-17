@@ -49,16 +49,19 @@ mod tests {
             event::{EventCause, EventTransaction, GameEvent},
             output::GameOutput,
         },
-        primitives::dev_card::DevCardKind,
+        primitives::{dev_card::DevCardKind, player::PlayerId},
     };
 
     use super::project_transaction;
+
+    const P1: PlayerId = PlayerId::new(1);
+    const P2: PlayerId = PlayerId::new(2);
 
     #[test]
     fn transaction_projection_preserves_tx_id_and_visibility() {
         let mut transaction = EventTransaction::new(9, EventCause::Start);
         transaction.events.push(GameEvent::DevCardDrawn {
-            player_id: 2,
+            player_id: P2,
             card: DevCardKind::VictoryPoint,
         });
 
@@ -70,7 +73,7 @@ mod tests {
         assert_eq!(record.tx_id, 9);
         assert!(matches!(
             record.event,
-            GameEvent::DevCardDrawn { player_id: 2, .. }
+            GameEvent::DevCardDrawn { player_id: P2, .. }
         ));
     }
 
@@ -85,7 +88,7 @@ mod tests {
             .events
             .push(GameEvent::DecisionOpened(OpenDecision {
                 id: DecisionId(3),
-                player_id: 1,
+                player_id: P1,
                 kind: DecisionKind::InitPlacement,
                 lifetime: DecisionLifetime::OneShot,
             }));

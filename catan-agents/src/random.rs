@@ -36,22 +36,25 @@ pub struct RandomAgent<R = SmallRng> {
 
 impl Default for RandomAgent {
     fn default() -> Self {
-        Self::new(0)
+        Self::new(PlayerId::new(0))
     }
 }
 
 impl RandomAgent {
-    pub fn new(id: PlayerId) -> Self {
+    pub fn new(id: impl Into<PlayerId>) -> Self {
+        let id = id.into();
         Self::with_rng(id, SmallRng::from_rng(&mut rand::rng()))
     }
 
-    pub fn with_seed(id: PlayerId, seed: u64) -> Self {
+    pub fn with_seed(id: impl Into<PlayerId>, seed: u64) -> Self {
+        let id = id.into();
         Self::with_rng(id, SmallRng::seed_from_u64(seed))
     }
 }
 
 impl<R> RandomAgent<R> {
-    pub fn with_rng(id: PlayerId, rng: R) -> Self {
+    pub fn with_rng(id: impl Into<PlayerId>, rng: R) -> Self {
+        let id = id.into();
         Self { id, rng }
     }
 }
@@ -108,7 +111,9 @@ impl<R: Rng> BotPolicy for RandomAgent<R> {
             DecisionKind::InitPlacement => Some(PlayerCommand::InitialPlacement(
                 self.init_stage_action(context),
             )),
-            DecisionKind::InitCommand => Some(PlayerCommand::InitCommand(self.init_action(context))),
+            DecisionKind::InitCommand => {
+                Some(PlayerCommand::InitCommand(self.init_action(context)))
+            }
             DecisionKind::PostDiceCommand => {
                 Some(PlayerCommand::PostDice(self.after_dice_action(context)))
             }

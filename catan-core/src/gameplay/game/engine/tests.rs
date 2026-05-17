@@ -16,12 +16,18 @@ use crate::{
         },
         primitives::{
             dev_card::DevCardKind,
+            player::PlayerId,
             resource::{Resource, ResourceCollection},
             trade::{BankTrade, BankTradeKind, PlayerTrade, PublicTradeOffer},
         },
     },
     topology::Hex,
 };
+
+const P0: PlayerId = PlayerId::new(0);
+const P1: PlayerId = PlayerId::new(1);
+const P2: PlayerId = PlayerId::new(2);
+const P99: PlayerId = PlayerId::new(99);
 
 fn one_brick() -> ResourceCollection {
     ResourceCollection {
@@ -142,7 +148,7 @@ fn reducer_replays_initial_placement_event() {
     reducer::reduce(
         &mut lifecycle,
         &GameEvent::InitialPlacementBuilt {
-            player_id: 0,
+            player_id: P0,
             settlement: settlement.vtx,
             road,
         },
@@ -158,7 +164,7 @@ fn reducer_replays_initial_placement_event() {
 fn reducer_applies_explicit_resource_distribution_event() {
     let mut lifecycle = EngineCore::active(GameInitializationState::default().finish());
     let mut by_player = smallvec::SmallVec::new();
-    by_player.push((0, one_brick()));
+    by_player.push((P0, one_brick()));
 
     reducer::reduce(
         &mut lifecycle,
@@ -178,7 +184,7 @@ fn reducer_applies_initial_resource_grant_event() {
     reducer::reduce(
         &mut lifecycle,
         &GameEvent::InitialResourcesGranted {
-            player_id: 0,
+            player_id: P0,
             resources: one_brick(),
         },
     )
@@ -203,8 +209,8 @@ fn reducer_applies_explicit_resource_stolen_event() {
     reducer::reduce(
         &mut lifecycle,
         &GameEvent::ResourceStolen {
-            player_id: 0,
-            robbed_id: 1,
+            player_id: P0,
+            robbed_id: P1,
             resource: Resource::Brick,
         },
     )
@@ -229,7 +235,7 @@ fn reducer_applies_discard_robber_and_turn_events() {
     reducer::reduce(
         &mut lifecycle,
         &GameEvent::PlayerDiscarded {
-            player_id: 0,
+            player_id: P0,
             resources: one_brick(),
         },
     )
@@ -237,7 +243,7 @@ fn reducer_applies_discard_robber_and_turn_events() {
     reducer::reduce(
         &mut lifecycle,
         &GameEvent::RobberMoved {
-            player_id: 0,
+            player_id: P0,
             hex: target_hex,
             robbed_id: None,
         },
@@ -246,7 +252,7 @@ fn reducer_applies_discard_robber_and_turn_events() {
     reducer::reduce(
         &mut lifecycle,
         &GameEvent::TurnEnded {
-            player_id: 0,
+            player_id: P0,
             turn_no: 0,
         },
     )
@@ -278,7 +284,7 @@ fn reducer_applies_bank_trade_event_with_exact_exchange() {
     reducer::reduce(
         &mut lifecycle,
         &GameEvent::BankTradeCompleted {
-            player_id: 0,
+            player_id: P0,
             trade: BankTrade {
                 kind: BankTradeKind::BankGeneric,
                 give: Resource::Brick,
@@ -368,7 +374,7 @@ fn wrong_player_is_rejected_without_closing_decision() {
 
     let status = engine.apply(
         GameInput::Submit {
-            player_id: 1,
+            player_id: P1,
             decision_id: decision.id,
             command: PlayerCommand::MoveRobbers(crate::gameplay::game::command::MoveRobberCommand(
                 Hex::new(0, 0),
@@ -382,9 +388,9 @@ fn wrong_player_is_rejected_without_closing_decision() {
         matches!(
             output,
             GameOutput::CommandRejected {
-                player_id: 1,
+                player_id: P1,
                 decision_id: Some(id),
-                reason: CommandRejectionReason::WrongPlayer { expected: 0 },
+                reason: CommandRejectionReason::WrongPlayer { expected: P0 },
             } if *id == decision.id
         )
     }));
@@ -398,7 +404,7 @@ fn wrong_player_rejection_emits_domain_command_rejected_event() {
 
     engine.apply(
         GameInput::Submit {
-            player_id: 1,
+            player_id: P1,
             decision_id: decision.id,
             command: PlayerCommand::MoveRobbers(crate::gameplay::game::command::MoveRobberCommand(
                 Hex::new(0, 0),
@@ -411,9 +417,9 @@ fn wrong_player_rejection_emits_domain_command_rejected_event() {
         matches!(
             output_event(output),
             Some(GameEvent::CommandRejected {
-                player_id: 1,
+                player_id: P1,
                 decision_id: Some(id),
-                reason: CommandRejectionReason::WrongPlayer { expected: 0 },
+                reason: CommandRejectionReason::WrongPlayer { expected: P0 },
                 counts_toward_limit: false,
             }) if *id == decision.id
         )
@@ -425,7 +431,7 @@ fn stale_decision_is_rejected_after_one_shot_closes() {
     let (mut engine, outputs) = started_engine();
     let decision = first_open_decision(&outputs);
     let placement = engine
-        .legal_initial_placements(0)
+        .legal_initial_placements(P0)
         .into_iter()
         .next()
         .expect("default board should have an initial placement");
@@ -433,7 +439,7 @@ fn stale_decision_is_rejected_after_one_shot_closes() {
 
     engine.apply(
         GameInput::Submit {
-            player_id: 0,
+            player_id: P0,
             decision_id: decision.id,
             command: PlayerCommand::InitialPlacement(placement),
         },
@@ -442,7 +448,7 @@ fn stale_decision_is_rejected_after_one_shot_closes() {
     let mut stale_sink = VecOutputSink::default();
     engine.apply(
         GameInput::Submit {
-            player_id: 0,
+            player_id: P0,
             decision_id: decision.id,
             command: PlayerCommand::InitialPlacement(placement),
         },
@@ -453,7 +459,7 @@ fn stale_decision_is_rejected_after_one_shot_closes() {
         matches!(
             output,
             GameOutput::CommandRejected {
-                player_id: 0,
+                player_id: P0,
                 decision_id: Some(id),
                 reason: CommandRejectionReason::StaleDecision,
             } if *id == decision.id
@@ -480,7 +486,7 @@ fn buying_dev_card_emits_private_drawn_card_event() {
 
     engine.apply(
         GameInput::Submit {
-            player_id: 0,
+            player_id: P0,
             decision_id: decision.id,
             command: PlayerCommand::Regular(
                 crate::gameplay::game::command::RegularCommand::BuyDevCard,
@@ -493,7 +499,7 @@ fn buying_dev_card_emits_private_drawn_card_event() {
         matches!(
             output_event(output),
             Some(GameEvent::DevCardDrawn {
-                player_id: 0,
+                player_id: P0,
                 card: DevCardKind::VictoryPoint,
             })
         )
@@ -510,7 +516,7 @@ fn moving_robber_emits_stolen_resource_event() {
 
     engine.apply(
         GameInput::Submit {
-            player_id: 0,
+            player_id: P0,
             decision_id: decision.id,
             command: PlayerCommand::MoveRobbers(crate::gameplay::game::command::MoveRobberCommand(
                 victim_hex,
@@ -523,8 +529,8 @@ fn moving_robber_emits_stolen_resource_event() {
         matches!(
             output_event(output),
             Some(GameEvent::ResourceStolen {
-                player_id: 0,
-                robbed_id: 1,
+                player_id: P0,
+                robbed_id: P1,
                 resource: Resource::Brick,
             })
         )
@@ -542,7 +548,7 @@ fn reusable_trade_response_decision_can_be_updated_until_session_closes() {
     let owner_decision = engine.open_decision_for_test(0, DecisionKind::RegularCommand);
     engine.apply(
         GameInput::Submit {
-            player_id: 0,
+            player_id: P0,
             decision_id: owner_decision.id,
             command: PlayerCommand::Trade(TradeCommand::Propose {
                 scope: TradeScope::Public,
@@ -572,7 +578,7 @@ fn reusable_trade_response_decision_can_be_updated_until_session_closes() {
     let mut update_sink = VecOutputSink::default();
     engine.apply(
         GameInput::Submit {
-            player_id: 1,
+            player_id: P1,
             decision_id: response_decision.id,
             command: PlayerCommand::Trade(TradeCommand::Respond(TradeResponseCommand::Accept {
                 offer_id: 0.into(),
@@ -582,7 +588,7 @@ fn reusable_trade_response_decision_can_be_updated_until_session_closes() {
     );
     engine.apply(
         GameInput::Submit {
-            player_id: 1,
+            player_id: P1,
             decision_id: response_decision.id,
             command: PlayerCommand::Trade(TradeCommand::Respond(TradeResponseCommand::Reject)),
         },
@@ -624,7 +630,7 @@ fn trade_commit_revalidates_resources_and_rejects_missing_resources() {
 
     engine.apply(
         GameInput::Submit {
-            player_id: 0,
+            player_id: P0,
             decision_id: owner.id,
             command: PlayerCommand::Trade(TradeCommand::Commit { offer_id: offer }),
         },
@@ -635,7 +641,7 @@ fn trade_commit_revalidates_resources_and_rejects_missing_resources() {
         matches!(
             output,
             GameOutput::CommandRejected {
-                player_id: 0,
+                player_id: P0,
                 reason: CommandRejectionReason::IllegalCommand(_),
                 ..
             }
@@ -652,7 +658,7 @@ fn same_resource_on_both_sides_is_rejected() {
 
     engine.apply(
         GameInput::Submit {
-            player_id: 0,
+            player_id: P0,
             decision_id: owner.id,
             command: PlayerCommand::Trade(TradeCommand::Propose {
                 scope: TradeScope::Public,
@@ -693,7 +699,7 @@ fn player_can_reject_trade() {
 
     engine.apply(
         GameInput::Submit {
-            player_id: 1,
+            player_id: P1,
             decision_id: response.id,
             command: PlayerCommand::Trade(TradeCommand::Respond(TradeResponseCommand::Reject)),
         },
@@ -705,7 +711,7 @@ fn player_can_reject_trade() {
             output_event(output),
             Some(GameEvent::TradeResponseUpdated {
                 session_id,
-                player_id: 1,
+                player_id: P1,
                 response: crate::gameplay::game::trade::TradeResponseState::Rejected,
             }) if *session_id == session
         )
@@ -729,7 +735,7 @@ fn player_can_counter_trade() {
 
     engine.apply(
         GameInput::Submit {
-            player_id: 1,
+            player_id: P1,
             decision_id: response.id,
             command: PlayerCommand::Trade(TradeCommand::Respond(TradeResponseCommand::Counter {
                 offer: PlayerTrade {
@@ -747,7 +753,7 @@ fn player_can_counter_trade() {
             output_event(output),
             Some(GameEvent::TradeOfferAdded {
                 session_id,
-                player_id: 1,
+                player_id: P1,
                 ..
             }) if *session_id == session
         )
@@ -757,7 +763,7 @@ fn player_can_counter_trade() {
             output_event(output),
             Some(GameEvent::TradeResponseUpdated {
                 session_id,
-                player_id: 1,
+                player_id: P1,
                 response: crate::gameplay::game::trade::TradeResponseState::Countered { .. },
             }) if *session_id == session
         )
@@ -785,7 +791,7 @@ fn active_player_can_commit_accepted_offer() {
 
     engine.apply(
         GameInput::Submit {
-            player_id: 0,
+            player_id: P0,
             decision_id: owner.id,
             command: PlayerCommand::Trade(TradeCommand::Commit { offer_id: offer }),
         },
@@ -799,8 +805,8 @@ fn active_player_can_commit_accepted_offer() {
             output_event(output),
             Some(GameEvent::TradeCompleted {
                 session_id,
-                proposer_id: 0,
-                peer_id: 1,
+                proposer_id: P0,
+                peer_id: P1,
                 offer_id: completed,
             }) if *session_id == session && *completed == offer
         )
@@ -825,7 +831,7 @@ fn active_player_can_cancel_trade_and_close_trade_decisions() {
 
     engine.apply(
         GameInput::Submit {
-            player_id: 0,
+            player_id: P0,
             decision_id: owner.id,
             command: PlayerCommand::Trade(TradeCommand::Cancel),
         },
@@ -850,7 +856,7 @@ fn active_player_can_cancel_trade_and_close_trade_decisions() {
             output_event(output),
             Some(GameEvent::TradeCancelled {
                 session_id,
-                proposer_id: 0,
+                proposer_id: P0,
             }) if *session_id == session
         )
     }));
@@ -874,7 +880,7 @@ fn player_cannot_accept_another_players_counteroffer() {
 
     engine.apply(
         GameInput::Submit {
-            player_id: 1,
+            player_id: P1,
             decision_id: countering_player.id,
             command: PlayerCommand::Trade(TradeCommand::Respond(TradeResponseCommand::Counter {
                 offer: PlayerTrade {
@@ -901,7 +907,7 @@ fn player_cannot_accept_another_players_counteroffer() {
 
     engine.apply(
         GameInput::Submit {
-            player_id: 2,
+            player_id: P2,
             decision_id: other_player.id,
             command: PlayerCommand::Trade(TradeCommand::Respond(TradeResponseCommand::Accept {
                 offer_id: counter_offer_id,
@@ -914,7 +920,7 @@ fn player_cannot_accept_another_players_counteroffer() {
         matches!(
             output,
             GameOutput::CommandRejected {
-                player_id: 2,
+                player_id: P2,
                 reason: CommandRejectionReason::IllegalCommand(_),
                 ..
             }
@@ -931,10 +937,10 @@ fn targeted_trade_rejects_invalid_target() {
 
     engine.apply(
         GameInput::Submit {
-            player_id: 0,
+            player_id: P0,
             decision_id: owner.id,
             command: PlayerCommand::Trade(TradeCommand::Propose {
-                scope: TradeScope::Targeted(99),
+                scope: TradeScope::Targeted(P99),
                 offer: PublicTradeOffer {
                     give: one_brick(),
                     take: one_wood(),
@@ -948,7 +954,7 @@ fn targeted_trade_rejects_invalid_target() {
         matches!(
             output,
             GameOutput::CommandRejected {
-                player_id: 0,
+                player_id: P0,
                 reason: CommandRejectionReason::IllegalCommand(_),
                 ..
             }
@@ -965,9 +971,11 @@ fn submit_after_game_end_is_rejected_without_mutation() {
 
     let status = engine.apply(
         GameInput::Submit {
-            player_id: 0,
+            player_id: P0,
             decision_id: decision.id,
-            command: PlayerCommand::Regular(crate::gameplay::game::command::RegularCommand::EndMove),
+            command: PlayerCommand::Regular(
+                crate::gameplay::game::command::RegularCommand::EndMove,
+            ),
         },
         &mut sink,
     );
@@ -977,7 +985,7 @@ fn submit_after_game_end_is_rejected_without_mutation() {
         matches!(
             output,
             GameOutput::CommandRejected {
-                player_id: 0,
+                player_id: P0,
                 reason: CommandRejectionReason::GameEnded,
                 ..
             }

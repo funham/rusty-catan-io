@@ -90,27 +90,31 @@ mod tests {
             event::{EventCause, EventTransaction, EventVisibility, GameEvent},
             output::GameEventRecord,
         },
-        primitives::{dev_card::DevCardKind, resource::Resource},
+        primitives::{dev_card::DevCardKind, player::PlayerId, resource::Resource},
     };
+
+    const P0: PlayerId = PlayerId::new(0);
+    const P1: PlayerId = PlayerId::new(1);
+    const P2: PlayerId = PlayerId::new(2);
 
     #[test]
     fn event_visibility_marks_private_events() {
         let dev_card = EventVisibility::for_event(&GameEvent::DevCardDrawn {
-            player_id: 1,
+            player_id: P1,
             card: DevCardKind::VictoryPoint,
         });
         let mut expected_dev_card = smallvec::SmallVec::new();
-        expected_dev_card.push(1);
+        expected_dev_card.push(P1);
         assert_eq!(dev_card, EventVisibility::PrivateTo(expected_dev_card));
 
         let stolen = EventVisibility::for_event(&GameEvent::ResourceStolen {
-            player_id: 0,
-            robbed_id: 2,
+            player_id: P0,
+            robbed_id: P2,
             resource: Resource::Brick,
         });
         let mut expected_stolen = smallvec::SmallVec::new();
-        expected_stolen.push(0);
-        expected_stolen.push(2);
+        expected_stolen.push(P0);
+        expected_stolen.push(P2);
         assert_eq!(stolen, EventVisibility::PrivateTo(expected_stolen));
 
         assert_eq!(

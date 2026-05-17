@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     gameplay::game::command::{
-        ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, InitialPlacementCommand, MoveRobberCommand,
-        PostDevCardCommand, PostDiceCommand, RegularCommand,
+        ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, InitialPlacementCommand,
+        MoveRobberCommand, PostDevCardCommand, PostDiceCommand, RegularCommand,
     },
     gameplay::primitives::{
         player::PlayerId,

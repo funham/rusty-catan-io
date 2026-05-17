@@ -25,7 +25,8 @@ pub struct LazyAgent {
 }
 
 impl LazyAgent {
-    pub fn new(id: PlayerId) -> Self {
+    pub fn new(id: impl Into<PlayerId>) -> Self {
+        let id = id.into();
         Self { id }
     }
 }
@@ -82,7 +83,9 @@ impl BotPolicy for LazyAgent {
             DecisionKind::InitPlacement => Some(PlayerCommand::InitialPlacement(
                 self.init_stage_action(context),
             )),
-            DecisionKind::InitCommand => Some(PlayerCommand::InitCommand(self.init_action(context))),
+            DecisionKind::InitCommand => {
+                Some(PlayerCommand::InitCommand(self.init_action(context)))
+            }
             DecisionKind::PostDiceCommand => {
                 Some(PlayerCommand::PostDice(self.after_dice_action(context)))
             }

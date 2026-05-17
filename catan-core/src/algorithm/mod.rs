@@ -23,9 +23,11 @@ use crate::{
 
 pub fn player_order_from(
     start_id: PlayerId,
-    player_count: PlayerId,
+    player_count: usize,
 ) -> impl Iterator<Item = PlayerId> {
-    (start_id..player_count).chain(0..start_id)
+    (start_id.index()..player_count)
+        .chain(0..start_id.index())
+        .map(|id| PlayerId::try_from(id).expect("player count should fit in u8"))
 }
 
 pub fn is_player_on_hex(hex: Hex, builds: &PlayerBuildData) -> bool {
@@ -39,9 +41,10 @@ pub fn players_on_hex<'a>(
     hex: Hex,
     builds: impl Iterator<Item = &'a PlayerBuildData>,
 ) -> impl Iterator<Item = PlayerId> {
-    builds
-        .enumerate()
-        .filter_map(move |(id, builds)| is_player_on_hex(hex, builds).then_some(id))
+    builds.enumerate().filter_map(move |(id, builds)| {
+        is_player_on_hex(hex, builds)
+            .then(|| PlayerId::try_from(id).expect("player count should fit in u8"))
+    })
 }
 
 pub fn robbery_candidates<'a>(
@@ -115,7 +118,8 @@ pub fn get_ports_acquired(
     for id in 0..builds.players().len() {
         let mut set = SmallSet::new();
 
-        for est in builds.by_player(id).establishments.iter() {
+        let player_id = PlayerId::try_from(id).expect("player count should fit in u8");
+        for est in builds.by_player(player_id).establishments.iter() {
             if let Some(port) = ports.get(&est.vtx) {
                 set.insert(*port);
             }

@@ -8,7 +8,10 @@ use crate::gameplay::{
         run::GameResult,
         trade::TradeSession,
     },
-    primitives::build::{Build, Establishment, EstablishmentType, Road},
+    primitives::{
+        build::{Build, Establishment, EstablishmentType, Road},
+        player::player_ids,
+    },
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -214,13 +217,15 @@ pub fn reduce(lifecycle: &mut EngineCore, event: &GameEvent) -> Result<(), Repla
                     }
                 }
                 crate::gameplay::primitives::dev_card::DevCardUsage::Monopoly(resource) => {
-                    for other_id in 0..active.game.players.count() {
+                    for other_id in player_ids(active.game.players.count()) {
                         if other_id == *player_id {
                             continue;
                         }
-                        let resources =
-                            (*resource, active.game.players.get(other_id).resources()[*resource])
-                                .into();
+                        let resources = (
+                            *resource,
+                            active.game.players.get(other_id).resources()[*resource],
+                        )
+                            .into();
                         active
                             .game
                             .players_resource_transfer(other_id, *player_id, resources)
@@ -319,7 +324,10 @@ pub fn reduce(lifecycle: &mut EngineCore, event: &GameEvent) -> Result<(), Repla
             session.open = false;
             active
                 .game
-                .players_resource_exchange((*proposer_id, offer.trade.give), (*peer_id, offer.trade.take))
+                .players_resource_exchange(
+                    (*proposer_id, offer.trade.give),
+                    (*peer_id, offer.trade.take),
+                )
                 .map_err(|_| ReplayError::InvalidResourceTransfer)?;
             active.phase = GamePhase::Turn(crate::gameplay::game::phase::TurnPhase::RegularCommand);
         }

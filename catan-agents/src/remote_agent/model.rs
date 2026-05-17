@@ -279,7 +279,8 @@ impl UiOmniscient {
                 .iter()
                 .enumerate()
                 .map(|(player_id, player)| UiPrivatePlayer {
-                    player_id,
+                    player_id: PlayerId::try_from(player_id)
+                        .expect("player count should fit in u8"),
                     resources: *player.resources(),
                     dev_cards: player.dev_cards().clone(),
                 })

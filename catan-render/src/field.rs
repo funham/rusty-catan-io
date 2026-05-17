@@ -329,7 +329,7 @@ impl FieldRenderer {
             RenderColor::Red,
             RenderColor::Ansi256(172),
         ];
-        COLORS[player_id % COLORS.len()]
+        COLORS[player_id.index() % COLORS.len()]
     }
 
     pub fn resource_color(res: Resource) -> RenderColor {
@@ -516,10 +516,14 @@ impl From<Road> for FieldSelection {
 mod tests {
     use catan_core::{
         gameplay::game::action::InitStageAction, gameplay::game::init::GameInitializationState,
+        gameplay::primitives::player::PlayerId,
     };
 
     use super::*;
     use crate::model::{RenderBoard, RenderPlayerBuilds};
+
+    const P0: PlayerId = PlayerId::new(0);
+    const P1: PlayerId = PlayerId::new(1);
 
     #[test]
     fn renders_default_game_field() {
@@ -574,12 +578,12 @@ mod tests {
             board_state: init.board_state,
             builds: vec![
                 RenderPlayerBuilds {
-                    player_id: 0,
+                    player_id: P0,
                     establishments: vec![settlement],
                     roads: Vec::new(),
                 },
                 RenderPlayerBuilds {
-                    player_id: 1,
+                    player_id: P1,
                     establishments: Vec::new(),
                     roads: vec![road],
                 },

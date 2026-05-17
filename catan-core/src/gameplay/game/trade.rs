@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::gameplay::primitives::{
-    player::PlayerId,
+    player::{PlayerId, player_ids},
     resource::{Resource, ResourceCollection},
     trade::PlayerTrade,
 };
@@ -60,11 +60,11 @@ impl TradeSession {
         player_count: usize,
     ) -> Self {
         let mut responses = vec![None; player_count];
-        for player_id in 0..player_count {
+        for player_id in player_ids(player_count) {
             if player_id == proposer || !scope.includes(player_id) {
                 continue;
             }
-            responses[player_id] = Some(TradeResponseState::Waiting);
+            responses[player_id.index()] = Some(TradeResponseState::Waiting);
         }
 
         Self {
@@ -104,7 +104,7 @@ impl TradeSession {
     }
 
     pub fn set_response(&mut self, player_id: PlayerId, response: TradeResponseState) {
-        self.responses[player_id] = Some(response);
+        self.responses[player_id.index()] = Some(response);
         self.version += 1;
     }
 
@@ -117,7 +117,7 @@ impl TradeSession {
                 | Some(TradeResponseState::Countered { offer_id: accepted })
                     if *accepted == offer_id =>
                 {
-                    Some(player_id)
+                    Some(PlayerId::try_from(player_id).expect("player count should fit in u8"))
                 }
                 _ => None,
             })

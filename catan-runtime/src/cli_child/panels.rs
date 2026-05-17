@@ -153,7 +153,7 @@ pub(crate) fn snapshot_state_lines(model: &UiModel, width: u16) -> Vec<Line<'sta
     lines.extend(snapshot_turn_box_lines(model, width));
     lines.extend(snapshot_bank_box_lines(model, width));
 
-    for player_id in 0..state.players.count() {
+    for player_id in catan_core::gameplay::primitives::player::player_ids(state.players.count()) {
         lines.extend(snapshot_player_box_lines(model, player_id, width));
     }
 
@@ -649,13 +649,14 @@ fn dev_card_label_line() -> Line<'static> {
 }
 
 pub(crate) fn drop_personal_lines(
-    player_id: PlayerId,
+    player_id: impl Into<PlayerId>,
     resources: &ResourceCollection,
     dev_cards: &DevCardData,
     selected: &ResourceCollection,
     required: u16,
     selected_resource: usize,
 ) -> Vec<Line<'static>> {
+    let player_id = player_id.into();
     let mut lines = vec![
         Line::from(format!("you: p{player_id}")),
         Line::from(format!("drop {} / {} cards", selected.total(), required)),

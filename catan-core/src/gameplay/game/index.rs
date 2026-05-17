@@ -9,7 +9,7 @@ use crate::{
             PortKind,
             build::{Build, Establishment, EstablishmentType, Road},
             dev_card::DevCardUsage,
-            player::PlayerId,
+            player::{PlayerId, player_ids},
         },
     },
     topology::{Intersection, Path},
@@ -43,7 +43,13 @@ impl GameIndex {
         algorithm::get_ports_acquired(state.board.ports_intersection(), &state.builds)
     }
 
-    pub fn refresh_after_build(&mut self, state: &GameState, player_id: PlayerId, build: Build) {
+    pub fn refresh_after_build(
+        &mut self,
+        state: &GameState,
+        player_id: impl Into<PlayerId>,
+        build: Build,
+    ) {
+        let player_id = player_id.into();
         match build {
             Build::Road(road) => {
                 self.insert_road(player_id, road);
@@ -64,9 +70,10 @@ impl GameIndex {
     pub fn refresh_after_roadbuild(
         &mut self,
         state: &GameState,
-        player_id: PlayerId,
+        player_id: impl Into<PlayerId>,
         roads: [Path; 2],
     ) {
+        let player_id = player_id.into();
         for pos in roads {
             self.insert_road(player_id, Road { path: pos });
         }
@@ -78,9 +85,10 @@ impl GameIndex {
     pub fn refresh_after_dev_card(
         &mut self,
         state: &GameState,
-        player_id: PlayerId,
+        player_id: impl Into<PlayerId>,
         usage: &DevCardUsage,
     ) {
+        let player_id = player_id.into();
         match usage {
             DevCardUsage::Knight { .. } => {}
             DevCardUsage::RoadBuild(roads) => {
@@ -94,7 +102,7 @@ impl GameIndex {
     }
 
     fn longest_road_lengths(state: &GameState) -> Vec<u16> {
-        (0..state.players.count())
+        player_ids(state.players.count())
             .map(|player_id| {
                 let blockers = Self::opponent_establishments(state, player_id);
                 state.builds[player_id]
@@ -118,21 +126,21 @@ impl GameIndex {
 
     fn refresh_longest_road_length(&mut self, state: &GameState, player_id: PlayerId) {
         let blockers = Self::opponent_establishments(state, player_id);
-        self.longest_road_lengths[player_id] = state.builds[player_id]
+        self.longest_road_lengths[player_id.index()] = state.builds[player_id]
             .roads
             .find_longest_trail_length_with_blockers(&blockers)
             as u16;
     }
 
     fn insert_road(&mut self, player_id: PlayerId, road: Road) {
-        let roads = &mut self.all_builds[player_id].roads;
+        let roads = &mut self.all_builds[player_id.index()].roads;
         if let Err(index) = roads.binary_search(&road) {
             roads.insert(index, road);
         }
     }
 
     fn upsert_establishment(&mut self, player_id: PlayerId, establishment: Establishment) {
-        let establishments = &mut self.all_builds[player_id].establishments;
+        let establishments = &mut self.all_builds[player_id.index()].establishments;
         if let Some(existing) = establishments
             .iter_mut()
             .find(|existing| existing.vtx == establishment.vtx)
@@ -151,7 +159,7 @@ impl GameIndex {
         settlement: Establishment,
     ) {
         if let Some(port) = state.board.ports_intersection().get(&settlement.vtx) {
-            self.ports_acquired[player_id].insert(*port);
+            self.ports_acquired[player_id.index()].insert(*port);
         }
     }
 
@@ -161,7 +169,7 @@ impl GameIndex {
         player_id: PlayerId,
         settlement: Establishment,
     ) {
-        for opponent in 0..state.players.count() {
+        for opponent in player_ids(state.players.count()) {
             if opponent != player_id
                 && Self::player_has_road_touching(state, opponent, settlement.vtx)
             {
@@ -200,12 +208,12 @@ impl GameIndex {
         const MIN_LONGEST_ROAD: u16 = 5;
 
         if let Some(owner) = current_owner {
-            let owner_len = longest_road_lengths[owner];
+            let owner_len = longest_road_lengths[owner.index()];
             if owner_len >= MIN_LONGEST_ROAD
                 && longest_road_lengths
                     .iter()
                     .enumerate()
-                    .all(|(id, &len)| id == owner || len <= owner_len)
+                    .all(|(id, &len)| id == owner.index() || len <= owner_len)
             {
                 return Some(owner);
             }
@@ -220,7 +228,7 @@ impl GameIndex {
             .iter()
             .enumerate()
             .filter(|&(_, &len)| len == best_len)
-            .map(|(id, _)| id);
+            .map(|(id, _)| PlayerId::try_from(id).expect("player count should fit in u8"));
 
         let best = best_players.next()?;
         if best_players.next().is_none() {
@@ -258,6 +266,8 @@ mod tests {
     fn empty_build_collections() -> Vec<BuildCollection> {
         vec![BuildCollection::default(); 4]
     }
+
+    const P0: PlayerId = PlayerId::new(0);
 
     fn assert_matches_rebuild(index: &GameIndex, state: &GameState) {
         assert_eq!(index, &GameIndex::rebuild(state));
@@ -300,7 +310,7 @@ mod tests {
         let index = GameIndex::rebuild(&state);
 
         assert_eq!(index.longest_road_lengths[0], 5);
-        assert_eq!(index.longest_road_owner, Some(0));
+        assert_eq!(index.longest_road_owner, Some(P0));
     }
 
     #[test]
@@ -502,7 +512,7 @@ mod tests {
             },
         );
 
-        assert_eq!(incremental.largest_army_owner, Some(0));
+        assert_eq!(incremental.largest_army_owner, Some(P0));
         assert_eq!(incremental.all_builds, before_builds);
         assert_eq!(incremental.longest_road_lengths, before_roads);
         assert_eq!(incremental.ports_acquired, before_ports);
@@ -534,14 +544,14 @@ mod tests {
         state.builds = BoardBuildData::from_build_collections(builds);
 
         let mut incremental = GameIndex::rebuild(&state);
-        incremental.longest_road_owner = Some(0);
+        incremental.longest_road_owner = Some(P0);
 
         incremental.refresh_after_dev_card(
             &state,
             1,
             &DevCardUsage::Knight {
                 rob_hex: h(0, 0),
-                robbed_id: Some(0),
+                robbed_id: Some(P0),
             },
         );
 

@@ -10,8 +10,8 @@ use catan_agents::remote_agent::{
     NonblockingFrameReader, UiModel, read_frame, ui_model_summary, write_frame,
 };
 use catan_core::gameplay::game::command::{
-    ChooseRobbedPlayerCommand, DropHalfCommand, InitialPlacementCommand, MoveRobberCommand, PostDevCardCommand,
-    TradeAnswer,
+    ChooseRobbedPlayerCommand, DropHalfCommand, InitialPlacementCommand, MoveRobberCommand,
+    PostDevCardCommand, TradeAnswer,
 };
 use catan_core::gameplay::game::output::GameOutput;
 use catan_core::gameplay::game::{
@@ -630,9 +630,12 @@ mod tests {
             input::PlayerCommand,
             view::{ContextFactory, VisibilityConfig},
         },
+        gameplay::primitives::player::PlayerId,
     };
 
     use super::{command_from_decision_response, decision_request_from_output};
+
+    const P0: PlayerId = PlayerId::new(0);
 
     fn test_model() -> UiModel {
         let init = catan_core::gameplay::game::init::GameInitializationState::default();
@@ -651,7 +654,7 @@ mod tests {
     fn event_decision_regular_response_maps_to_submit_command_payload() {
         let decision = OpenDecision {
             id: DecisionId(9),
-            player_id: 0,
+            player_id: P0,
             kind: DecisionKind::RegularCommand,
             lifetime: DecisionLifetime::OneShot,
         };

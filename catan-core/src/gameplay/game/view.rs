@@ -60,7 +60,8 @@ impl Default for VisibilityConfig {
 }
 
 impl VisibilityConfig {
-    pub fn player_policy(&self, id: PlayerId) -> VisibilityPolicy {
+    pub fn player_policy(&self, id: impl Into<PlayerId>) -> VisibilityPolicy {
+        let id = id.into();
         VisibilityPolicy::Player(PlayerVisibility {
             id,
             counting: self.player_mode,
@@ -214,12 +215,17 @@ impl<'a> PublicGameView<'a> {
         &self,
         player_id: PlayerId,
     ) -> &'a SmallSet<PortKind, PLAYER_PORTS_INLINE> {
-        &self.ports_acquired[player_id]
+        &self.ports_acquired[player_id.index()]
     }
 }
 
 impl<'a> SearchFactory<'a> {
-    pub fn new(state: &'a GameState, policy: VisibilityPolicy, root_player: PlayerId) -> Self {
+    pub fn new(
+        state: &'a GameState,
+        policy: VisibilityPolicy,
+        root_player: impl Into<PlayerId>,
+    ) -> Self {
+        let root_player = root_player.into();
         Self {
             state,
             policy,
@@ -243,9 +249,10 @@ impl<'a> SearchFactory<'a> {
 impl<'a> ContextFactory<'a> {
     pub fn player_decision_context(
         &self,
-        player_id: PlayerId,
+        player_id: impl Into<PlayerId>,
         search: Option<SearchFactory<'a>>,
     ) -> PlayerDecisionContext<'a> {
+        let player_id = player_id.into();
         PlayerDecisionContext {
             actor: player_id,
             public: self.public_view(self.visibility.player_policy(player_id)),
@@ -314,7 +321,12 @@ impl<'a> ContextFactory<'a> {
             .iter()
             .enumerate()
             .map(|(player_id, player)| {
-                project_player(player_id, player.resources(), player.dev_cards(), policy)
+                project_player(
+                    PlayerId::try_from(player_id).expect("player count should fit in u8"),
+                    player.resources(),
+                    player.dev_cards(),
+                    policy,
+                )
             })
             .collect()
     }

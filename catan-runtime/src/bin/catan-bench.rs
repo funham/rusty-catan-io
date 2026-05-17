@@ -12,6 +12,7 @@ use catan_core::{
         init::GameInitializationState,
         run::{GameResult, GameRunStats, RunOptions},
     },
+    gameplay::primitives::player::PlayerId,
     gameplay::random::GameRandom,
 };
 use catan_runtime::{
@@ -309,14 +310,18 @@ fn build_agents(players: &[PlayerConfig], seed: u64) -> Vec<Box<dyn BotPolicy>> 
     players
         .iter()
         .enumerate()
-        .map(|(id, player)| match player {
-            PlayerConfig::Lazy => Box::new(LazyAgent::new(id)) as Box<dyn BotPolicy>,
-            PlayerConfig::Greedy => Box::new(GreedyAgent::new(id)) as Box<dyn BotPolicy>,
-            PlayerConfig::Random => {
-                Box::new(RandomAgent::with_seed(id, agent_seed(seed, id))) as Box<dyn BotPolicy>
-            }
-            PlayerConfig::Cli => {
-                unreachable!("unsupported agents are rejected during validation")
+        .map(|(id, player)| {
+            let player_id = PlayerId::try_from(id).expect("player count should fit in u8");
+            match player {
+                PlayerConfig::Lazy => Box::new(LazyAgent::new(player_id)) as Box<dyn BotPolicy>,
+                PlayerConfig::Greedy => Box::new(GreedyAgent::new(player_id)) as Box<dyn BotPolicy>,
+                PlayerConfig::Random => {
+                    Box::new(RandomAgent::with_seed(player_id, agent_seed(seed, id)))
+                        as Box<dyn BotPolicy>
+                }
+                PlayerConfig::Cli => {
+                    unreachable!("unsupported agents are rejected during validation")
+                }
             }
         })
         .collect()

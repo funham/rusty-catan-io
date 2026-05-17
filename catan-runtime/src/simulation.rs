@@ -103,7 +103,7 @@ impl SimulationHost {
         };
         let search = Some(SearchFactory::new(self.engine.state(), policy, player_id));
         let context = factory.player_decision_context(player_id, search);
-        self.bots[player_id].command_for(decision, context)
+        self.bots[player_id.index()].command_for(decision, context)
     }
 }
 

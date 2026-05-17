@@ -45,8 +45,8 @@ impl<CycleType> GameTurn<CycleType> {
         self.rounds_played
     }
 
-    pub fn get_turn_index(&self) -> usize {
-        self.turn_index as usize
+    pub fn get_turn_index(&self) -> PlayerId {
+        PlayerId::new(self.turn_index)
     }
 
     pub fn get_turns_played(&self) -> u64 {
@@ -130,6 +130,6 @@ impl GameTurn<BackAndForthCycle> {
 
 impl<T> Into<PlayerId> for GameTurn<T> {
     fn into(self) -> PlayerId {
-        self.get_turn_index() as PlayerId
+        self.get_turn_index()
     }
 }

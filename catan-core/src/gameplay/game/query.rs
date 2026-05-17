@@ -39,13 +39,13 @@ impl<'a> GameQuery<'a> {
     }
 
     pub fn count_max_tract_length(&self, player_id: PlayerId) -> u16 {
-        self.index.longest_road_lengths[player_id]
+        self.index.longest_road_lengths[player_id.index()]
     }
 
     pub fn check_win_condition(&self) -> Option<PlayerId> {
         const VP_TO_WIN: u16 = 10;
 
-        for player_id in self.player_ids_starting_from(0) {
+        for player_id in self.player_ids_starting_from(PlayerId::new(0)) {
             let build_dev_card_vp = self.count_dev_card_build_vp(player_id);
             let road_vp = if self.longest_road_owner() == Some(player_id) {
                 2

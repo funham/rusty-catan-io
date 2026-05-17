@@ -5,8 +5,8 @@ use std::{
 
 use catan_core::{
     gameplay::game::command::{
-        ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, InitialPlacementCommand, MoveRobberCommand,
-        PostDevCardCommand, PostDiceCommand, RegularCommand, TradeAnswer,
+        ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, InitialPlacementCommand,
+        MoveRobberCommand, PostDevCardCommand, PostDiceCommand, RegularCommand, TradeAnswer,
     },
     gameplay::{
         game::{

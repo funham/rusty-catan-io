@@ -19,7 +19,7 @@ use crate::{
     gameplay::{
         constants::capacities::PLAYER_ESTABLISHMENTS_INLINE,
         field::state::{BoardLayout, BuildCollection},
-        primitives::player::PlayerId,
+        primitives::player::{PlayerId, player_ids},
     },
     topology::{
         HasPos, Hex, Intersection, Path,
@@ -209,7 +209,7 @@ pub mod occupancy {
         {
             ids.into_iter()
                 .flat_map(|id| {
-                    let player = &self.container.players()[id];
+                    let player = &self.container.players()[id.index()];
 
                     player.establishments.iter().map(|s| s.vtx)
                 })
@@ -221,7 +221,7 @@ pub mod occupancy {
             Players: IntoIterator<Item = PlayerId>,
         {
             ids.into_iter()
-                .map(|id| self.container.players()[id].roads_occupancy())
+                .map(|id| self.container.players()[id.index()].roads_occupancy())
                 .fold(PathOccupancy::default(), |acc, x| acc.union(&x))
         }
 
@@ -236,11 +236,11 @@ pub mod occupancy {
         }
 
         pub fn builds_occupancy_full(&self) -> IntersectionOccupancy {
-            self.builds_occupancy(0..self.container.players().len())
+            self.builds_occupancy(player_ids(self.container.players().len()))
         }
 
         pub fn roads_occupancy_full(&self) -> PathOccupancy {
-            self.roads_occupancy(0..self.container.players().len())
+            self.roads_occupancy(player_ids(self.container.players().len()))
         }
 
         pub fn occupancy_full(&self) -> AggregateOccupancy {
@@ -372,30 +372,34 @@ pub mod data {
         }
 
         #[inline]
-        pub fn by_player(&self, id: PlayerId) -> &PlayerBuildData {
-            &self.players[id]
+        pub fn by_player(&self, id: impl Into<PlayerId>) -> &PlayerBuildData {
+            let id = id.into();
+            &self.players[id.index()]
         }
 
         #[inline]
         pub fn players_indexed(&self) -> impl Iterator<Item = (PlayerId, &PlayerBuildData)> {
-            self.players
-                .iter()
-                .enumerate()
-                .map(|(id, player)| (id as PlayerId, player))
+            self.players.iter().enumerate().map(|(id, player)| {
+                (
+                    PlayerId::try_from(id).expect("player count should fit in u8"),
+                    player,
+                )
+            })
         }
 
         /* modifiers */
 
         pub fn try_build(
             &mut self,
-            player_id: PlayerId,
+            player_id: impl Into<PlayerId>,
             build: Build,
         ) -> Result<(), BuildingError> {
+            let player_id = player_id.into();
             self.can_build(player_id, build)?;
 
             match build {
                 Build::Road(road) => {
-                    self.players[player_id]
+                    self.players[player_id.index()]
                         .roads
                         .insert_validated_edge(&road.path);
                     self.update_longest_road(player_id);
@@ -404,7 +408,10 @@ pub mod data {
 
                 Build::Establishment(establishment) => match establishment.stage {
                     EstablishmentType::Settlement => {
-                        if self.players[player_id].establishments.insert(establishment) {
+                        if self.players[player_id.index()]
+                            .establishments
+                            .insert(establishment)
+                        {
                             Ok(())
                         } else {
                             Err(BuildingError::Settlement())
@@ -416,11 +423,17 @@ pub mod data {
                             stage: EstablishmentType::Settlement,
                         };
 
-                        if !self.players[player_id].establishments.remove(&settlement) {
+                        if !self.players[player_id.index()]
+                            .establishments
+                            .remove(&settlement)
+                        {
                             return Err(BuildingError::City());
                         }
 
-                        if self.players[player_id].establishments.insert(establishment) {
+                        if self.players[player_id.index()]
+                            .establishments
+                            .insert(establishment)
+                        {
                             Ok(())
                         } else {
                             Err(BuildingError::City())
@@ -430,7 +443,12 @@ pub mod data {
             }
         }
 
-        pub fn can_build(&self, player_id: PlayerId, build: Build) -> Result<(), BuildingError> {
+        pub fn can_build(
+            &self,
+            player_id: impl Into<PlayerId>,
+            build: Build,
+        ) -> Result<(), BuildingError> {
+            let player_id = player_id.into();
             match build {
                 Build::Road(road) => self.can_place_road(player_id, road.path),
                 Build::Establishment(establishment) => match establishment.stage {
@@ -442,8 +460,13 @@ pub mod data {
             }
         }
 
-        pub fn can_place_road(&self, player_id: PlayerId, path: Path) -> Result<(), BuildingError> {
-            if self.players[player_id].roads_count() >= PlayerBuildData::ROAD_LIMIT {
+        pub fn can_place_road(
+            &self,
+            player_id: impl Into<PlayerId>,
+            path: Path,
+        ) -> Result<(), BuildingError> {
+            let player_id = player_id.into();
+            if self.players[player_id.index()].roads_count() >= PlayerBuildData::ROAD_LIMIT {
                 return Err(BuildingError::RoadLimit());
             }
 
@@ -460,24 +483,28 @@ pub mod data {
 
         pub fn can_place_road_with_extra_roads(
             &self,
-            player_id: PlayerId,
+            player_id: impl Into<PlayerId>,
             path: Path,
             extra_roads: &[Path],
         ) -> Result<(), BuildingError> {
+            let player_id = player_id.into();
             self.can_place_road_with_extra_roads_iter(player_id, path, extra_roads.iter().copied())
         }
 
         pub fn can_place_road_with_extra_roads_iter<ExtraRoads>(
             &self,
-            player_id: PlayerId,
+            player_id: impl Into<PlayerId>,
             path: Path,
             extra_roads: ExtraRoads,
         ) -> Result<(), BuildingError>
         where
             ExtraRoads: IntoIterator<Item = Path> + Clone,
         {
+            let player_id = player_id.into();
             let extra_count = extra_roads.clone().into_iter().count();
-            if self.players[player_id].roads_count() + extra_count >= PlayerBuildData::ROAD_LIMIT {
+            if self.players[player_id.index()].roads_count() + extra_count
+                >= PlayerBuildData::ROAD_LIMIT
+            {
                 return Err(BuildingError::RoadLimit());
             }
 
@@ -499,23 +526,26 @@ pub mod data {
 
         pub fn road_extension_candidates(
             &self,
-            player_id: PlayerId,
+            player_id: impl Into<PlayerId>,
             board_paths: &[Path],
         ) -> PathSet {
+            let player_id = player_id.into();
             self.road_extension_candidates_with_extra_roads(player_id, [], board_paths)
         }
 
         pub fn road_extension_candidates_with_extra_roads<ExtraRoads>(
             &self,
-            player_id: PlayerId,
+            player_id: impl Into<PlayerId>,
             extra_roads: ExtraRoads,
             board_paths: &[Path],
         ) -> PathSet
         where
             ExtraRoads: IntoIterator<Item = Path> + Clone,
         {
+            let player_id = player_id.into();
             if player_id >= self.players.len()
-                || self.players[player_id].roads_count() + extra_roads.clone().into_iter().count()
+                || self.players[player_id.index()].roads_count()
+                    + extra_roads.clone().into_iter().count()
                     >= PlayerBuildData::ROAD_LIMIT
             {
                 return PathSet::new();
@@ -524,7 +554,12 @@ pub mod data {
             let extra_roads_set = extra_roads.clone().into_iter().collect::<PathSet>();
             let mut frontier = SmallSet::<Intersection, 64>::new();
 
-            for road in self.players[player_id].roads.edges().iter().copied() {
+            for road in self.players[player_id.index()]
+                .roads
+                .edges()
+                .iter()
+                .copied()
+            {
                 for intersection in road.intersections() {
                     if !self.opponent_has_establishment_at(player_id, intersection) {
                         frontier.insert(intersection);
@@ -570,21 +605,23 @@ pub mod data {
 
         pub fn can_place_settlement(
             &self,
-            player_id: PlayerId,
+            player_id: impl Into<PlayerId>,
             pos: Intersection,
         ) -> Result<(), BuildingError> {
+            let player_id = player_id.into();
             self.can_place_settlement_with_extra_roads_iter(player_id, pos, [])
         }
 
         pub fn can_place_settlement_with_extra_roads_iter<ExtraRoads>(
             &self,
-            player_id: PlayerId,
+            player_id: impl Into<PlayerId>,
             pos: Intersection,
             extra_roads: ExtraRoads,
         ) -> Result<(), BuildingError>
         where
             ExtraRoads: IntoIterator<Item = Path>,
         {
+            let player_id = player_id.into();
             if !(self.player_has_road_at_intersection(player_id, pos)
                 || extra_roads
                     .into_iter()
@@ -593,7 +630,9 @@ pub mod data {
             {
                 return Err(BuildingError::Settlement());
             }
-            if self.players[player_id].settlements_count() >= PlayerBuildData::SETTLEMENT_LIMIT {
+            if self.players[player_id.index()].settlements_count()
+                >= PlayerBuildData::SETTLEMENT_LIMIT
+            {
                 return Err(BuildingError::SettlementLimit());
             }
 
@@ -602,9 +641,10 @@ pub mod data {
 
         pub fn can_place_city(
             &self,
-            player_id: PlayerId,
+            player_id: impl Into<PlayerId>,
             pos: Intersection,
         ) -> Result<(), BuildingError> {
+            let player_id = player_id.into();
             let settlement = Establishment {
                 vtx: pos,
                 stage: EstablishmentType::Settlement,
@@ -614,13 +654,19 @@ pub mod data {
                 stage: EstablishmentType::City,
             };
 
-            if !self.players[player_id].establishments.contains(&settlement) {
+            if !self.players[player_id.index()]
+                .establishments
+                .contains(&settlement)
+            {
                 return Err(BuildingError::City());
             }
-            if self.players[player_id].cities_count() >= PlayerBuildData::CITY_LIMIT {
+            if self.players[player_id.index()].cities_count() >= PlayerBuildData::CITY_LIMIT {
                 return Err(BuildingError::CityLimit());
             }
-            if self.players[player_id].establishments.contains(&city) {
+            if self.players[player_id.index()]
+                .establishments
+                .contains(&city)
+            {
                 return Err(BuildingError::City());
             }
 
@@ -638,7 +684,7 @@ pub mod data {
             player_id: PlayerId,
             intersection: Intersection,
         ) -> bool {
-            self.players[player_id].roads.touches(intersection)
+            self.players[player_id.index()].roads.touches(intersection)
         }
 
         fn player_has_road_touching_path_at_unblocked_intersection(
@@ -647,7 +693,7 @@ pub mod data {
             path: Path,
         ) -> bool {
             path.intersections().into_iter().any(|intersection| {
-                self.players[player_id].roads.touches(intersection)
+                self.players[player_id.index()].roads.touches(intersection)
                     && !self.opponent_has_establishment_at(player_id, intersection)
             })
         }
@@ -705,14 +751,18 @@ pub mod data {
         }
 
         fn update_longest_road(&mut self, candidate: PlayerId) {
-            let candidate_len = self.players[candidate].roads.find_longest_trail_length();
+            let candidate_len = self.players[candidate.index()]
+                .roads
+                .find_longest_trail_length();
             if candidate_len < 5 {
                 return;
             }
 
             match self.longest_road {
                 Some(owner) => {
-                    let owner_len = self.players[owner].roads.find_longest_trail_length();
+                    let owner_len = self.players[owner.index()]
+                        .roads
+                        .find_longest_trail_length();
                     if candidate_len > owner_len {
                         self.longest_road = Some(candidate);
                     }
@@ -736,18 +786,21 @@ pub mod data {
 
         pub fn try_init_place(
             &mut self,
-            player_id: PlayerId,
+            player_id: impl Into<PlayerId>,
             road: Road,
             establishment: Establishment,
         ) -> Result<(), BuildingError> {
+            let player_id = player_id.into();
             if self.has_establishment_in_deadzone(establishment.vtx) {
                 return Err(BuildingError::InitSettlement(establishment.vtx));
             }
 
-            if self.players[player_id].settlements_count() >= PlayerBuildData::SETTLEMENT_LIMIT {
+            if self.players[player_id.index()].settlements_count()
+                >= PlayerBuildData::SETTLEMENT_LIMIT
+            {
                 return Err(BuildingError::SettlementLimit());
             }
-            if self.players[player_id].roads_count() >= PlayerBuildData::ROAD_LIMIT {
+            if self.players[player_id.index()].roads_count() >= PlayerBuildData::ROAD_LIMIT {
                 return Err(BuildingError::RoadLimit());
             }
 
@@ -806,13 +859,13 @@ pub mod data {
         type Output = PlayerBuildData;
 
         fn index(&self, index: PlayerId) -> &Self::Output {
-            &self.players[index]
+            &self.players[index.index()]
         }
     }
 
     impl IndexMut<PlayerId> for BoardBuildData {
         fn index_mut(&mut self, index: PlayerId) -> &mut Self::Output {
-            &mut self.players[index]
+            &mut self.players[index.index()]
         }
     }
 }
@@ -855,7 +908,7 @@ pub mod query {
                         None
                     } else {
                         Some((
-                            player_id,
+                            PlayerId::try_from(player_id).expect("player count should fit in u8"),
                             BuildCollection {
                                 establishments,
                                 roads,
@@ -880,7 +933,7 @@ pub mod query {
         pub fn possible_initial_placements(
             &self,
             field: &BoardLayout,
-            _player_id: PlayerId,
+            _player_id: impl Into<PlayerId>,
         ) -> Vec<InitialPlacementCommand> {
             let intersections = field
                 .arrangement
@@ -914,6 +967,9 @@ mod tests {
     use super::*;
     use crate::gameplay::field::state::{BoardLayout, FieldBuildParam};
     use crate::topology::Hex;
+
+    const P0: PlayerId = PlayerId::new(0);
+    const P1: PlayerId = PlayerId::new(1);
 
     fn h(q: i32, r: i32) -> Hex {
         Hex::new(q, r)
@@ -990,7 +1046,7 @@ mod tests {
             .expect_err("road path should already be occupied");
 
         assert!(matches!(err, BuildingError::Road(_)));
-        assert_eq!(builds[0].roads_count(), 1);
+        assert_eq!(builds[P0].roads_count(), 1);
     }
 
     #[test]
@@ -1013,8 +1069,8 @@ mod tests {
             .expect_err("opponent road path should already be occupied");
 
         assert!(matches!(err, BuildingError::Road(_)));
-        assert_eq!(builds[0].roads_count(), 1);
-        assert_eq!(builds[1].roads_count(), 1);
+        assert_eq!(builds[P0].roads_count(), 1);
+        assert_eq!(builds[P1].roads_count(), 1);
     }
 
     #[test]
@@ -1084,8 +1140,8 @@ mod tests {
             .try_build(0, Build::Establishment(settlement))
             .expect("connected settlement should be legal");
 
-        assert!(builds[0].establishments.contains(&settlement));
-        assert_eq!(builds[0].settlements_count(), 1);
+        assert!(builds[P0].establishments.contains(&settlement));
+        assert_eq!(builds[P0].settlements_count(), 1);
     }
 
     #[test]
@@ -1108,12 +1164,12 @@ mod tests {
             .expect("fourth city should be available even with five settlements on board");
 
         assert_eq!(
-            builds[0].settlements_count(),
+            builds[P0].settlements_count(),
             PlayerBuildData::SETTLEMENT_LIMIT - 1
         );
-        assert_eq!(builds[0].cities_count(), 4);
-        assert!(!builds[0].establishments.contains(&settlement(vertices[3])));
-        assert!(builds[0].establishments.contains(&city(vertices[3])));
+        assert_eq!(builds[P0].cities_count(), 4);
+        assert!(!builds[P0].establishments.contains(&settlement(vertices[3])));
+        assert!(builds[P0].establishments.contains(&city(vertices[3])));
     }
 
     #[test]
@@ -1132,8 +1188,8 @@ mod tests {
             .expect_err("city upgrade should require an existing settlement");
 
         assert!(matches!(err, BuildingError::City()));
-        assert_eq!(builds[0].settlements_count(), 0);
-        assert_eq!(builds[0].cities_count(), 1);
+        assert_eq!(builds[P0].settlements_count(), 0);
+        assert_eq!(builds[P0].cities_count(), 1);
     }
 
     #[test]
@@ -1155,7 +1211,7 @@ mod tests {
             .try_build(0, Build::Establishment(city(vertices[4])))
             .expect("fifth city should be legal and win the game at controller level");
 
-        assert_eq!(builds[0].cities_count(), PlayerBuildData::CITY_LIMIT);
+        assert_eq!(builds[P0].cities_count(), PlayerBuildData::CITY_LIMIT);
     }
 
     #[test]
@@ -1177,6 +1233,6 @@ mod tests {
             .try_build(0, Build::Road(Road { path: fifth }))
             .expect("fifth connected road should be legal");
 
-        assert_eq!(builds.longest_road(), Some(0));
+        assert_eq!(builds.longest_road(), Some(P0));
     }
 }

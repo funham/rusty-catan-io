@@ -8,7 +8,8 @@ use catan_core::{
         game::{
             command::{
                 ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, InitialPlacementCommand,
-                MoveRobberCommand, PostDevCardCommand, PostDiceCommand, RegularCommand, TradeAnswer,
+                MoveRobberCommand, PostDevCardCommand, PostDiceCommand, RegularCommand,
+                TradeAnswer,
             },
             decision::{DecisionKind, OpenDecision},
             event::{GameEvent, PlayerNotification},
@@ -42,7 +43,8 @@ pub struct CliAgent {
 }
 
 impl CliAgent {
-    pub fn new(id: PlayerId, terminal: SharedTerminalUi) -> Self {
+    pub fn new(id: impl Into<PlayerId>, terminal: SharedTerminalUi) -> Self {
+        let id = id.into();
         Self {
             player_id: id,
             terminal,
@@ -142,7 +144,9 @@ impl BotPolicy for CliAgent {
             DecisionKind::InitPlacement => Some(PlayerCommand::InitialPlacement(
                 self.init_stage_action(context),
             )),
-            DecisionKind::InitCommand => Some(PlayerCommand::InitCommand(self.init_action(context))),
+            DecisionKind::InitCommand => {
+                Some(PlayerCommand::InitCommand(self.init_action(context)))
+            }
             DecisionKind::PostDiceCommand => {
                 Some(PlayerCommand::PostDice(self.after_dice_action(context)))
             }

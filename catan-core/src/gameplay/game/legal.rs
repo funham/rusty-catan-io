@@ -85,7 +85,9 @@ pub enum BuildClass {
     City,
 }
 
-pub fn legal_initial_placements(context: &PlayerDecisionContext<'_>) -> Vec<InitialPlacementCommand> {
+pub fn legal_initial_placements(
+    context: &PlayerDecisionContext<'_>,
+) -> Vec<InitialPlacementCommand> {
     context
         .public
         .builds
@@ -1059,6 +1061,8 @@ mod tests {
 
     use super::*;
 
+    const P0: PlayerId = PlayerId::new(0);
+
     fn initialized_state() -> GameState {
         let mut init = GameInitializationState::default();
         let (settlement, road) = init
@@ -1129,7 +1133,7 @@ mod tests {
         state
             .transfer_from_bank(resources, 0)
             .expect("bank should fund test player");
-        preferred_action(&state, 0)
+        preferred_action(&state, P0)
     }
 
     fn preferred_action(state: &GameState, player_id: PlayerId) -> RegularCommand {
@@ -1323,30 +1327,30 @@ mod tests {
             )
             .expect("bank should fund test player");
 
-        with_decision_context(&state, 0, |context| {
+        with_decision_context(&state, P0, |context| {
             assert_eq!(
-                sorted_debug(legal_city_spots(&context, 0)),
-                sorted_debug(clone_apply_city_spots(&context, 0))
+                sorted_debug(legal_city_spots(&context, P0)),
+                sorted_debug(clone_apply_city_spots(&context, P0))
             );
             assert_eq!(
-                sorted_debug(legal_settlement_spots(&context, 0)),
-                sorted_debug(clone_apply_settlement_spots(&context, 0))
+                sorted_debug(legal_settlement_spots(&context, P0)),
+                sorted_debug(clone_apply_settlement_spots(&context, P0))
             );
             assert_eq!(
-                sorted_debug(legal_road_spots(&context, 0)),
-                sorted_debug(clone_apply_road_spots(&context, 0))
+                sorted_debug(legal_road_spots(&context, P0)),
+                sorted_debug(clone_apply_road_spots(&context, P0))
             );
             assert_eq!(
-                legal_city_spots_count(&context, 0),
-                clone_apply_city_spots(&context, 0).len()
+                legal_city_spots_count(&context, P0),
+                clone_apply_city_spots(&context, P0).len()
             );
             assert_eq!(
-                legal_settlement_spots_count(&context, 0),
-                clone_apply_settlement_spots(&context, 0).len()
+                legal_settlement_spots_count(&context, P0),
+                clone_apply_settlement_spots(&context, P0).len()
             );
             assert_eq!(
-                legal_road_spots_count(&context, 0),
-                clone_apply_road_spots(&context, 0).len()
+                legal_road_spots_count(&context, P0),
+                clone_apply_road_spots(&context, P0).len()
             );
         });
     }
@@ -1367,7 +1371,7 @@ mod tests {
             )
             .expect("bank should fund test player");
 
-        with_decision_context(&state, 0, |context| {
+        with_decision_context(&state, P0, |context| {
             assert_eq!(
                 sorted_regular_debug(legal_regular_actions(&context)),
                 sorted_regular_debug(legal_regular_actions_iter(&context).collect())
@@ -1391,7 +1395,7 @@ mod tests {
             )
             .expect("bank should fund test player");
 
-        with_decision_context(&state, 0, |context| {
+        with_decision_context(&state, P0, |context| {
             let expected = legal_regular_actions(&context);
 
             assert_eq!(legal_regular_action_count(&context), expected.len());
@@ -1422,7 +1426,7 @@ mod tests {
         }
         state.players.get_mut(0).dev_cards_reset_queue();
 
-        with_decision_context(&state, 0, |context| {
+        with_decision_context(&state, P0, |context| {
             assert_eq!(
                 sorted_dev_usage_debug(legal_dev_card_usages(&context)),
                 sorted_dev_usage_debug(legal_dev_card_usages_iter(&context).collect())
@@ -1442,7 +1446,7 @@ mod tests {
             },
         );
 
-        with_decision_context(&state, 0, |context| {
+        with_decision_context(&state, P0, |context| {
             let eager = legal_bank_trades(&context)
                 .into_iter()
                 .map(|trade| format!("{trade:?}"))
@@ -1489,9 +1493,9 @@ mod tests {
             )
             .expect("bank should fund settlement-cost resources");
 
-        with_decision_context(&state, 0, |context| {
+        with_decision_context(&state, P0, |context| {
             assert!(!can_buy_city(&context));
-            assert!(legal_city_spots(&context, 0).is_empty());
+            assert!(legal_city_spots(&context, P0).is_empty());
         });
     }
 
@@ -1549,8 +1553,8 @@ mod tests {
             index: &index,
             visibility: &visibility,
         };
-        let search = Some(SearchFactory::new(&state, visibility.player_policy(0), 0));
-        let context = factory.player_decision_context(0, search);
+        let search = Some(SearchFactory::new(&state, visibility.player_policy(P0), P0));
+        let context = factory.player_decision_context(P0, search);
         let actions = legal_regular_actions(&context);
 
         assert!(!can_buy_dev_card(&context));
@@ -1598,7 +1602,7 @@ mod tests {
             index: &index,
             visibility: &visibility,
         };
-        let context = factory.player_decision_context(0, None);
+        let context = factory.player_decision_context(P0, None);
         let legal = legal_initial_placements(&context)
             .into_iter()
             .map(|action| action.settlement_pos())
@@ -1620,7 +1624,7 @@ mod tests {
             index: &index,
             visibility: &visibility,
         };
-        let context = factory.player_decision_context(0, None);
+        let context = factory.player_decision_context(P0, None);
         let placements = legal_initial_placements(&context);
 
         assert!(!placements.is_empty());
@@ -1691,7 +1695,7 @@ mod tests {
             )
             .expect("bank should fund test resources");
 
-        let options = context_bank_trades(&state, 0);
+        let options = context_bank_trades(&state, P0);
 
         assert!(options.iter().any(|trade| {
             matches!(trade.kind, BankTradeKind::BankGeneric) && trade.give == Resource::Brick
@@ -1701,7 +1705,7 @@ mod tests {
     #[test]
     fn bank_trades_exclude_unaffordable_generic_trades() {
         let state = GameInitializationState::default().finish();
-        let options = context_bank_trades(&state, 0);
+        let options = context_bank_trades(&state, P0);
 
         assert!(
             options.is_empty(),
@@ -1718,7 +1722,7 @@ mod tests {
                 ..ResourceCollection::ZERO
             },
         );
-        assert!(context_bank_trades(&universal, 0).iter().any(|trade| {
+        assert!(context_bank_trades(&universal, P0).iter().any(|trade| {
             matches!(trade.kind, BankTradeKind::PortGeneric) && trade.give == Resource::Brick
         }));
 
@@ -1729,7 +1733,7 @@ mod tests {
                 ..ResourceCollection::ZERO
             },
         );
-        assert!(context_bank_trades(&specific, 0).iter().any(|trade| {
+        assert!(context_bank_trades(&specific, P0).iter().any(|trade| {
             matches!(trade.kind, BankTradeKind::PortSpecific) && trade.give == Resource::Brick
         }));
     }
@@ -1745,7 +1749,7 @@ mod tests {
             },
         );
 
-        let options = context_bank_trades(&state, 0);
+        let options = context_bank_trades(&state, P0);
 
         assert!(options.iter().any(|trade| {
             matches!(trade.kind, BankTradeKind::PortSpecific) && trade.give == Resource::Brick
@@ -1770,8 +1774,8 @@ mod tests {
             index: &index,
             visibility: &visibility,
         };
-        let search = Some(SearchFactory::new(&state, visibility.player_policy(0), 0));
-        let context = factory.player_decision_context(0, search);
+        let search = Some(SearchFactory::new(&state, visibility.player_policy(P0), P0));
+        let context = factory.player_decision_context(P0, search);
 
         let usages = legal_dev_card_usages(&context)
             .into_iter()
@@ -1786,7 +1790,7 @@ mod tests {
             let mut candidate = state.clone();
             let mut rng = crate::gameplay::random::GameRandom::seeded(42);
             assert!(
-                rng.with_rng(|rng| candidate.use_dev_card_with_rng(usage, 0, rng))
+                rng.with_rng(|rng| candidate.use_dev_card_with_rng(usage, P0, rng))
                     .is_ok(),
                 "legal roadbuild usage should be accepted: {usage:?}"
             );
@@ -1803,8 +1807,8 @@ mod tests {
             index: &index,
             visibility: &visibility,
         };
-        let search = Some(SearchFactory::new(&state, visibility.player_policy(0), 0));
-        let context = factory.player_decision_context(0, search);
+        let search = Some(SearchFactory::new(&state, visibility.player_policy(P0), P0));
+        let context = factory.player_decision_context(P0, search);
         let paths = context.public.board.paths();
 
         let mut expected = Vec::new();
@@ -1829,7 +1833,7 @@ mod tests {
         }
 
         let actual =
-            legal_k_road_extensions::<2>(context.public.builds, 0, paths).collect::<Vec<_>>();
+            legal_k_road_extensions::<2>(context.public.builds, P0, paths).collect::<Vec<_>>();
 
         assert_eq!(actual, expected);
     }

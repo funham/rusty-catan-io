@@ -5,7 +5,8 @@ use catan_core::{
         game::{
             command::{
                 ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, InitialPlacementCommand,
-                MoveRobberCommand, PostDevCardCommand, PostDiceCommand, RegularCommand, TradeAnswer,
+                MoveRobberCommand, PostDevCardCommand, PostDiceCommand, RegularCommand,
+                TradeAnswer,
             },
             decision::{DecisionKind, OpenDecision},
             event::{
@@ -37,7 +38,8 @@ pub struct RemoteCliAgent {
 }
 
 impl RemoteCliAgent {
-    pub fn new(player_id: PlayerId, mut stream: UnixStream) -> io::Result<Self> {
+    pub fn new(player_id: impl Into<PlayerId>, mut stream: UnixStream) -> io::Result<Self> {
+        let player_id = player_id.into();
         write_frame(
             &mut stream,
             &HostToCli::Hello {
@@ -200,7 +202,9 @@ impl BotPolicy for RemoteCliAgent {
             DecisionKind::InitPlacement => Some(PlayerCommand::InitialPlacement(
                 self.init_stage_action(context),
             )),
-            DecisionKind::InitCommand => Some(PlayerCommand::InitCommand(self.init_action(context))),
+            DecisionKind::InitCommand => {
+                Some(PlayerCommand::InitCommand(self.init_action(context)))
+            }
             DecisionKind::PostDiceCommand => {
                 Some(PlayerCommand::PostDice(self.after_dice_action(context)))
             }

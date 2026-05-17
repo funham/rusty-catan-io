@@ -3,11 +3,10 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    algorithm,
-    constants,
+    algorithm, constants,
     gameplay::game::command::{
-        ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, InitialPlacementCommand, MoveRobberCommand,
-        PostDevCardCommand, PostDiceCommand, RegularCommand,
+        ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, InitialPlacementCommand,
+        MoveRobberCommand, PostDevCardCommand, PostDiceCommand, RegularCommand,
     },
     gameplay::{
         field::state::{BoardLayout, BoardState},
@@ -27,7 +26,7 @@ use crate::{
             bank::{BankResourceExchangeError::*, PlayerResourceExchangeError},
             build::{Build, Establishment},
             dev_card::{DevCardUsage, UsableDevCard},
-            player::PlayerId,
+            player::{PlayerId, player_ids},
             resource::ResourceCollection,
             trade::{BankTrade, BankTradeKind, PlayerTrade},
         },
@@ -234,8 +233,7 @@ impl GameEngine {
             transaction.events =
                 crate::gameplay::game::decider::decide(&self.core, GameInput::Start);
             for event in &transaction.events {
-                reducer::reduce(&mut self.core, event)
-                    .expect("start transaction should reduce");
+                reducer::reduce(&mut self.core, event).expect("start transaction should reduce");
                 self.record_event(event);
             }
             for output in projector::project_transaction(&transaction) {
@@ -489,7 +487,9 @@ impl GameEngine {
                     },
                     sink,
                 );
-                let next_player = (player_id + 1) % self.game.players.count();
+                let next_player =
+                    PlayerId::try_from((player_id.index() + 1) % self.game.players.count())
+                        .expect("player count should fit in u8");
                 self.open_decision(
                     next_player,
                     DecisionKind::InitPlacement,
@@ -829,7 +829,7 @@ impl GameEngine {
             DecisionLifetime::UntilSessionClosed(session_id),
             sink,
         );
-        for player_id in 0..self.game.players.count() {
+        for player_id in player_ids(self.game.players.count()) {
             if player_id != decision.player_id && scope.includes(player_id) {
                 self.open_decision(
                     player_id,
@@ -1476,7 +1476,7 @@ impl GameEngine {
         player_id: PlayerId,
         trade: BankTrade,
     ) -> Result<(), String> {
-        let ports = &self.index.ports_acquired[player_id];
+        let ports = &self.index.ports_acquired[player_id.index()];
         let required_port = match trade.kind {
             BankTradeKind::BankGeneric => None,
             BankTradeKind::PortGeneric => Some(PortKind::Universal),
@@ -1513,7 +1513,7 @@ impl GameEngine {
 
     fn game_end_stats(&self) -> crate::gameplay::game::event::GameEndStats {
         let query = GameQuery::new(&self.game, &self.index);
-        (0..self.game.players.count())
+        player_ids(self.game.players.count())
             .map(|player_id| {
                 let build_and_dev_card_vp = query.count_dev_card_build_vp(player_id);
                 let has_longest_road = query.longest_road_owner() == Some(player_id);
@@ -1714,7 +1714,8 @@ fn invalid_trade_scope_reason(
 
 #[cfg(test)]
 impl GameEngine {
-    pub fn test_force_regular_action_phase(&mut self, player_id: PlayerId) {
+    pub fn test_force_regular_action_phase(&mut self, player_id: impl Into<PlayerId>) {
+        let player_id = player_id.into();
         self.phase = GamePhase::Turn(super::phase::TurnPhase::RegularCommand);
         self.pending = PendingDecisions::default();
         self.next_decision_id = self.next_decision_id.max(100);
@@ -1727,22 +1728,33 @@ impl GameEngine {
         );
     }
 
-    pub fn test_give_resources(&mut self, player_id: PlayerId, resources: ResourceCollection) {
+    pub fn test_give_resources(
+        &mut self,
+        player_id: impl Into<PlayerId>,
+        resources: ResourceCollection,
+    ) {
+        let player_id = player_id.into();
         match self.game.transfer_from_bank(resources, player_id) {
             Ok(()) | Err(BankIsShort) => {}
             Err(AccountIsShort { .. }) => unreachable!(),
         }
     }
 
-    pub fn test_take_resources(&mut self, player_id: PlayerId, resources: ResourceCollection) {
+    pub fn test_take_resources(
+        &mut self,
+        player_id: impl Into<PlayerId>,
+        resources: ResourceCollection,
+    ) {
+        let player_id = player_id.into();
         let _ = self.game.transfer_to_bank(resources, player_id);
     }
 
     pub fn open_decision_for_test(
         &mut self,
-        player_id: PlayerId,
+        player_id: impl Into<PlayerId>,
         kind: DecisionKind,
     ) -> OpenDecision {
+        let player_id = player_id.into();
         let lifetime = match kind {
             DecisionKind::TradeResponse { session }
             | DecisionKind::TradeOwnerAction { session } => {
@@ -1756,19 +1768,15 @@ impl GameEngine {
 
     pub fn test_open_trade_session(
         &mut self,
-        proposer: PlayerId,
+        proposer: impl Into<PlayerId>,
         scope: TradeScope,
         trade: PlayerTrade,
     ) -> TradeSessionId {
+        let proposer = proposer.into();
         let id = TradeSessionId(self.trade_sessions.len() as u64);
         let player_count = self.game.players.count();
-        self.trade_sessions.push(TradeSession::new(
-            id,
-            proposer,
-            scope,
-            trade,
-            player_count,
-        ));
+        self.trade_sessions
+            .push(TradeSession::new(id, proposer, scope, trade, player_count));
         id
     }
 
@@ -1781,9 +1789,10 @@ impl GameEngine {
     pub fn test_set_trade_response_accept(
         &mut self,
         session: TradeSessionId,
-        player_id: PlayerId,
+        player_id: impl Into<PlayerId>,
         offer_id: TradeOfferId,
     ) {
+        let player_id = player_id.into();
         self.trade_session_mut(session)
             .expect("session should exist")
             .set_response(player_id, TradeResponseState::Accepted { offer_id });

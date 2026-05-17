@@ -25,7 +25,8 @@ pub struct RemoteCliSeat {
 }
 
 impl RemoteCliSeat {
-    pub fn new(player_id: PlayerId, mut stream: UnixStream) -> io::Result<Self> {
+    pub fn new(player_id: impl Into<PlayerId>, mut stream: UnixStream) -> io::Result<Self> {
+        let player_id = player_id.into();
         write_frame(
             &mut stream,
             &HostToCli::Hello {
@@ -293,6 +294,9 @@ mod tests {
 
     use super::*;
 
+    const P0: PlayerId = PlayerId::new(0);
+    const P1: PlayerId = PlayerId::new(1);
+
     #[test]
     fn remote_cli_seat_queues_submit_command_from_child() {
         let (host_stream, mut child_stream) = UnixStream::pair().unwrap();
@@ -300,7 +304,7 @@ mod tests {
             assert!(matches!(
                 read_frame::<HostToCli>(&mut child_stream).unwrap(),
                 HostToCli::Hello {
-                    role: CliRole::Player { player_id: 0 }
+                    role: CliRole::Player { player_id: P0 }
                 }
             ));
             write_frame(&mut child_stream, &CliToHost::Ready).unwrap();
@@ -339,14 +343,14 @@ mod tests {
         let view = factory.player_decision_context(0, None);
         let output = GameOutput::DecisionOpened(OpenDecision {
             id: catan_core::gameplay::game::decision::DecisionId(7),
-            player_id: 0,
+            player_id: P0,
             kind: DecisionKind::RegularCommand,
             lifetime: DecisionLifetime::OneShot,
         });
 
         seat.on_frame(
             SeatFrame {
-                player_id: 0,
+                player_id: P0,
                 output: &output,
                 view,
             },
@@ -367,7 +371,7 @@ mod tests {
             assert!(matches!(
                 read_frame::<HostToCli>(&mut child_stream).unwrap(),
                 HostToCli::Hello {
-                    role: CliRole::Player { player_id: 0 }
+                    role: CliRole::Player { player_id: P0 }
                 }
             ));
             write_frame(&mut child_stream, &CliToHost::Ready).unwrap();
@@ -388,14 +392,14 @@ mod tests {
         let view = factory.player_decision_context(0, None);
         let output = GameOutput::DecisionOpened(OpenDecision {
             id: catan_core::gameplay::game::decision::DecisionId(8),
-            player_id: 1,
+            player_id: P1,
             kind: DecisionKind::RegularCommand,
             lifetime: DecisionLifetime::OneShot,
         });
 
         seat.on_frame(
             SeatFrame {
-                player_id: 0,
+                player_id: P0,
                 output: &output,
                 view,
             },

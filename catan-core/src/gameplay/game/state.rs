@@ -123,7 +123,12 @@ impl GameState {
         self.bank_resource_exchange(player_id, trade.to_bank(), trade.from_bank())
     }
 
-    pub fn build(&mut self, player_id: PlayerId, build: Build) -> Result<(), BuildActionError> {
+    pub fn build(
+        &mut self,
+        player_id: impl Into<PlayerId>,
+        build: Build,
+    ) -> Result<(), BuildActionError> {
+        let player_id = player_id.into();
         use Build::*;
         use EstablishmentType::*;
 
@@ -170,8 +175,9 @@ impl GameState {
 
     pub fn buy_dev_card(
         &mut self,
-        player_id: PlayerId,
+        player_id: impl Into<PlayerId>,
     ) -> Result<crate::gameplay::primitives::dev_card::DevCardKind, BuyDevCardError> {
+        let player_id = player_id.into();
         if self.bank.dev_cards.is_empty() {
             return Err(BuyDevCardError::BankIsShort);
         }
@@ -205,8 +211,9 @@ impl GameState {
     pub fn transfer_to_bank(
         &mut self,
         resources: ResourceCollection,
-        player_id: PlayerId,
+        player_id: impl Into<PlayerId>,
     ) -> Result<(), BankResourceExchangeError> {
+        let player_id = player_id.into();
         ResourceCollection::transfer(
             self.players.get_mut(player_id).resources(),
             &mut self.bank.resources,
@@ -227,8 +234,9 @@ impl GameState {
     pub fn transfer_from_bank(
         &mut self,
         resources: ResourceCollection,
-        player_id: PlayerId,
+        player_id: impl Into<PlayerId>,
     ) -> Result<(), BankResourceExchangeError> {
+        let player_id = player_id.into();
         ResourceCollection::transfer(
             &mut self.bank.resources,
             self.players.get_mut(player_id).resources(),
@@ -239,10 +247,12 @@ impl GameState {
 
     pub fn players_resource_transfer(
         &mut self,
-        from_id: PlayerId,
-        to_id: PlayerId,
+        from_id: impl Into<PlayerId>,
+        to_id: impl Into<PlayerId>,
         resources: ResourceCollection,
     ) -> Result<(), PlayerResourceExchangeError> {
+        let from_id = from_id.into();
+        let to_id = to_id.into();
         log::trace!("players_resource_transfer");
         if from_id == to_id {
             return self
@@ -262,9 +272,11 @@ impl GameState {
 
     pub fn players_resource_exchange(
         &mut self,
-        lhs: (PlayerId, ResourceCollection),
-        rhs: (PlayerId, ResourceCollection),
+        lhs: (impl Into<PlayerId>, ResourceCollection),
+        rhs: (impl Into<PlayerId>, ResourceCollection),
     ) -> Result<(), PlayerResourceExchangeError> {
+        let lhs = (lhs.0.into(), lhs.1);
+        let rhs = (rhs.0.into(), rhs.1);
         let has_enough =
             |(id, rc): &(_, ResourceCollection)| self.players.get(*id).resources.has_enough(rc);
 
@@ -326,9 +338,10 @@ impl GameState {
     pub fn use_dev_card_with_rng<R: Rng + ?Sized>(
         &mut self,
         usage: DevCardUsage,
-        user: PlayerId,
+        user: impl Into<PlayerId>,
         rng: &mut R,
     ) -> Result<Option<Resource>, DevCardUsageError> {
+        let user = user.into();
         if !self
             .players
             .get(user)
@@ -482,7 +495,7 @@ impl GameState {
         user: PlayerId,
     ) -> Result<(), DevCardUsageError> {
         for id in self
-            .player_ids_starting_from(0)
+            .player_ids_starting_from(PlayerId::new(0))
             .into_iter()
             .filter(|id| *id != user)
         {
@@ -506,11 +519,15 @@ mod tests {
             game::init::GameInitializationState,
             primitives::{
                 dev_card::{DevCardKind, DevCardUsage, UsableDevCard},
+                player::PlayerId,
                 resource::{Resource, ResourceCollection},
             },
         },
     };
     use rand::SeedableRng;
+
+    const P0: PlayerId = PlayerId::new(0);
+    const P1: PlayerId = PlayerId::new(1);
 
     fn state_with_two_initial_settlements() -> (GameState, Hex) {
         let mut init = GameInitializationState::default();
@@ -545,7 +562,8 @@ mod tests {
         )
     }
 
-    fn give_active_knight(state: &mut GameState, player_id: usize) {
+    fn give_active_knight(state: &mut GameState, player_id: impl Into<PlayerId>) {
+        let player_id = player_id.into();
         state
             .players
             .get_mut(player_id)
@@ -597,7 +615,7 @@ mod tests {
             restored.players.get(0).resources(),
             state.players.get(0).resources()
         );
-        assert_eq!(restored.players.best_army(), Some(1));
+        assert_eq!(restored.players.best_army(), Some(P1));
         assert_eq!(
             restored.players.get(1).dev_cards().used[UsableDevCard::Knight],
             3
@@ -634,9 +652,9 @@ mod tests {
             .use_dev_card_with_rng(
                 DevCardUsage::Knight {
                     rob_hex: victim_hex,
-                    robbed_id: Some(1),
+                    robbed_id: Some(P1),
                 },
-                0,
+                P0,
                 &mut rng,
             )
             .expect("knight usage should be legal");
@@ -670,7 +688,7 @@ mod tests {
                     rob_hex: victim_hex,
                     robbed_id: None,
                 },
-                0,
+                P0,
                 &mut rng,
             )
             .expect_err("target must be provided when a player can be robbed");

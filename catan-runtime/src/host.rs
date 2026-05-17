@@ -13,7 +13,10 @@ use catan_agents::{
     random::RandomAgent,
     remote_agent::{CliRole, CliToHost, read_frame},
 };
-use catan_core::gameplay::game::{init::GameInitializationState, run::RunOptions};
+use catan_core::gameplay::{
+    game::{init::GameInitializationState, run::RunOptions},
+    primitives::player::PlayerId,
+};
 
 use crate::{
     config::{self, FieldConfig, InitialStateConfig, MatchConfig, ObserverConfig, PlayerConfig},
@@ -104,19 +107,24 @@ fn build_seats(players: &[PlayerConfig], exe: &Path) -> Result<Vec<Box<dyn Seat>
     players
         .iter()
         .enumerate()
-        .map(|(id, player)| match player {
-            PlayerConfig::Lazy => Ok(bot_seat(Box::new(LazyAgent::new(id)) as Box<dyn BotPolicy>)),
-            PlayerConfig::Greedy => Ok(bot_seat(
-                Box::new(GreedyAgent::new(id)) as Box<dyn BotPolicy>
-            )),
-            PlayerConfig::Random => Ok(bot_seat(
-                Box::new(RandomAgent::new(id)) as Box<dyn BotPolicy>
-            )),
-            PlayerConfig::Cli => {
-                let stream = spawn_cli_child(exe, &CliChildSpec::player(id))?;
-                let seat = RemoteCliSeat::new(id, stream)
-                    .map_err(|err| format!("failed to initialize remote CLI player: {err}"))?;
-                Ok(Box::new(seat) as Box<dyn Seat>)
+        .map(|(id, player)| {
+            let player_id = PlayerId::try_from(id).map_err(|err| err.to_string())?;
+            match player {
+                PlayerConfig::Lazy => Ok(bot_seat(
+                    Box::new(LazyAgent::new(player_id)) as Box<dyn BotPolicy>
+                )),
+                PlayerConfig::Greedy => Ok(bot_seat(
+                    Box::new(GreedyAgent::new(player_id)) as Box<dyn BotPolicy>
+                )),
+                PlayerConfig::Random => Ok(bot_seat(
+                    Box::new(RandomAgent::new(player_id)) as Box<dyn BotPolicy>
+                )),
+                PlayerConfig::Cli => {
+                    let stream = spawn_cli_child(exe, &CliChildSpec::player(player_id))?;
+                    let seat = RemoteCliSeat::new(player_id, stream)
+                        .map_err(|err| format!("failed to initialize remote CLI player: {err}"))?;
+                    Ok(Box::new(seat) as Box<dyn Seat>)
+                }
             }
         })
         .collect()
@@ -168,7 +176,7 @@ struct CliChildSpec {
 }
 
 impl CliChildSpec {
-    fn player(player_id: usize) -> Self {
+    fn player(player_id: PlayerId) -> Self {
         Self {
             role: CliRole::Player { player_id },
             label: format!("player:{player_id}"),
@@ -179,7 +187,8 @@ impl CliChildSpec {
         let role = match config {
             ObserverConfig::CliSpectator => CliRole::Spectator,
             ObserverConfig::CliPlayer { player_id } => CliRole::PlayerObserver {
-                player_id: *player_id,
+                player_id: PlayerId::try_from(*player_id)
+                    .expect("configured player id should fit in u8"),
             },
             ObserverConfig::CliOmniscient => CliRole::Omniscient,
             ObserverConfig::SnapshotObserver => CliRole::SnapshotObserver,
