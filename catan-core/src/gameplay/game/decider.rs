@@ -1,6 +1,6 @@
 use crate::gameplay::game::{
     decision::{DecisionId, DecisionKind, DecisionLifetime, OpenDecision},
-    event::{EventBatch, GameEvent},
+    event::{EventBatch, GameEndPlayerStats, GameEndStats, GameEvent},
     input::{GameInput, PlayerCommand},
     lifecycle::EngineCore,
     output::CommandRejectionReason,
@@ -13,12 +13,14 @@ use crate::gameplay::{
     primitives::{
         PortKind, Tile,
         build::{Build, Establishment},
+        dev_card::UsableDevCard,
+        player::player_ids,
         resource::ResourceCollection,
         trade::{BankTrade, BankTradeKind},
     },
 };
 use crate::{
-    algorithm,
+    algorithm, constants,
     math::dice::{DiceOutcome, DiceRoll},
 };
 use rand::{SeedableRng, rngs::SmallRng};
@@ -544,23 +546,53 @@ fn decide_build(
         return;
     }
     let candidate_index = GameIndex::rebuild(&candidate);
-    if GameQuery::new(&candidate, &candidate_index)
-        .check_win_condition()
-        .is_some()
-    {
-        return;
-    }
-
     events.push(GameEvent::DecisionClosed {
         decision_id: decision.id,
     });
     events.push(GameEvent::Built { player_id, build });
-    events.push(GameEvent::DecisionOpened(OpenDecision {
-        id: DecisionId(active.next_decision_id),
-        player_id,
-        kind: DecisionKind::RegularCommand,
-        lifetime: DecisionLifetime::OneShot,
-    }));
+    if let Some(winner) = GameQuery::new(&candidate, &candidate_index).check_win_condition() {
+        events.push(GameEvent::GameFinished {
+            result: GameResult::Win(winner),
+            stats: Some(game_end_stats(&candidate, &candidate_index)),
+        });
+    } else {
+        events.push(GameEvent::DecisionOpened(OpenDecision {
+            id: DecisionId(active.next_decision_id),
+            player_id,
+            kind: DecisionKind::RegularCommand,
+            lifetime: DecisionLifetime::OneShot,
+        }));
+    }
+}
+
+fn game_end_stats(
+    game: &crate::gameplay::game::state::GameState,
+    index: &GameIndex,
+) -> GameEndStats {
+    let query = GameQuery::new(game, index);
+    player_ids(game.players.count())
+        .map(|player_id| {
+            let build_and_dev_card_vp = query.count_dev_card_build_vp(player_id);
+            let has_longest_road = query.longest_road_owner() == Some(player_id);
+            let has_largest_army = query.largest_army_owner() == Some(player_id);
+            let award_vp = u16::from(has_longest_road) * constants::LONGEST_ROAD_VP
+                + u16::from(has_largest_army) * constants::LARGEST_ARMY_VP;
+            let builds = game.builds.by_player(player_id);
+            GameEndPlayerStats {
+                player_id,
+                total_vp: build_and_dev_card_vp + award_vp,
+                build_and_dev_card_vp,
+                award_vp,
+                settlements: builds.settlements_count() as u16,
+                cities: builds.cities_count() as u16,
+                roads: builds.roads_count() as u16,
+                longest_road_length: query.count_max_tract_length(player_id),
+                knights_used: game.players.get(player_id).dev_cards().used[UsableDevCard::Knight],
+                has_longest_road,
+                has_largest_army,
+            }
+        })
+        .collect()
 }
 
 fn decide_bank_trade(
