@@ -7,7 +7,8 @@ use catan_core::gameplay::{
         engine::GameEngine,
         init::GameInitializationState,
         input::{GameInput, PlayerCommand},
-        output::{GameOutput, OutputSink, VecOutputSink},
+        output::GameOutput,
+        projector,
         run::{GameResult, RunOptions},
         view::{ContextFactory, PlayerDecisionContext, SearchFactory, VisibilityConfig},
     },
@@ -136,15 +137,16 @@ impl SyncGameHost {
     }
 
     pub fn start(&mut self) {
-        let mut sink = VecOutputSink::default();
         if self.engine.is_started() {
             for decision in self.engine.pending_decisions() {
-                sink.push(GameOutput::DecisionOpened(decision.clone()));
+                self.outputs
+                    .push_back(GameOutput::DecisionOpened(decision.clone()));
             }
         } else {
-            self.engine.start(&mut sink);
+            let transition = self.engine.start().expect("engine start should reduce");
+            self.outputs
+                .extend(projector::project_transaction(&transition.transaction));
         }
-        self.outputs.extend(sink.into_vec());
     }
 
     pub fn submit(&mut self, command: SeatCommand) {
@@ -161,16 +163,16 @@ impl SyncGameHost {
                 return Some(result);
             }
             if let Some(input) = self.inputs.pop_front() {
-                let mut sink = VecOutputSink::default();
-                self.engine.apply(
-                    GameInput::Submit {
+                let transition = self
+                    .engine
+                    .apply(GameInput::Submit {
                         player_id: input.player_id,
                         decision_id: input.decision_id,
                         command: input.command,
-                    },
-                    &mut sink,
-                );
-                self.outputs.extend(sink.into_vec());
+                    })
+                    .expect("engine submit should reduce");
+                self.outputs
+                    .extend(projector::project_transaction(&transition.transaction));
                 continue;
             }
             return None;

@@ -9,9 +9,9 @@ use crate::{
             init::GameInitializationState,
             input::{GameInput, PlayerCommand, TradeCommand, TradeResponseCommand},
             lifecycle::EngineCore,
-            output::{CommandRejectionReason, GameOutput, VecOutputSink},
+            output::{CommandRejectionReason, GameOutput, OutputSink, VecOutputSink},
             phase::GamePhase,
-            reducer,
+            projector, reducer,
             run::RunOptions,
             trade::TradeScope,
         },
@@ -47,9 +47,33 @@ fn one_wood() -> ResourceCollection {
 fn started_engine() -> (GameEngine, Vec<GameOutput>) {
     let init = GameInitializationState::default();
     let mut engine = GameEngine::from_init(init, RunOptions::default());
-    let mut sink = VecOutputSink::default();
-    engine.start(&mut sink);
-    (engine, sink.into_vec())
+    let outputs = start_outputs(&mut engine);
+    (engine, outputs)
+}
+
+fn start_outputs(engine: &mut GameEngine) -> Vec<GameOutput> {
+    let transition = engine.start().expect("start should reduce");
+    projector::project_transaction(&transition.transaction)
+}
+
+fn apply_outputs(engine: &mut GameEngine, input: GameInput) -> (GameStatus, Vec<GameOutput>) {
+    let transition = engine.apply(input).expect("submit should reduce");
+    (
+        transition.status,
+        projector::project_transaction(&transition.transaction),
+    )
+}
+
+fn apply_to_sink(
+    engine: &mut GameEngine,
+    input: GameInput,
+    sink: &mut VecOutputSink,
+) -> GameStatus {
+    let (status, outputs) = apply_outputs(engine, input);
+    for output in outputs {
+        sink.push(output);
+    }
+    status
 }
 
 fn first_open_decision(outputs: &[GameOutput]) -> OpenDecision {
@@ -403,7 +427,8 @@ fn characterization_bank_trade_event_follows_decision_close() {
     let decision = engine.open_decision_for_test(0, DecisionKind::RegularCommand);
     let mut sink = VecOutputSink::default();
 
-    engine.apply(
+    apply_to_sink(
+        &mut engine,
         GameInput::Submit {
             player_id: P0,
             decision_id: decision.id,
@@ -451,7 +476,8 @@ fn characterization_trade_commit_event_order_closes_session_then_reopens_regular
     let peer = engine.open_decision_for_test(1, DecisionKind::TradeResponse { session });
     let mut sink = VecOutputSink::default();
 
-    engine.apply(
+    apply_to_sink(
+        &mut engine,
         GameInput::Submit {
             player_id: P0,
             decision_id: owner.id,
@@ -464,13 +490,15 @@ fn characterization_trade_commit_event_order_closes_session_then_reopens_regular
     assert!(matches!(
         events.as_slice(),
         [
+            GameEvent::DecisionClosed { decision_id: owner_closed },
+            GameEvent::DecisionClosed { decision_id: peer_closed },
             GameEvent::TradeCompleted { session_id, proposer_id: P0, peer_id: P1, .. },
             GameEvent::DecisionOpened(OpenDecision {
                 player_id: P0,
                 kind: DecisionKind::RegularCommand,
                 ..
             }),
-        ] if *session_id == session
+        ] if *owner_closed == owner.id && *peer_closed == peer.id && *session_id == session
     ));
     assert!(sink.as_slice().iter().any(|output| {
         matches!(output, GameOutput::DecisionClosed { decision_id } if *decision_id == owner.id)
@@ -486,7 +514,8 @@ fn wrong_player_is_rejected_without_closing_decision() {
     let decision = first_open_decision(&outputs);
     let mut sink = VecOutputSink::default();
 
-    let status = engine.apply(
+    let status = apply_to_sink(
+        &mut engine,
         GameInput::Submit {
             player_id: P1,
             decision_id: decision.id,
@@ -516,7 +545,8 @@ fn wrong_player_rejection_emits_domain_command_rejected_event() {
     let decision = first_open_decision(&outputs);
     let mut sink = VecOutputSink::default();
 
-    engine.apply(
+    apply_to_sink(
+        &mut engine,
         GameInput::Submit {
             player_id: P1,
             decision_id: decision.id,
@@ -551,7 +581,8 @@ fn stale_decision_is_rejected_after_one_shot_closes() {
         .expect("default board should have an initial placement");
     let mut sink = VecOutputSink::default();
 
-    engine.apply(
+    apply_to_sink(
+        &mut engine,
         GameInput::Submit {
             player_id: P0,
             decision_id: decision.id,
@@ -560,7 +591,8 @@ fn stale_decision_is_rejected_after_one_shot_closes() {
         &mut sink,
     );
     let mut stale_sink = VecOutputSink::default();
-    engine.apply(
+    apply_to_sink(
+        &mut engine,
         GameInput::Submit {
             player_id: P0,
             decision_id: decision.id,
@@ -598,7 +630,8 @@ fn buying_dev_card_emits_private_drawn_card_event() {
     let decision = engine.open_decision_for_test(0, DecisionKind::RegularCommand);
     let mut sink = VecOutputSink::default();
 
-    engine.apply(
+    apply_to_sink(
+        &mut engine,
         GameInput::Submit {
             player_id: P0,
             decision_id: decision.id,
@@ -628,7 +661,8 @@ fn moving_robber_emits_stolen_resource_event() {
     let decision = engine.open_decision_for_test(0, DecisionKind::MoveRobber);
     let mut sink = VecOutputSink::default();
 
-    engine.apply(
+    apply_to_sink(
+        &mut engine,
         GameInput::Submit {
             player_id: P0,
             decision_id: decision.id,
@@ -660,7 +694,8 @@ fn reusable_trade_response_decision_can_be_updated_until_session_closes() {
 
     let mut sink = VecOutputSink::default();
     let owner_decision = engine.open_decision_for_test(0, DecisionKind::RegularCommand);
-    engine.apply(
+    apply_to_sink(
+        &mut engine,
         GameInput::Submit {
             player_id: P0,
             decision_id: owner_decision.id,
@@ -690,7 +725,8 @@ fn reusable_trade_response_decision_can_be_updated_until_session_closes() {
         .expect("trade should open response decision for peer");
 
     let mut update_sink = VecOutputSink::default();
-    engine.apply(
+    apply_to_sink(
+        &mut engine,
         GameInput::Submit {
             player_id: P1,
             decision_id: response_decision.id,
@@ -700,7 +736,8 @@ fn reusable_trade_response_decision_can_be_updated_until_session_closes() {
         },
         &mut update_sink,
     );
-    engine.apply(
+    apply_to_sink(
+        &mut engine,
         GameInput::Submit {
             player_id: P1,
             decision_id: response_decision.id,
@@ -742,7 +779,8 @@ fn trade_commit_revalidates_resources_and_rejects_missing_resources() {
     let owner = engine.open_decision_for_test(0, DecisionKind::TradeOwnerAction { session });
     let mut sink = VecOutputSink::default();
 
-    engine.apply(
+    apply_to_sink(
+        &mut engine,
         GameInput::Submit {
             player_id: P0,
             decision_id: owner.id,
@@ -770,7 +808,8 @@ fn same_resource_on_both_sides_is_rejected() {
     let owner = engine.open_decision_for_test(0, DecisionKind::RegularCommand);
     let mut sink = VecOutputSink::default();
 
-    engine.apply(
+    apply_to_sink(
+        &mut engine,
         GameInput::Submit {
             player_id: P0,
             decision_id: owner.id,
@@ -811,7 +850,8 @@ fn player_can_reject_trade() {
     let response = engine.open_decision_for_test(1, DecisionKind::TradeResponse { session });
     let mut sink = VecOutputSink::default();
 
-    engine.apply(
+    apply_to_sink(
+        &mut engine,
         GameInput::Submit {
             player_id: P1,
             decision_id: response.id,
@@ -847,7 +887,8 @@ fn player_can_counter_trade() {
     let response = engine.open_decision_for_test(1, DecisionKind::TradeResponse { session });
     let mut sink = VecOutputSink::default();
 
-    engine.apply(
+    apply_to_sink(
+        &mut engine,
         GameInput::Submit {
             player_id: P1,
             decision_id: response.id,
@@ -903,7 +944,8 @@ fn active_player_can_commit_accepted_offer() {
     let owner = engine.open_decision_for_test(0, DecisionKind::TradeOwnerAction { session });
     let mut sink = VecOutputSink::default();
 
-    engine.apply(
+    apply_to_sink(
+        &mut engine,
         GameInput::Submit {
             player_id: P0,
             decision_id: owner.id,
@@ -943,7 +985,8 @@ fn active_player_can_cancel_trade_and_close_trade_decisions() {
     let peer = engine.open_decision_for_test(1, DecisionKind::TradeResponse { session });
     let mut sink = VecOutputSink::default();
 
-    engine.apply(
+    apply_to_sink(
+        &mut engine,
         GameInput::Submit {
             player_id: P0,
             decision_id: owner.id,
@@ -992,7 +1035,8 @@ fn player_cannot_accept_another_players_counteroffer() {
         engine.open_decision_for_test(1, DecisionKind::TradeResponse { session });
     let mut counter_sink = VecOutputSink::default();
 
-    engine.apply(
+    apply_to_sink(
+        &mut engine,
         GameInput::Submit {
             player_id: P1,
             decision_id: countering_player.id,
@@ -1019,7 +1063,8 @@ fn player_cannot_accept_another_players_counteroffer() {
     let other_player = engine.open_decision_for_test(2, DecisionKind::TradeResponse { session });
     let mut accept_sink = VecOutputSink::default();
 
-    engine.apply(
+    apply_to_sink(
+        &mut engine,
         GameInput::Submit {
             player_id: P2,
             decision_id: other_player.id,
@@ -1049,7 +1094,8 @@ fn targeted_trade_rejects_invalid_target() {
     let owner = engine.open_decision_for_test(0, DecisionKind::RegularCommand);
     let mut sink = VecOutputSink::default();
 
-    engine.apply(
+    apply_to_sink(
+        &mut engine,
         GameInput::Submit {
             player_id: P0,
             decision_id: owner.id,
@@ -1083,7 +1129,8 @@ fn submit_after_game_end_is_rejected_without_mutation() {
     engine.test_mark_ended();
     let mut sink = VecOutputSink::default();
 
-    let status = engine.apply(
+    let status = apply_to_sink(
+        &mut engine,
         GameInput::Submit {
             player_id: P0,
             decision_id: decision.id,

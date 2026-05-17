@@ -11,13 +11,15 @@ use crate::{
     gameplay::{
         field::state::{BoardLayout, BoardState},
         game::{
-            event::{EventCause, GameEndPlayerStats, GameEvent, ResourceDistribution},
+            event::{
+                EventCause, EventTransaction, GameEndPlayerStats, GameEvent, ResourceDistribution,
+            },
             index::GameIndex,
             init::GameInitializationState,
             lifecycle::{ActiveEngine, EngineCore, FinishedEngine},
             projector,
             query::GameQuery,
-            reducer,
+            reducer::{self, ReplayError},
             run::{GameResult, GameRunStats, RunOptions},
             state::GameState,
         },
@@ -40,7 +42,7 @@ use smallvec::SmallVec;
 use super::{
     decision::{DecisionId, DecisionKind, DecisionLifetime, OpenDecision, PendingDecisions},
     input::{GameInput, PlayerCommand, TradeCommand, TradeResponseCommand},
-    output::{CommandRejectionReason, GameOutput, OutputSink},
+    output::{CommandRejectionReason, GameOutput, OutputSink, VecOutputSink},
     phase::{GamePhase, TradePhase},
     trade::{
         TradeOfferId, TradeResponseState, TradeScope, TradeSession, TradeSessionId,
@@ -52,6 +54,23 @@ use super::{
 pub enum GameStatus {
     Waiting,
     Ended,
+}
+
+#[derive(Debug, Clone)]
+pub struct EngineTransition {
+    pub status: GameStatus,
+    pub transaction: EventTransaction,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EngineError {
+    Replay(ReplayError),
+}
+
+impl From<ReplayError> for EngineError {
+    fn from(value: ReplayError) -> Self {
+        Self::Replay(value)
+    }
 }
 
 pub struct GameEngine {
@@ -222,9 +241,15 @@ impl GameEngine {
         self.runtime.dice = RandomDiceRoller::with_seed(seed);
     }
 
-    pub fn start(&mut self, sink: &mut impl OutputSink) -> GameStatus {
+    pub fn start(&mut self) -> Result<EngineTransition, EngineError> {
+        let mut sink = VecOutputSink::default();
+        let status = self.start_projected(&mut sink)?;
+        Ok(self.transition_from_outputs(EventCause::Start, status, sink.into_vec()))
+    }
+
+    fn start_projected(&mut self, sink: &mut impl OutputSink) -> Result<GameStatus, EngineError> {
         if self.phase != GamePhase::NotStarted {
-            return GameStatus::Waiting;
+            return Ok(GameStatus::Waiting);
         }
         if self.init.is_some() {
             let tx_id = self.begin_transaction(EventCause::Start);
@@ -233,23 +258,44 @@ impl GameEngine {
             transaction.events =
                 crate::gameplay::game::decider::decide(&self.core, GameInput::Start);
             for event in &transaction.events {
-                reducer::reduce(&mut self.core, event).expect("start transaction should reduce");
+                reducer::reduce(&mut self.core, event)?;
                 self.record_event(event);
             }
             for output in projector::project_transaction(&transaction) {
                 sink.push(output);
             }
-            return GameStatus::Waiting;
+            return Ok(GameStatus::Waiting);
         }
         self.begin_transaction(EventCause::Start);
         self.emit_event(GameEvent::GameStarted, sink);
         self.start_turn(sink);
-        GameStatus::Waiting
+        Ok(GameStatus::Waiting)
     }
 
-    pub fn apply(&mut self, input: GameInput, sink: &mut impl OutputSink) -> GameStatus {
-        match input {
-            GameInput::Start => self.start(sink),
+    pub fn apply(&mut self, input: GameInput) -> Result<EngineTransition, EngineError> {
+        let mut sink = VecOutputSink::default();
+        let cause = match &input {
+            GameInput::Start => EventCause::Start,
+            GameInput::Submit {
+                player_id,
+                decision_id,
+                ..
+            } => EventCause::PlayerCommand {
+                player_id: *player_id,
+                decision_id: *decision_id,
+            },
+        };
+        let status = self.apply_projected(input, &mut sink)?;
+        Ok(self.transition_from_outputs(cause, status, sink.into_vec()))
+    }
+
+    fn apply_projected(
+        &mut self,
+        input: GameInput,
+        sink: &mut impl OutputSink,
+    ) -> Result<GameStatus, EngineError> {
+        Ok(match input {
+            GameInput::Start => return self.start_projected(sink),
             GameInput::Submit {
                 player_id,
                 decision_id,
@@ -261,6 +307,30 @@ impl GameEngine {
                 });
                 self.apply_submit(player_id, decision_id, command, sink)
             }
+        })
+    }
+
+    fn transition_from_outputs(
+        &self,
+        cause: EventCause,
+        status: GameStatus,
+        outputs: Vec<GameOutput>,
+    ) -> EngineTransition {
+        let mut tx_id = self.runtime.current_tx_id;
+        let mut events = crate::gameplay::game::event::EventBatch::new();
+        for output in outputs {
+            if let GameOutput::Event(record) = output {
+                tx_id = record.tx_id;
+                events.push(record.event);
+            }
+        }
+        EngineTransition {
+            status,
+            transaction: EventTransaction {
+                tx_id,
+                cause,
+                events,
+            },
         }
     }
 
@@ -1543,10 +1613,14 @@ impl GameEngine {
         if let Some(session) = self.trade_session_mut(session_id) {
             session.open = false;
         }
-        for decision in self.pending.close_session(session_id) {
-            sink.push(GameOutput::DecisionClosed {
-                decision_id: decision.id,
-            });
+        let closed = self.pending.close_session(session_id);
+        for decision in closed {
+            self.emit_event(
+                GameEvent::DecisionClosed {
+                    decision_id: decision.id,
+                },
+                sink,
+            );
         }
     }
 
@@ -1578,10 +1652,14 @@ impl GameEngine {
     }
 
     fn close_all_decisions(&mut self, sink: &mut impl OutputSink) {
-        for decision in self.pending.close_all() {
-            sink.push(GameOutput::DecisionClosed {
-                decision_id: decision.id,
-            });
+        let closed = self.pending.close_all().into_iter().collect::<Vec<_>>();
+        for decision in closed {
+            self.emit_event(
+                GameEvent::DecisionClosed {
+                    decision_id: decision.id,
+                },
+                sink,
+            );
         }
     }
 

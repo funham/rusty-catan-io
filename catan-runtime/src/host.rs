@@ -401,7 +401,7 @@ fn apple_quote(value: &str) -> String {
 mod tests {
     use catan_agents::remote_agent::CliRole;
     use catan_core::gameplay::game::{
-        engine::GameEngine, init::GameInitializationState, output::VecOutputSink, run::RunOptions,
+        engine::GameEngine, init::GameInitializationState, run::RunOptions,
     };
 
     use crate::{
@@ -453,8 +453,7 @@ mod tests {
         let dir = unique_test_dir();
         let mut engine =
             GameEngine::from_init(GameInitializationState::default(), RunOptions::default());
-        let mut sink = VecOutputSink::default();
-        engine.start(&mut sink);
+        engine.start().expect("engine should start");
         let mut store = SnapshotStore::new_in(dir.clone()).unwrap();
         let snapshot_dir = store.write_checkpoint(&engine).unwrap();
         let config = MatchConfig {

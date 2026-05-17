@@ -6,7 +6,8 @@ use catan_core::gameplay::{
         engine::GameEngine,
         init::GameInitializationState,
         input::{GameInput, PlayerCommand},
-        output::{GameOutput, VecOutputSink},
+        output::GameOutput,
+        projector,
         run::{GameResult, GameRunStats, RunOptions},
         view::{ContextFactory, SearchFactory, VisibilityConfig},
     },
@@ -39,9 +40,15 @@ impl SimulationHost {
 
     pub fn run(&mut self) -> GameResult {
         let mut queue = VecDeque::new();
-        let mut sink = VecOutputSink::default();
-        self.engine.start(&mut sink);
-        queue.extend(sink.into_vec());
+        let transition = match self.engine.start() {
+            Ok(transition) => transition,
+            Err(err) => {
+                return GameResult::Interrupted {
+                    reason: format!("engine start failed: {err:?}"),
+                };
+            }
+        };
+        queue.extend(projector::project_transaction(&transition.transaction));
 
         let mut steps = 0_u64;
         while self.engine.result().is_none() {
@@ -68,16 +75,19 @@ impl SimulationHost {
                 };
             };
 
-            let mut sink = VecOutputSink::default();
-            self.engine.apply(
-                GameInput::Submit {
-                    player_id,
-                    decision_id: decision.id,
-                    command,
-                },
-                &mut sink,
-            );
-            queue.extend(sink.into_vec());
+            let transition = match self.engine.apply(GameInput::Submit {
+                player_id,
+                decision_id: decision.id,
+                command,
+            }) {
+                Ok(transition) => transition,
+                Err(err) => {
+                    return GameResult::Interrupted {
+                        reason: format!("engine apply failed: {err:?}"),
+                    };
+                }
+            };
+            queue.extend(projector::project_transaction(&transition.transaction));
         }
 
         self.engine
