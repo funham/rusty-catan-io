@@ -243,7 +243,12 @@ mod tests {
     fn bot_seat_responds_immediately() {
         let init = GameInitializationState::default();
         let seats = (0..init.board.n_players)
-            .map(|id| bot_seat(Box::new(LazyAgent::new(id))))
+            .map(|id| {
+                bot_seat(Box::new(LazyAgent::new(
+                    catan_core::gameplay::primitives::player::PlayerId::try_from(id)
+                        .expect("test player id should fit"),
+                )))
+            })
             .collect();
         let mut host = SyncGameHost::new(
             init,
@@ -316,7 +321,12 @@ mod tests {
     fn output_observer_receives_engine_outputs() {
         let init = GameInitializationState::default();
         let seats = (0..init.board.n_players)
-            .map(|id| bot_seat(Box::new(LazyAgent::new(id))))
+            .map(|id| {
+                bot_seat(Box::new(LazyAgent::new(
+                    catan_core::gameplay::primitives::player::PlayerId::try_from(id)
+                        .expect("test player id should fit"),
+                )))
+            })
             .collect();
         let output_count = std::rc::Rc::new(std::cell::Cell::new(0));
         let observer = Box::new(CountingObserver {
@@ -347,7 +357,12 @@ mod tests {
     fn terminal_outputs_are_delivered_before_host_returns_result() {
         let init = GameInitializationState::default();
         let seats = (0..init.board.n_players)
-            .map(|id| bot_seat(Box::new(LazyAgent::new(id))))
+            .map(|id| {
+                bot_seat(Box::new(LazyAgent::new(
+                    catan_core::gameplay::primitives::player::PlayerId::try_from(id)
+                        .expect("test player id should fit"),
+                )))
+            })
             .collect();
         let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
         let observer = Box::new(EventRecordingObserver {

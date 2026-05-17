@@ -126,7 +126,12 @@ mod tests {
     fn lazy_bots_reach_turn_limit() {
         let init = GameInitializationState::default();
         let bots = (0..init.board.n_players)
-            .map(|id| Box::new(LazyAgent::new(id)) as Box<dyn BotPolicy>)
+            .map(|id| {
+                Box::new(LazyAgent::new(
+                    catan_core::gameplay::primitives::player::PlayerId::try_from(id)
+                        .expect("test player id should fit"),
+                )) as Box<dyn BotPolicy>
+            })
             .collect();
         let mut host = SimulationHost::new(
             init,

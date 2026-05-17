@@ -31,15 +31,19 @@ impl From<u8> for PlayerId {
     }
 }
 
-impl From<usize> for PlayerId {
-    fn from(value: usize) -> Self {
-        Self(u8::try_from(value).expect("player id should fit in u8"))
+impl TryFrom<usize> for PlayerId {
+    type Error = std::num::TryFromIntError;
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        Ok(Self(u8::try_from(value)?))
     }
 }
 
-impl From<i32> for PlayerId {
-    fn from(value: i32) -> Self {
-        Self(u8::try_from(value).expect("player id should fit in u8"))
+impl TryFrom<i32> for PlayerId {
+    type Error = std::num::TryFromIntError;
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        Ok(Self(u8::try_from(value)?))
     }
 }
 
