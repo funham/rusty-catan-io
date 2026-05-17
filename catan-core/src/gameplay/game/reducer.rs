@@ -317,6 +317,7 @@ pub fn reduce(lifecycle: &mut EngineCore, event: &GameEvent) -> Result<(), Repla
                 .game
                 .trade_with_bank(*player_id, *trade)
                 .map_err(|_| ReplayError::InvalidResourceTransfer)?;
+            active.stats.regular_actions += 1;
             active.stats.bank_trades += 1;
         }
         GameEvent::TradeOpened {

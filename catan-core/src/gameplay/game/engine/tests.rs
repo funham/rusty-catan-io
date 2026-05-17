@@ -388,6 +388,66 @@ fn decider_end_move_emits_turn_transition_events() {
 }
 
 #[test]
+fn decider_valid_bank_trade_emits_trade_and_reopens_regular_decision() {
+    let mut lifecycle = EngineCore::active(GameInitializationState::default().finish());
+    let decision = OpenDecision {
+        id: crate::gameplay::game::decision::DecisionId(7),
+        player_id: P0,
+        kind: DecisionKind::RegularCommand,
+        lifetime: DecisionLifetime::OneShot,
+    };
+    let active = lifecycle.active_mut().expect("lifecycle should be active");
+    active.phase = GamePhase::Turn(crate::gameplay::game::phase::TurnPhase::RegularCommand);
+    active.next_decision_id = 8;
+    active
+        .game
+        .transfer_from_bank(
+            ResourceCollection {
+                brick: 4,
+                ..ResourceCollection::ZERO
+            },
+            P0,
+        )
+        .unwrap();
+    active.pending.push(decision.clone());
+    let trade = BankTrade {
+        kind: BankTradeKind::BankGeneric,
+        give: Resource::Brick,
+        take: Resource::Wood,
+    };
+
+    let events = decider::decide(
+        &lifecycle,
+        GameInput::Submit {
+            player_id: P0,
+            decision_id: decision.id,
+            command: PlayerCommand::Regular(RegularCommand::TradeWithBank(trade)),
+        },
+    );
+
+    assert!(matches!(
+        events.as_slice(),
+        [
+            GameEvent::DecisionClosed { decision_id },
+            GameEvent::BankTradeCompleted {
+                player_id: P0,
+                trade: emitted,
+            },
+            GameEvent::DecisionOpened(OpenDecision {
+                id,
+                player_id: P0,
+                kind: DecisionKind::RegularCommand,
+                lifetime: DecisionLifetime::OneShot,
+            }),
+        ] if *decision_id == decision.id
+            && emitted.kind == trade.kind
+            && emitted.give == trade.give
+            && emitted.take == trade.take
+            && id.0 == 8
+    ));
+}
+
+#[test]
 fn start_opens_one_shot_init_decision() {
     let (_engine, outputs) = started_engine();
 

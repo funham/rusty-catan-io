@@ -9,7 +9,12 @@ use crate::gameplay::game::{
 };
 use crate::gameplay::{
     game::command::RegularCommand,
-    primitives::{Tile, build::Establishment, resource::ResourceCollection},
+    primitives::{
+        PortKind, Tile,
+        build::Establishment,
+        resource::ResourceCollection,
+        trade::{BankTrade, BankTradeKind},
+    },
 };
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -102,10 +107,64 @@ fn decide_submit(
         (DecisionKind::RegularCommand, PlayerCommand::Regular(RegularCommand::EndMove)) => {
             decide_end_move(active, decision, context, &mut events);
         }
+        (
+            DecisionKind::RegularCommand,
+            PlayerCommand::Regular(RegularCommand::TradeWithBank(trade)),
+        ) => {
+            decide_bank_trade(active, decision, trade, &mut events);
+        }
         _ => {}
     }
 
     events
+}
+
+fn decide_bank_trade(
+    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    decision: OpenDecision,
+    trade: BankTrade,
+    events: &mut EventBatch,
+) {
+    let player_id = decision.player_id;
+    if !can_trade_with_bank(active, player_id, trade) {
+        return;
+    }
+
+    events.push(GameEvent::DecisionClosed {
+        decision_id: decision.id,
+    });
+    events.push(GameEvent::BankTradeCompleted { player_id, trade });
+    events.push(GameEvent::DecisionOpened(OpenDecision {
+        id: DecisionId(active.next_decision_id),
+        player_id,
+        kind: DecisionKind::RegularCommand,
+        lifetime: DecisionLifetime::OneShot,
+    }));
+}
+
+fn can_trade_with_bank(
+    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    player_id: crate::gameplay::primitives::player::PlayerId,
+    trade: BankTrade,
+) -> bool {
+    let required_port = match trade.kind {
+        BankTradeKind::BankGeneric => None,
+        BankTradeKind::PortGeneric => Some(PortKind::Universal),
+        BankTradeKind::PortSpecific => Some(PortKind::Special(trade.give)),
+    };
+    if let Some(required_port) = required_port
+        && !active.index.ports_acquired[player_id.index()].contains(&required_port)
+    {
+        return false;
+    }
+
+    active
+        .game
+        .players
+        .get(player_id)
+        .resources()
+        .has_enough(&trade.to_bank())
+        && active.game.bank.can_pay(&trade.from_bank())
 }
 
 fn decide_end_move(
