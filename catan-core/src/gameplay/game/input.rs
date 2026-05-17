@@ -33,7 +33,7 @@ pub enum PlayerCommand {
     PostDice(PostDiceCommand),
     PostDevCard(PostDevCardCommand),
     Regular(RegularCommand),
-    MoveRobbers(MoveRobberCommand),
+    MoveRobber(MoveRobberCommand),
     ChooseRobbedPlayer(ChooseRobbedPlayerCommand),
     DropHalf(DropHalfCommand),
     Trade(TradeCommand),

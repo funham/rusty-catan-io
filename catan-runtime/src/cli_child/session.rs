@@ -218,7 +218,7 @@ fn decision_request_from_output(
         DecisionKind::PostDiceCommand => DecisionRequestFrame::PostDice(envelope),
         DecisionKind::PostDevCardCommand => DecisionRequestFrame::PostDevCard(envelope),
         DecisionKind::RegularCommand => DecisionRequestFrame::Regular(envelope),
-        DecisionKind::MoveRobber => DecisionRequestFrame::MoveRobbers(envelope),
+        DecisionKind::MoveRobber => DecisionRequestFrame::MoveRobber(envelope),
         DecisionKind::ChooseRobbedPlayer { .. } => {
             DecisionRequestFrame::ChoosePlayerToRob(envelope)
         }
@@ -248,8 +248,8 @@ fn command_from_decision_response(
         (DecisionKind::RegularCommand, DecisionResponseFrame::Regular(action)) => {
             Some(PlayerCommand::Regular(action))
         }
-        (DecisionKind::MoveRobber, DecisionResponseFrame::MoveRobbers(action)) => {
-            Some(PlayerCommand::MoveRobbers(action))
+        (DecisionKind::MoveRobber, DecisionResponseFrame::MoveRobber(action)) => {
+            Some(PlayerCommand::MoveRobber(action))
         }
         (
             DecisionKind::ChooseRobbedPlayer { .. },
@@ -564,15 +564,15 @@ fn handle_decision(
             log::trace!("Regular action result: {:?}", action);
             Ok(DecisionResponseFrame::Regular(action))
         }
-        DecisionRequestFrame::MoveRobbers(envelope) => {
+        DecisionRequestFrame::MoveRobber(envelope) => {
             log::trace!(
                 target: "catan_runtime::cli_child::session",
-                "processing MoveRobbers decision id={}",
+                "processing MoveRobber decision id={}",
                 envelope.request_id
             );
             let hex = read_hex(ui, &envelope, "robber hex: ")?;
             log::trace!("Selected robber hex: {:?}", hex);
-            Ok(DecisionResponseFrame::MoveRobbers(MoveRobberCommand(hex)))
+            Ok(DecisionResponseFrame::MoveRobber(MoveRobberCommand(hex)))
         }
         DecisionRequestFrame::ChoosePlayerToRob(envelope) => {
             log::trace!(

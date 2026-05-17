@@ -73,8 +73,8 @@ impl GreedyAgent {
         greedy_regular_action(&context, self.id)
     }
 
-    fn move_robbers(&mut self, context: PlayerDecisionContext<'_>) -> MoveRobberCommand {
-        greedy_move_robbers(context)
+    fn move_robber(&mut self, context: PlayerDecisionContext<'_>) -> MoveRobberCommand {
+        greedy_move_robber(context)
     }
 
     fn choose_player_to_rob(
@@ -116,9 +116,7 @@ impl BotPolicy for GreedyAgent {
             DecisionKind::RegularCommand => {
                 Some(PlayerCommand::Regular(self.regular_action(context)))
             }
-            DecisionKind::MoveRobber => {
-                Some(PlayerCommand::MoveRobbers(self.move_robbers(context)))
-            }
+            DecisionKind::MoveRobber => Some(PlayerCommand::MoveRobber(self.move_robber(context))),
             DecisionKind::ChooseRobbedPlayer { robber_pos } => Some(
                 PlayerCommand::ChooseRobbedPlayer(self.choose_player_to_rob(context, robber_pos)),
             ),
@@ -141,7 +139,7 @@ pub fn greedy_choose_player_to_rob(
     lazy::lazy_choose_player_to_rob(context, robber_pos) // TODO: try to peek the most wanted card
 }
 
-pub fn greedy_move_robbers(context: PlayerDecisionContext<'_>) -> MoveRobberCommand {
+pub fn greedy_move_robber(context: PlayerDecisionContext<'_>) -> MoveRobberCommand {
     let hex = match context.counting() {
         // blocking max amount of players with the most producing hex
         CountingMode::Human => most_occupied_producing_tile(context),

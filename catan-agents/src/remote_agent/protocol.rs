@@ -137,7 +137,7 @@ pub enum DecisionRequestFrame {
     PostDice(DecisionRequestEnvelope),
     PostDevCard(DecisionRequestEnvelope),
     Regular(DecisionRequestEnvelope),
-    MoveRobbers(DecisionRequestEnvelope),
+    MoveRobber(DecisionRequestEnvelope),
     ChoosePlayerToRob(DecisionRequestEnvelope),
     AnswerTrade(DecisionRequestEnvelope),
     DropHalf(DecisionRequestEnvelope),
@@ -150,7 +150,7 @@ pub enum DecisionResponseFrame {
     PostDice(PostDiceCommand),
     PostDevCard(PostDevCardCommand),
     Regular(RegularCommand),
-    MoveRobbers(MoveRobberCommand),
+    MoveRobber(MoveRobberCommand),
     ChoosePlayerToRob(ChooseRobbedPlayerCommand),
     AnswerTrade(TradeAnswer),
     DropHalf(DropHalfCommand),
@@ -194,7 +194,7 @@ impl DecisionRequestFrame {
             Self::PostDice(_) => "post_dice",
             Self::PostDevCard(_) => "post_dev_card",
             Self::Regular(_) => "regular",
-            Self::MoveRobbers(_) => "move_robbers",
+            Self::MoveRobber(_) => "move_robber",
             Self::ChoosePlayerToRob(_) => "choose_player_to_rob",
             Self::AnswerTrade(_) => "answer_trade",
             Self::DropHalf(_) => "drop_half",
@@ -208,7 +208,7 @@ impl DecisionRequestFrame {
             | Self::PostDice(envelope)
             | Self::PostDevCard(envelope)
             | Self::Regular(envelope)
-            | Self::MoveRobbers(envelope)
+            | Self::MoveRobber(envelope)
             | Self::ChoosePlayerToRob(envelope)
             | Self::AnswerTrade(envelope)
             | Self::DropHalf(envelope) => envelope,

@@ -151,10 +151,10 @@ impl RemoteCliAgent {
         }
     }
 
-    fn move_robbers(&mut self, context: PlayerDecisionContext<'_>) -> MoveRobberCommand {
+    fn move_robber(&mut self, context: PlayerDecisionContext<'_>) -> MoveRobberCommand {
         let envelope = self.envelope(&context, None);
-        match self.request(DecisionRequestFrame::MoveRobbers(envelope)) {
-            DecisionResponseFrame::MoveRobbers(action) => action,
+        match self.request(DecisionRequestFrame::MoveRobber(envelope)) {
+            DecisionResponseFrame::MoveRobber(action) => action,
             other => panic!("unexpected CLI response: {other:?}"),
         }
     }
@@ -214,9 +214,7 @@ impl BotPolicy for RemoteCliAgent {
             DecisionKind::RegularCommand => {
                 Some(PlayerCommand::Regular(self.regular_action(context)))
             }
-            DecisionKind::MoveRobber => {
-                Some(PlayerCommand::MoveRobbers(self.move_robbers(context)))
-            }
+            DecisionKind::MoveRobber => Some(PlayerCommand::MoveRobber(self.move_robber(context))),
             DecisionKind::ChooseRobbedPlayer { robber_pos } => Some(
                 PlayerCommand::ChooseRobbedPlayer(self.choose_player_to_rob(context, robber_pos)),
             ),

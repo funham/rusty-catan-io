@@ -52,8 +52,8 @@ impl LazyAgent {
         RegularCommand::EndMove
     }
 
-    fn move_robbers(&mut self, context: PlayerDecisionContext<'_>) -> MoveRobberCommand {
-        lazy_move_robbers(context)
+    fn move_robber(&mut self, context: PlayerDecisionContext<'_>) -> MoveRobberCommand {
+        lazy_move_robber(context)
     }
 
     fn choose_player_to_rob(
@@ -95,9 +95,7 @@ impl BotPolicy for LazyAgent {
             DecisionKind::RegularCommand => {
                 Some(PlayerCommand::Regular(self.regular_action(context)))
             }
-            DecisionKind::MoveRobber => {
-                Some(PlayerCommand::MoveRobbers(self.move_robbers(context)))
-            }
+            DecisionKind::MoveRobber => Some(PlayerCommand::MoveRobber(self.move_robber(context))),
             DecisionKind::ChooseRobbedPlayer { robber_pos } => Some(
                 PlayerCommand::ChooseRobbedPlayer(self.choose_player_to_rob(context, robber_pos)),
             ),
@@ -136,7 +134,7 @@ pub fn lazy_choose_player_to_rob(
     ChooseRobbedPlayerCommand(id)
 }
 
-pub fn lazy_move_robbers(context: PlayerDecisionContext<'_>) -> MoveRobberCommand {
+pub fn lazy_move_robber(context: PlayerDecisionContext<'_>) -> MoveRobberCommand {
     for hex in context.public.board.arrangement.hex_iter() {
         if hex != context.public.board_state.robber_pos {
             return MoveRobberCommand(hex);

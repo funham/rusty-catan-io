@@ -283,7 +283,7 @@ fn decide_submit(
         }
         (
             DecisionKind::MoveRobber,
-            PlayerCommand::MoveRobbers(crate::gameplay::game::command::MoveRobberCommand(hex)),
+            PlayerCommand::MoveRobber(crate::gameplay::game::command::MoveRobberCommand(hex)),
         ) => {
             decide_move_robber(active, decision, hex, context, &mut events);
         }

@@ -1,11 +1,3 @@
-pub mod action {
-    pub use super::command::{
-        ChooseRobbedPlayerCommand as ChoosePlayerToRobAction, DropHalfCommand as DropHalfAction,
-        InitCommand as InitAction, InitialPlacementCommand as InitStageAction,
-        MoveRobberCommand as MoveRobbersAction, PostDevCardCommand as PostDevCardAction,
-        PostDiceCommand as PostDiceAction, RegularCommand as RegularAction,
-    };
-}
 pub mod command;
 pub mod decider;
 pub mod decision;

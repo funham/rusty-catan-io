@@ -409,7 +409,7 @@ impl GameEngine {
                 let robbed_id = match (decision.kind, command) {
                     (
                         DecisionKind::MoveRobber,
-                        PlayerCommand::MoveRobbers(
+                        PlayerCommand::MoveRobber(
                             crate::gameplay::game::command::MoveRobberCommand(hex),
                         ),
                     ) => {
@@ -583,7 +583,7 @@ impl GameEngine {
             (DecisionKind::TradeOwnerAction { session }, PlayerCommand::Trade(command)) => {
                 self.apply_trade_owner_session_command(decision, session, command, sink)
             }
-            (DecisionKind::MoveRobber, PlayerCommand::MoveRobbers(MoveRobberCommand(hex))) => {
+            (DecisionKind::MoveRobber, PlayerCommand::MoveRobber(MoveRobberCommand(hex))) => {
                 self.apply_move_robber(decision, hex, sink)
             }
             (

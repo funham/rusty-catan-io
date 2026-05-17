@@ -101,7 +101,7 @@ impl CliAgent {
         TerminalUi::read_regular_action()
     }
 
-    fn move_robbers(&mut self, context: PlayerDecisionContext<'_>) -> MoveRobberCommand {
+    fn move_robber(&mut self, context: PlayerDecisionContext<'_>) -> MoveRobberCommand {
         let _guard = self.terminal.inner.lock().expect("terminal mutex poisoned");
         TerminalUi::print_decision_context("Move robber", &context);
         MoveRobberCommand(TerminalUi::read_hex("robber hex: "))
@@ -156,9 +156,7 @@ impl BotPolicy for CliAgent {
             DecisionKind::RegularCommand => {
                 Some(PlayerCommand::Regular(self.regular_action(context)))
             }
-            DecisionKind::MoveRobber => {
-                Some(PlayerCommand::MoveRobbers(self.move_robbers(context)))
-            }
+            DecisionKind::MoveRobber => Some(PlayerCommand::MoveRobber(self.move_robber(context))),
             DecisionKind::ChooseRobbedPlayer { robber_pos } => Some(
                 PlayerCommand::ChooseRobbedPlayer(self.choose_player_to_rob(context, robber_pos)),
             ),

@@ -80,8 +80,8 @@ impl<R: Rng> RandomAgent<R> {
         rand_regular_action(context, &mut self.rng)
     }
 
-    fn move_robbers(&mut self, context: PlayerDecisionContext<'_>) -> MoveRobberCommand {
-        rand_move_robbers(context, &mut self.rng)
+    fn move_robber(&mut self, context: PlayerDecisionContext<'_>) -> MoveRobberCommand {
+        rand_move_robber(context, &mut self.rng)
     }
 
     fn choose_player_to_rob(
@@ -123,9 +123,7 @@ impl<R: Rng> BotPolicy for RandomAgent<R> {
             DecisionKind::RegularCommand => {
                 Some(PlayerCommand::Regular(self.regular_action(context)))
             }
-            DecisionKind::MoveRobber => {
-                Some(PlayerCommand::MoveRobbers(self.move_robbers(context)))
-            }
+            DecisionKind::MoveRobber => Some(PlayerCommand::MoveRobber(self.move_robber(context))),
             DecisionKind::ChooseRobbedPlayer { robber_pos } => Some(
                 PlayerCommand::ChooseRobbedPlayer(self.choose_player_to_rob(context, robber_pos)),
             ),
@@ -197,7 +195,7 @@ pub fn rand_regular_action(
     RegularCommand::EndMove
 }
 
-pub fn rand_move_robbers(
+pub fn rand_move_robber(
     context: PlayerDecisionContext<'_>,
     rng: &mut impl Rng,
 ) -> MoveRobberCommand {

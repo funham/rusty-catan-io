@@ -890,7 +890,7 @@ fn wrong_player_is_rejected_without_closing_decision() {
         GameInput::Submit {
             player_id: P1,
             decision_id: decision.id,
-            command: PlayerCommand::MoveRobbers(crate::gameplay::game::command::MoveRobberCommand(
+            command: PlayerCommand::MoveRobber(crate::gameplay::game::command::MoveRobberCommand(
                 Hex::new(0, 0),
             )),
         },
@@ -921,7 +921,7 @@ fn wrong_player_rejection_emits_domain_command_rejected_event() {
         GameInput::Submit {
             player_id: P1,
             decision_id: decision.id,
-            command: PlayerCommand::MoveRobbers(crate::gameplay::game::command::MoveRobberCommand(
+            command: PlayerCommand::MoveRobber(crate::gameplay::game::command::MoveRobberCommand(
                 Hex::new(0, 0),
             )),
         },
@@ -1037,7 +1037,7 @@ fn moving_robber_emits_stolen_resource_event() {
         GameInput::Submit {
             player_id: P0,
             decision_id: decision.id,
-            command: PlayerCommand::MoveRobbers(crate::gameplay::game::command::MoveRobberCommand(
+            command: PlayerCommand::MoveRobber(crate::gameplay::game::command::MoveRobberCommand(
                 victim_hex,
             )),
         },
