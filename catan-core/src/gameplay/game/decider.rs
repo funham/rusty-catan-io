@@ -183,10 +183,205 @@ fn decide_submit(
                 &mut events,
             );
         }
+        (
+            DecisionKind::DropHalf { required },
+            PlayerCommand::DropHalf(crate::gameplay::game::command::DropHalfCommand(resources)),
+        ) => {
+            decide_drop_half(active, decision, required, resources, &mut events);
+        }
+        (
+            DecisionKind::MoveRobber,
+            PlayerCommand::MoveRobbers(crate::gameplay::game::command::MoveRobberCommand(hex)),
+        ) => {
+            decide_move_robber(active, decision, hex, context, &mut events);
+        }
+        (
+            DecisionKind::ChooseRobbedPlayer { robber_pos },
+            PlayerCommand::ChooseRobbedPlayer(
+                crate::gameplay::game::command::ChooseRobbedPlayerCommand(robbed_id),
+            ),
+        ) => {
+            decide_choose_robbed_player(
+                active,
+                decision,
+                robber_pos,
+                robbed_id,
+                context,
+                &mut events,
+            );
+        }
         _ => {}
     }
 
     events
+}
+
+fn decide_drop_half(
+    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    decision: OpenDecision,
+    required: u16,
+    resources: ResourceCollection,
+    events: &mut EventBatch,
+) {
+    let player_id = decision.player_id;
+    if resources.total() != required
+        || !active
+            .game
+            .players
+            .get(player_id)
+            .resources()
+            .has_enough(&resources)
+    {
+        return;
+    }
+    events.push(GameEvent::DecisionClosed {
+        decision_id: decision.id,
+    });
+    events.push(GameEvent::PlayerDiscarded {
+        player_id,
+        resources,
+    });
+
+    let mut remaining = active.pending_discards.iter().copied();
+    if active.pending_discards.first() == Some(&player_id) {
+        remaining.next();
+    }
+    if let Some(next_player) = remaining.next() {
+        let required = active.game.players.get(next_player).resources().total() / 2;
+        events.push(GameEvent::DecisionOpened(OpenDecision {
+            id: DecisionId(active.next_decision_id),
+            player_id: next_player,
+            kind: DecisionKind::DropHalf { required },
+            lifetime: DecisionLifetime::OneShot,
+        }));
+    } else {
+        let robber_player = active.game.turn.get_turn_index();
+        events.push(GameEvent::DecisionOpened(OpenDecision {
+            id: DecisionId(active.next_decision_id),
+            player_id: robber_player,
+            kind: DecisionKind::MoveRobber,
+            lifetime: DecisionLifetime::OneShot,
+        }));
+    }
+}
+
+fn decide_move_robber(
+    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    decision: OpenDecision,
+    hex: crate::topology::Hex,
+    context: DecisionContext,
+    events: &mut EventBatch,
+) {
+    let player_id = decision.player_id;
+    if hex == active.game.board_state.robber_pos {
+        return;
+    }
+    let candidates: EventBatch =
+        algorithm::robbery_candidates(hex, player_id, &active.game.builds, &active.game.players)
+            .map(|robbed_id| GameEvent::ResourceStolen {
+                player_id,
+                robbed_id,
+                resource: context
+                    .stolen_resource
+                    .unwrap_or(crate::gameplay::primitives::resource::Resource::Brick),
+            })
+            .collect();
+    match candidates.as_slice() {
+        [] => {
+            events.push(GameEvent::DecisionClosed {
+                decision_id: decision.id,
+            });
+            events.push(GameEvent::RobberMoved {
+                player_id,
+                hex,
+                robbed_id: None,
+            });
+            reopen_regular(active, player_id, events);
+        }
+        [
+            GameEvent::ResourceStolen {
+                robbed_id,
+                resource,
+                ..
+            },
+        ] => {
+            events.push(GameEvent::DecisionClosed {
+                decision_id: decision.id,
+            });
+            events.push(GameEvent::RobberMoved {
+                player_id,
+                hex,
+                robbed_id: Some(*robbed_id),
+            });
+            events.push(GameEvent::ResourceStolen {
+                player_id,
+                robbed_id: *robbed_id,
+                resource: *resource,
+            });
+            reopen_regular(active, player_id, events);
+        }
+        _ => {
+            events.push(GameEvent::DecisionClosed {
+                decision_id: decision.id,
+            });
+            events.push(GameEvent::DecisionOpened(OpenDecision {
+                id: DecisionId(active.next_decision_id),
+                player_id,
+                kind: DecisionKind::ChooseRobbedPlayer { robber_pos: hex },
+                lifetime: DecisionLifetime::OneShot,
+            }));
+        }
+    }
+}
+
+fn decide_choose_robbed_player(
+    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    decision: OpenDecision,
+    robber_pos: crate::topology::Hex,
+    robbed_id: crate::gameplay::primitives::player::PlayerId,
+    context: DecisionContext,
+    events: &mut EventBatch,
+) {
+    let player_id = decision.player_id;
+    if !algorithm::robbery_candidates(
+        robber_pos,
+        player_id,
+        &active.game.builds,
+        &active.game.players,
+    )
+    .any(|candidate| candidate == robbed_id)
+    {
+        return;
+    }
+    events.push(GameEvent::DecisionClosed {
+        decision_id: decision.id,
+    });
+    events.push(GameEvent::RobberMoved {
+        player_id,
+        hex: robber_pos,
+        robbed_id: Some(robbed_id),
+    });
+    if let Some(resource) = context.stolen_resource {
+        events.push(GameEvent::ResourceStolen {
+            player_id,
+            robbed_id,
+            resource,
+        });
+    }
+    reopen_regular(active, player_id, events);
+}
+
+fn reopen_regular(
+    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    player_id: crate::gameplay::primitives::player::PlayerId,
+    events: &mut EventBatch,
+) {
+    events.push(GameEvent::DecisionOpened(OpenDecision {
+        id: DecisionId(active.next_decision_id),
+        player_id,
+        kind: DecisionKind::RegularCommand,
+        lifetime: DecisionLifetime::OneShot,
+    }));
 }
 
 fn decide_use_dev_card(

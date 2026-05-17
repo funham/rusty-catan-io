@@ -407,7 +407,37 @@ impl GameEngine {
                     crate::gameplay::game::command::PostDiceCommand::UseDevCard(usage),
                 ),
             ) => usage,
-            _ => return None,
+            _ => {
+                let robbed_id = match (decision.kind, command) {
+                    (
+                        DecisionKind::MoveRobber,
+                        PlayerCommand::MoveRobbers(
+                            crate::gameplay::game::command::MoveRobberCommand(hex),
+                        ),
+                    ) => {
+                        let mut candidates = algorithm::robbery_candidates(
+                            *hex,
+                            *player_id,
+                            &active.game.builds,
+                            &active.game.players,
+                        );
+                        let only = candidates.next()?;
+                        candidates.next().is_none().then_some(only)?
+                    }
+                    (
+                        DecisionKind::ChooseRobbedPlayer { .. },
+                        PlayerCommand::ChooseRobbedPlayer(
+                            crate::gameplay::game::command::ChooseRobbedPlayerCommand(robbed_id),
+                        ),
+                    ) => *robbed_id,
+                    _ => return None,
+                };
+                let resources = *active.game.players.get(robbed_id).resources();
+                return self
+                    .runtime
+                    .random
+                    .with_rng(|rng| resources.peek_random(rng));
+            }
         };
         let crate::gameplay::primitives::dev_card::DevCardUsage::Knight {
             robbed_id: Some(robbed_id),
