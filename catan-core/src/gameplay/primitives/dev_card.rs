@@ -154,7 +154,7 @@ impl DevCardData {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DevCardUsage {
     Knight {
         rob_hex: Hex,

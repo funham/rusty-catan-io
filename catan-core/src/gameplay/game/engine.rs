@@ -300,6 +300,7 @@ impl GameEngine {
             let context = crate::gameplay::game::decider::DecisionContext {
                 max_turns: self.runtime.max_turns,
                 dice_roll: self.dice_roll_for_decider(&input),
+                stolen_resource: self.stolen_resource_for_decider(&input),
             };
             let events = crate::gameplay::game::decider::decide_with_context(
                 &self.core,
@@ -374,6 +375,51 @@ impl GameEngine {
             ) => Some(self.roll_dice()),
             _ => None,
         }
+    }
+
+    fn stolen_resource_for_decider(
+        &mut self,
+        input: &GameInput,
+    ) -> Option<crate::gameplay::primitives::resource::Resource> {
+        let GameInput::Submit {
+            player_id,
+            decision_id,
+            command,
+        } = input
+        else {
+            return None;
+        };
+        let active = self.core.as_active()?;
+        let decision = active.pending.get(*decision_id)?;
+        if decision.player_id != *player_id {
+            return None;
+        }
+        let usage = match (decision.kind, command) {
+            (
+                DecisionKind::InitCommand,
+                PlayerCommand::InitCommand(
+                    crate::gameplay::game::command::InitCommand::UseDevCard(usage),
+                ),
+            )
+            | (
+                DecisionKind::PostDiceCommand,
+                PlayerCommand::PostDice(
+                    crate::gameplay::game::command::PostDiceCommand::UseDevCard(usage),
+                ),
+            ) => usage,
+            _ => return None,
+        };
+        let crate::gameplay::primitives::dev_card::DevCardUsage::Knight {
+            robbed_id: Some(robbed_id),
+            ..
+        } = usage
+        else {
+            return None;
+        };
+        let resources = *active.game.players.get(*robbed_id).resources();
+        self.runtime
+            .random
+            .with_rng(|rng| resources.peek_random(rng))
     }
 
     fn transition_from_outputs(

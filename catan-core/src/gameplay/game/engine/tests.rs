@@ -17,7 +17,7 @@ use crate::{
         },
         primitives::{
             build::{Build, Road},
-            dev_card::DevCardKind,
+            dev_card::{DevCardKind, DevCardUsage, UsableDevCard},
             player::PlayerId,
             resource::{Resource, ResourceCollection},
             trade::{BankTrade, BankTradeKind, PlayerTrade, PublicTradeOffer},
@@ -544,6 +544,7 @@ fn decider_roll_dice_harvest_emits_complete_facts() {
         decider::DecisionContext {
             max_turns: None,
             dice_roll: Some(DiceRoll::eight()),
+            stolen_resource: None,
         },
     );
 
@@ -592,6 +593,7 @@ fn decider_roll_dice_seven_opens_discard_or_robber_decision() {
         decider::DecisionContext {
             max_turns: None,
             dice_roll: Some(DiceRoll::seven()),
+            stolen_resource: None,
         },
     );
 
@@ -657,6 +659,56 @@ fn decider_buy_dev_card_emits_private_draw_fact_and_reopens_regular_decision() {
                 lifetime: DecisionLifetime::OneShot,
             }),
         ] if *decision_id == decision.id && id.0 == 8
+    ));
+}
+
+#[test]
+fn decider_use_dev_card_emits_usage_and_post_dev_card_decision() {
+    let mut lifecycle = EngineCore::active(GameInitializationState::default().finish());
+    let decision = OpenDecision {
+        id: crate::gameplay::game::decision::DecisionId(7),
+        player_id: P0,
+        kind: DecisionKind::InitCommand,
+        lifetime: DecisionLifetime::OneShot,
+    };
+    let active = lifecycle.active_mut().expect("lifecycle should be active");
+    active.phase = GamePhase::Turn(crate::gameplay::game::phase::TurnPhase::InitCommand);
+    active.next_decision_id = 8;
+    active
+        .game
+        .players
+        .get_mut(P0)
+        .dev_cards_add(DevCardKind::Usable(UsableDevCard::YearOfPlenty));
+    active.game.players.get_mut(P0).dev_cards_reset_queue();
+    active.pending.push(decision.clone());
+    let usage = DevCardUsage::YearOfPlenty([Resource::Brick, Resource::Wood]);
+
+    let events = decider::decide(
+        &lifecycle,
+        GameInput::Submit {
+            player_id: P0,
+            decision_id: decision.id,
+            command: PlayerCommand::InitCommand(
+                crate::gameplay::game::command::InitCommand::UseDevCard(usage.clone()),
+            ),
+        },
+    );
+
+    assert!(matches!(
+        events.as_slice(),
+        [
+            GameEvent::DecisionClosed { decision_id },
+            GameEvent::DevCardUsed {
+                player_id: P0,
+                usage: emitted,
+            },
+            GameEvent::DecisionOpened(OpenDecision {
+                id,
+                player_id: P0,
+                kind: DecisionKind::PostDevCardCommand,
+                lifetime: DecisionLifetime::OneShot,
+            }),
+        ] if *decision_id == decision.id && *emitted == usage && id.0 == 8
     ));
 }
 

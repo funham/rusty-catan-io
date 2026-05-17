@@ -21,11 +21,13 @@ use crate::{
     algorithm,
     math::dice::{DiceOutcome, DiceRoll},
 };
+use rand::{SeedableRng, rngs::SmallRng};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DecisionContext {
     pub max_turns: Option<u64>,
     pub dice_roll: Option<DiceRoll>,
+    pub stolen_resource: Option<crate::gameplay::primitives::resource::Resource>,
 }
 
 pub fn decide(lifecycle: &EngineCore, input: GameInput) -> EventBatch {
@@ -151,10 +153,93 @@ fn decide_submit(
                 &mut events,
             );
         }
+        (
+            DecisionKind::InitCommand,
+            PlayerCommand::InitCommand(crate::gameplay::game::command::InitCommand::UseDevCard(
+                usage,
+            )),
+        ) => {
+            decide_use_dev_card(
+                active,
+                decision,
+                usage,
+                DecisionKind::PostDevCardCommand,
+                context,
+                &mut events,
+            );
+        }
+        (
+            DecisionKind::PostDiceCommand,
+            PlayerCommand::PostDice(crate::gameplay::game::command::PostDiceCommand::UseDevCard(
+                usage,
+            )),
+        ) => {
+            decide_use_dev_card(
+                active,
+                decision,
+                usage,
+                DecisionKind::RegularCommand,
+                context,
+                &mut events,
+            );
+        }
         _ => {}
     }
 
     events
+}
+
+fn decide_use_dev_card(
+    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    decision: OpenDecision,
+    usage: crate::gameplay::primitives::dev_card::DevCardUsage,
+    next_kind: DecisionKind,
+    context: DecisionContext,
+    events: &mut EventBatch,
+) {
+    let player_id = decision.player_id;
+    let mut candidate = active.game.clone();
+    let mut rng = SmallRng::seed_from_u64(0);
+    if candidate
+        .use_dev_card_with_rng(usage, player_id, &mut rng)
+        .is_err()
+    {
+        return;
+    }
+    let candidate_index = GameIndex::rebuild(&candidate);
+    if GameQuery::new(&candidate, &candidate_index)
+        .check_win_condition()
+        .is_some()
+    {
+        return;
+    }
+
+    events.push(GameEvent::DecisionClosed {
+        decision_id: decision.id,
+    });
+    events.push(GameEvent::DevCardUsed { player_id, usage });
+    if let crate::gameplay::primitives::dev_card::DevCardUsage::Knight { rob_hex, robbed_id } =
+        usage
+    {
+        events.push(GameEvent::RobberMoved {
+            player_id,
+            hex: rob_hex,
+            robbed_id,
+        });
+        if let (Some(robbed_id), Some(resource)) = (robbed_id, context.stolen_resource) {
+            events.push(GameEvent::ResourceStolen {
+                player_id,
+                robbed_id,
+                resource,
+            });
+        }
+    }
+    events.push(GameEvent::DecisionOpened(OpenDecision {
+        id: DecisionId(active.next_decision_id),
+        player_id,
+        kind: next_kind,
+        lifetime: DecisionLifetime::OneShot,
+    }));
 }
 
 fn decide_buy_dev_card(
