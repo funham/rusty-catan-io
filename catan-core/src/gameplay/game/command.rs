@@ -5,7 +5,7 @@ use crate::{
         build::{Build, Establishment, EstablishmentType, Road},
         dev_card::DevCardUsage,
         player::PlayerId,
-        resource::ResourceCollection,
+        resource::ResourceSet,
         trade::{BankTrade, PersonalTradeOffer, PublicTradeOffer},
     },
     topology::{Hex, Intersection, Path},
@@ -48,7 +48,7 @@ impl InitialPlacementCommand {
 pub struct ChooseRobbedPlayerCommand(pub PlayerId);
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct DropHalfCommand(pub ResourceCollection);
+pub struct DropHalfCommand(pub ResourceSet);
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct MoveRobberCommand(pub Hex);

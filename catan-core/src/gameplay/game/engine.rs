@@ -20,7 +20,7 @@ use crate::{
         primitives::{self, player::PlayerId, turn},
         random::GameRandom,
     },
-    math::dice::{DiceRoll, DiceRoller, RandomDiceRoller},
+    math::dice::DiceRoll,
 };
 use smallvec::SmallVec;
 
@@ -40,7 +40,7 @@ use super::{
 use crate::gameplay::game::lifecycle::FinishedEngine;
 #[cfg(test)]
 use primitives::{
-    bank::BankResourceExchangeError, resource::ResourceCollection, trade::PlayerTrade,
+    bank::BankResourceExchangeError, resource::ResourceSet, trade::PlayerTrade,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,7 +73,6 @@ pub struct GameEngine {
 
 pub struct EngineRuntime {
     random: GameRandom,
-    dice: RandomDiceRoller,
     max_turns: Option<u64>,
     max_invalid_actions: Option<u64>,
     next_tx_id: u64,
@@ -84,7 +83,6 @@ impl EngineRuntime {
     fn new(options: RunOptions) -> Self {
         Self {
             random: options.random,
-            dice: RandomDiceRoller::new(),
             max_turns: options.max_turns,
             max_invalid_actions: options.max_invalid_actions,
             next_tx_id: 1,
@@ -220,10 +218,6 @@ impl GameEngine {
         }
     }
 
-    pub fn set_dice_seed(&mut self, seed: u64) {
-        self.runtime.dice = RandomDiceRoller::with_seed(seed);
-    }
-
     pub fn start(&mut self) -> Result<EngineTransition, EngineError> {
         let tx_id = self.begin_transaction(EventCause::Start);
         let transaction = EventTransaction {
@@ -309,7 +303,7 @@ impl GameEngine {
             | (
                 DecisionKind::PostDevCardCommand,
                 PlayerCommand::PostDevCard(command::PostDevCardCommand::RollDice),
-            ) => Some(self.runtime.dice.roll()),
+            ) => Some(self.runtime.random.roll_dice()),
             _ => None,
         }
     }
@@ -361,10 +355,7 @@ impl GameEngine {
                     _ => return None,
                 };
                 let resources = *active.game.players.get(robbed_id).resources();
-                return self
-                    .runtime
-                    .random
-                    .with_rng(|rng| resources.peek_random(rng));
+                return self.runtime.random.pick_resource(&resources);
             }
         };
         let primitives::DevCardUsage::Knight {
@@ -375,9 +366,7 @@ impl GameEngine {
             return None;
         };
         let resources = *active.game.players.get(*robbed_id).resources();
-        self.runtime
-            .random
-            .with_rng(|rng| resources.peek_random(rng))
+        self.runtime.random.pick_resource(&resources)
     }
 
     pub fn run_stats(&self) -> GameRunStats {
@@ -477,7 +466,7 @@ impl GameEngine {
     pub fn test_give_resources(
         &mut self,
         player_id: impl Into<PlayerId>,
-        resources: ResourceCollection,
+        resources: ResourceSet,
     ) {
         let player_id = player_id.into();
         let active = self
@@ -493,7 +482,7 @@ impl GameEngine {
     pub fn test_take_resources(
         &mut self,
         player_id: impl Into<PlayerId>,
-        resources: ResourceCollection,
+        resources: ResourceSet,
     ) {
         let player_id = player_id.into();
         let active = self

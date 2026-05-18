@@ -16,7 +16,7 @@ use crate::{
             build::{Build, Road},
             dev_card::{DevCardKind, DevCardUsage},
             player::PlayerId,
-            resource::{Resource, ResourceCollection},
+            resource::{Resource, ResourceSet},
             trade::{BankTrade, PlayerTrade},
         },
     },
@@ -25,7 +25,7 @@ use crate::{
 };
 
 pub type EventBatch = SmallVec<[GameEvent; 32]>;
-pub type ResourceDistribution = SmallVec<[(PlayerId, ResourceCollection); 8]>;
+pub type ResourceDistribution = SmallVec<[(PlayerId, ResourceSet); 8]>;
 pub type EventRecipients = SmallVec<[PlayerId; 2]>;
 pub type GameEndStats = SmallVec<[GameEndPlayerStats; 6]>;
 
@@ -162,7 +162,7 @@ pub enum GameEvent {
     },
     InitialResourcesGranted {
         player_id: PlayerId,
-        resources: ResourceCollection,
+        resources: ResourceSet,
     },
     DiceRolled {
         player_id: PlayerId,
@@ -220,7 +220,7 @@ pub enum GameEvent {
     },
     PlayerDiscarded {
         player_id: PlayerId,
-        resources: ResourceCollection,
+        resources: ResourceSet,
     },
     RobberMoved {
         player_id: PlayerId,

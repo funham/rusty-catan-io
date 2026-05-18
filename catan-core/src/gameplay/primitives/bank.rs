@@ -1,31 +1,30 @@
-use rand::{Rng, seq::SliceRandom};
 use serde::{Deserialize, Serialize};
 
-use crate::gameplay::primitives::{
-    dev_card::{DevCardKind, UsableDevCard},
-    player::PlayerId,
-    resource::{Resource, ResourceCollection, ResourceMap},
+use crate::{
+    constants,
+    gameplay::primitives::{
+        dev_card::DevCardKind,
+        player::PlayerId,
+        resource::{Resource, ResourceMap, ResourceSet},
+    },
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bank {
-    pub resources: ResourceCollection,
+    pub resources: ResourceSet,
     pub dev_cards: Vec<DevCardKind>,
 }
 
 impl Bank {
-    pub fn can_pay(&self, resources: &ResourceCollection) -> bool {
+    pub fn can_pay(&self, resources: &ResourceSet) -> bool {
         self.resources.has_enough(resources)
     }
 
-    pub fn deposit(&mut self, resources: ResourceCollection) {
+    pub fn deposit(&mut self, resources: ResourceSet) {
         self.resources += &resources;
     }
 
-    pub fn withdraw(
-        &mut self,
-        resources: ResourceCollection,
-    ) -> Result<(), BankResourceExchangeError> {
+    pub fn withdraw(&mut self, resources: ResourceSet) -> Result<(), BankResourceExchangeError> {
         self.resources
             .subtract_in_place(&resources)
             .map_err(|_| BankResourceExchangeError::BankIsShort)
@@ -33,10 +32,6 @@ impl Bank {
 
     pub fn draw_dev_card(&mut self) -> Option<DevCardKind> {
         self.dev_cards.pop()
-    }
-
-    pub fn shuffle_dev_cards_with_rng<R: Rng + ?Sized>(&mut self, rng: &mut R) {
-        self.dev_cards.shuffle(rng);
     }
 
     pub fn public_view(&self) -> BankViewOwned {
@@ -60,21 +55,12 @@ impl Bank {
 
 impl Default for Bank {
     fn default() -> Self {
-        let resources = ResourceCollection {
-            brick: 19,
-            wood: 19,
-            wheat: 19,
-            sheep: 19,
-            ore: 19,
-        };
+        let resources = constants::bank::DEFAULT_RESOURCES;
 
-        let mut dev_cards = Vec::new();
-
-        dev_cards.extend([DevCardKind::VictoryPoint; 5]);
-        dev_cards.extend([DevCardKind::Usable(UsableDevCard::Knight); 14]);
-        dev_cards.extend([DevCardKind::Usable(UsableDevCard::Monopoly); 2]);
-        dev_cards.extend([DevCardKind::Usable(UsableDevCard::YearOfPlenty); 2]);
-        dev_cards.extend([DevCardKind::Usable(UsableDevCard::RoadBuild); 2]);
+        let dev_cards = constants::bank::DEFAULT_DEV_CARDS
+            .unroll()
+            .flat_map(|(card, count)| std::iter::repeat(card).take(count as usize))
+            .collect();
 
         Self {
             resources,
@@ -146,7 +132,7 @@ pub enum BankResourceExchangeError {
     BankIsShort,
     AccountIsShort {
         account: PlayerId,
-        short: ResourceCollection,
+        short: ResourceSet,
     },
 }
 
@@ -158,17 +144,20 @@ pub enum PlayerResourceExchangeError {
 #[cfg(test)]
 mod tests {
     use super::Bank;
-    use rand::{SeedableRng, rngs::SmallRng};
+    use crate::gameplay::random::GameRandom;
 
     #[test]
     fn seeded_dev_card_shuffle_is_reproducible() {
         let mut first = Bank::default();
         let mut second = Bank::default();
         let mut different = Bank::default();
+        let mut first_random = GameRandom::seeded(42);
+        let mut second_random = GameRandom::seeded(42);
+        let mut different_random = GameRandom::seeded(43);
 
-        first.shuffle_dev_cards_with_rng(&mut SmallRng::seed_from_u64(42));
-        second.shuffle_dev_cards_with_rng(&mut SmallRng::seed_from_u64(42));
-        different.shuffle_dev_cards_with_rng(&mut SmallRng::seed_from_u64(43));
+        first_random.shuffle_dev_cards(&mut first.dev_cards);
+        second_random.shuffle_dev_cards(&mut second.dev_cards);
+        different_random.shuffle_dev_cards(&mut different.dev_cards);
 
         assert_eq!(first.dev_cards, second.dev_cards);
         assert_ne!(first.dev_cards, different.dev_cards);

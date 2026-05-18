@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::gameplay::primitives::{
     player::{PlayerId, player_ids},
-    resource::{Resource, ResourceCollection},
+    resource::{Resource, ResourceSet},
     trade::PlayerTrade,
 };
 
@@ -159,8 +159,8 @@ pub fn trade_from_personal_offer(
 }
 
 pub fn trade_is_funded(
-    proposer_resources: &ResourceCollection,
-    peer_resources: &ResourceCollection,
+    proposer_resources: &ResourceSet,
+    peer_resources: &ResourceSet,
     trade: &PlayerTrade,
 ) -> bool {
     proposer_resources.has_enough(&trade.give) && peer_resources.has_enough(&trade.take)

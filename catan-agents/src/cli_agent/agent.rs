@@ -19,7 +19,7 @@ use catan_core::{
         primitives::{
             build::{Build, Establishment, EstablishmentType, Road},
             player::PlayerId,
-            resource::{Resource, ResourceCollection},
+            resource::{Resource, ResourceSet},
             trade::{BankTrade, BankTradeKind},
         },
     },
@@ -287,7 +287,7 @@ impl TerminalUi {
         }
     }
 
-    fn read_resource_collection(prompt: &str) -> ResourceCollection {
+    fn read_resource_collection(prompt: &str) -> ResourceSet {
         loop {
             let line = Self::read_line(prompt);
             let parts = line
@@ -296,7 +296,7 @@ impl TerminalUi {
                 .collect::<Result<Vec<_>, _>>();
             match parts {
                 Ok(parts) if parts.len() == 5 => {
-                    return ResourceCollection {
+                    return ResourceSet {
                         brick: parts[0],
                         wood: parts[1],
                         wheat: parts[2],

@@ -31,7 +31,7 @@ mod tests {
             primitives::{
                 dev_card::{DevCardKind, DevCardUsage, UsableDevCard},
                 player::PlayerId,
-                resource::{Resource, ResourceCollection},
+                resource::{Resource, ResourceSet},
             },
         },
     };
@@ -139,12 +139,12 @@ mod tests {
         let mut state = GameInitializationState::default().finish();
         state
             .transfer_from_bank(
-                ResourceCollection {
+                ResourceSet {
                     brick: 4,
                     wheat: 1,
                     sheep: 1,
                     ore: 1,
-                    ..ResourceCollection::ZERO
+                    ..ResourceSet::ZERO
                 },
                 0,
             )

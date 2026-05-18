@@ -10,7 +10,7 @@ use catan_core::gameplay::{
         bank::DeckFullnessLevel,
         dev_card::{DevCardData, DevCardKind, UsableDevCard},
         player::PlayerId,
-        resource::{Resource, ResourceCollection},
+        resource::{Resource, ResourceSet},
         trade::{BankTrade, BankTradeKind},
     },
 };
@@ -554,8 +554,8 @@ fn dev_deck_counts(dev_cards: &[DevCardKind]) -> DevDeckCounts {
 }
 
 pub(crate) fn resource_card_lines(
-    resources: &ResourceCollection,
-    selected_drop: Option<&ResourceCollection>,
+    resources: &ResourceSet,
+    selected_drop: Option<&ResourceSet>,
 ) -> Vec<Line<'static>> {
     let mut top = Vec::new();
     let mut middle = Vec::new();
@@ -651,9 +651,9 @@ fn dev_card_label_line() -> Line<'static> {
 
 pub(crate) fn drop_personal_lines(
     player_id: impl Into<PlayerId>,
-    resources: &ResourceCollection,
+    resources: &ResourceSet,
     dev_cards: &DevCardData,
-    selected: &ResourceCollection,
+    selected: &ResourceSet,
     required: u16,
     selected_resource: usize,
 ) -> Vec<Line<'static>> {
@@ -673,8 +673,8 @@ pub(crate) fn drop_personal_lines(
 }
 
 fn drop_resource_card_lines(
-    resources: &ResourceCollection,
-    selected: &ResourceCollection,
+    resources: &ResourceSet,
+    selected: &ResourceSet,
     selected_resource: usize,
 ) -> Vec<Line<'static>> {
     let mut lines = resource_card_lines(resources, None);
@@ -735,7 +735,7 @@ fn bank_trade_menu_line(marker: &str, trade: BankTrade) -> Line<'static> {
 }
 
 pub(crate) fn resource_picker_lines(selected_resource: usize) -> Vec<Line<'static>> {
-    let resources = ResourceCollection {
+    let resources = ResourceSet {
         brick: 1,
         wood: 1,
         wheat: 1,
@@ -777,8 +777,8 @@ pub(crate) fn player_menu_lines(candidates: &[PlayerId], selected: usize) -> Vec
 }
 
 pub(crate) fn adjust_drop_selection(
-    available: &ResourceCollection,
-    selected: &mut ResourceCollection,
+    available: &ResourceSet,
+    selected: &mut ResourceSet,
     resource: Resource,
     delta: i8,
 ) {
@@ -839,7 +839,7 @@ fn dev_card_kind_abbrev(card: &DevCardKind) -> &'static str {
 
 fn push_resource_values(
     spans: &mut Vec<Span<'static>>,
-    resources: &ResourceCollection,
+    resources: &ResourceSet,
     format_count: impl Fn(u16) -> String,
 ) {
     for (idx, resource) in Resource::iter().into_iter().enumerate() {
@@ -888,7 +888,7 @@ mod tests {
     use catan_agents::remote_agent::UiModel;
     use catan_core::gameplay::primitives::{
         dev_card::DevCardData,
-        resource::{Resource, ResourceCollection},
+        resource::{Resource, ResourceSet},
         trade::{BankTrade, BankTradeKind},
     };
     use catan_core::gameplay::{
@@ -908,7 +908,7 @@ mod tests {
 
     #[test]
     fn card_lines_render_resource_and_dev_counts() {
-        let resources = ResourceCollection {
+        let resources = ResourceSet {
             brick: 1,
             wood: 2,
             wheat: 13,
@@ -938,11 +938,11 @@ mod tests {
 
     #[test]
     fn drop_selection_is_bounded_by_available_resources() {
-        let available = ResourceCollection {
+        let available = ResourceSet {
             brick: 2,
-            ..ResourceCollection::ZERO
+            ..ResourceSet::ZERO
         };
-        let mut selected = ResourceCollection::ZERO;
+        let mut selected = ResourceSet::ZERO;
 
         adjust_drop_selection(&available, &mut selected, Resource::Brick, 1);
         adjust_drop_selection(&available, &mut selected, Resource::Brick, 1);
@@ -957,14 +957,14 @@ mod tests {
 
     #[test]
     fn drop_lines_show_selector_counts_and_total() {
-        let resources = ResourceCollection {
+        let resources = ResourceSet {
             brick: 2,
             wood: 1,
-            ..ResourceCollection::ZERO
+            ..ResourceSet::ZERO
         };
-        let selected = ResourceCollection {
+        let selected = ResourceSet {
             brick: 1,
-            ..ResourceCollection::ZERO
+            ..ResourceSet::ZERO
         };
         let dev_cards = DevCardData::default();
         let lines = drop_personal_lines(0, &resources, &dev_cards, &selected, 2, 0)
@@ -1011,10 +1011,10 @@ mod tests {
         ];
         state
             .transfer_from_bank(
-                ResourceCollection {
+                ResourceSet {
                     brick: 2,
                     wood: 1,
-                    ..ResourceCollection::ZERO
+                    ..ResourceSet::ZERO
                 },
                 0,
             )

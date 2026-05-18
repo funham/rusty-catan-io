@@ -13,7 +13,7 @@ use crate::{
             },
             dev_card::{DevCardUsage, UsableDevCard},
             player::PlayerId,
-            resource::{Resource, ResourceCollection},
+            resource::{Resource, ResourceSet},
             trade::{BankTrade, BankTradeKind},
         },
     },
@@ -148,7 +148,7 @@ pub fn legal_city_spots_count(context: &PlayerDecisionContext<'_>, player_id: Pl
 pub fn legal_city_spots_count_with_resources(
     context: &PlayerDecisionContext<'_>,
     player_id: PlayerId,
-    resources: &crate::gameplay::primitives::resource::ResourceCollection,
+    resources: &crate::gameplay::primitives::resource::ResourceSet,
 ) -> usize {
     if context.search.is_none() {
         log::debug!("legal city spots require search context");
@@ -225,7 +225,7 @@ pub fn legal_settlement_spots_count(
 pub fn legal_settlement_spots_count_with_resources(
     context: &PlayerDecisionContext<'_>,
     player_id: PlayerId,
-    resources: &crate::gameplay::primitives::resource::ResourceCollection,
+    resources: &crate::gameplay::primitives::resource::ResourceSet,
 ) -> usize {
     if !can_search_settlement_with_resources(context, player_id, resources) {
         return 0;
@@ -253,7 +253,7 @@ pub fn legal_settlement_spots_count_with_extra_road(
     context: &PlayerDecisionContext<'_>,
     player_id: PlayerId,
     extra_road: Path,
-    resources: &crate::gameplay::primitives::resource::ResourceCollection,
+    resources: &crate::gameplay::primitives::resource::ResourceSet,
 ) -> usize {
     if !can_search_settlement_with_resources(context, player_id, resources) {
         return 0;
@@ -310,7 +310,7 @@ pub fn legal_road_spots_count(context: &PlayerDecisionContext<'_>, player_id: Pl
 pub fn legal_road_spots_count_with_resources(
     context: &PlayerDecisionContext<'_>,
     player_id: PlayerId,
-    resources: &crate::gameplay::primitives::resource::ResourceCollection,
+    resources: &crate::gameplay::primitives::resource::ResourceSet,
 ) -> usize {
     if !can_search_road_with_resources(context, player_id, resources) {
         return 0;
@@ -331,7 +331,7 @@ pub fn legal_road_spots_count_with_resources(
 fn can_search_settlement_with_resources(
     context: &PlayerDecisionContext<'_>,
     player_id: PlayerId,
-    resources: &crate::gameplay::primitives::resource::ResourceCollection,
+    resources: &crate::gameplay::primitives::resource::ResourceSet,
 ) -> bool {
     if context.search.is_none() {
         log::debug!("legal settlement spots require search context");
@@ -356,7 +356,7 @@ fn can_search_settlement_with_resources(
 fn can_search_road_with_resources(
     context: &PlayerDecisionContext<'_>,
     player_id: PlayerId,
-    resources: &crate::gameplay::primitives::resource::ResourceCollection,
+    resources: &crate::gameplay::primitives::resource::ResourceSet,
 ) -> bool {
     if context.search.is_none() {
         log::debug!("legal road spots require search context");
@@ -453,7 +453,7 @@ pub fn legal_dev_card_usages_iter<'a>(
             Resource::iter().flat_map(move |first| {
                 Resource::iter().filter_map(move |second| {
                     let requested = [first, second].into_iter().fold(
-                        ResourceCollection::default(),
+                        ResourceSet::default(),
                         |mut acc, resource| {
                             acc += &resource.into();
                             acc
@@ -522,7 +522,7 @@ pub fn first_legal_dev_card_usage(context: &PlayerDecisionContext<'_>) -> Option
         for first in Resource::iter() {
             for second in Resource::iter() {
                 let requested = [first, second].into_iter().fold(
-                    ResourceCollection::default(),
+                    ResourceSet::default(),
                     |mut acc, resource| {
                         acc += &resource.into();
                         acc
@@ -1054,7 +1054,7 @@ mod tests {
             build::{BoardBuildData, Build, Establishment, EstablishmentType, Road},
             dev_card::{DevCardKind, UsableDevCard},
             player::PlayerId,
-            resource::{Resource, ResourceCollection},
+            resource::{Resource, ResourceSet},
             trade::BankTradeKind,
         },
     };
@@ -1128,7 +1128,7 @@ mod tests {
             })
     }
 
-    fn context_action_with_resources(resources: ResourceCollection) -> RegularCommand {
+    fn context_action_with_resources(resources: ResourceSet) -> RegularCommand {
         let mut state = initialized_state();
         state
             .transfer_from_bank(resources, 0)
@@ -1316,7 +1316,7 @@ mod tests {
         let mut state = initialized_state();
         state
             .transfer_from_bank(
-                ResourceCollection {
+                ResourceSet {
                     brick: 5,
                     wood: 5,
                     wheat: 5,
@@ -1360,7 +1360,7 @@ mod tests {
         let mut state = initialized_state();
         state
             .transfer_from_bank(
-                ResourceCollection {
+                ResourceSet {
                     brick: 5,
                     wood: 5,
                     wheat: 5,
@@ -1384,7 +1384,7 @@ mod tests {
         let mut state = initialized_state();
         state
             .transfer_from_bank(
-                ResourceCollection {
+                ResourceSet {
                     brick: 5,
                     wood: 5,
                     wheat: 5,
@@ -1438,11 +1438,11 @@ mod tests {
     fn lazy_bank_trade_iterator_matches_eager_trades() {
         let state = state_with_port_and_resources(
             PortKind::Universal,
-            ResourceCollection {
+            ResourceSet {
                 brick: 4,
                 wood: 3,
                 wheat: 2,
-                ..ResourceCollection::ZERO
+                ..ResourceSet::ZERO
             },
         );
 
@@ -1461,7 +1461,7 @@ mod tests {
 
     #[test]
     fn legal_actions_include_city_when_affordable() {
-        let action = context_action_with_resources(ResourceCollection {
+        let action = context_action_with_resources(ResourceSet {
             brick: 1,
             wood: 1,
             wheat: 3,
@@ -1482,7 +1482,7 @@ mod tests {
         let mut state = initialized_state();
         state
             .transfer_from_bank(
-                ResourceCollection {
+                ResourceSet {
                     brick: 1,
                     wood: 1,
                     wheat: 1,
@@ -1501,7 +1501,7 @@ mod tests {
 
     #[test]
     fn legal_actions_include_settlement_when_affordable() {
-        let action = context_action_with_resources(ResourceCollection {
+        let action = context_action_with_resources(ResourceSet {
             brick: 1,
             wood: 1,
             wheat: 1,
@@ -1519,7 +1519,7 @@ mod tests {
 
     #[test]
     fn legal_actions_include_dev_card_when_affordable() {
-        let action = context_action_with_resources(ResourceCollection {
+        let action = context_action_with_resources(ResourceSet {
             brick: 0,
             wood: 0,
             wheat: 1,
@@ -1536,11 +1536,11 @@ mod tests {
         state.bank.dev_cards.clear();
         state
             .transfer_from_bank(
-                ResourceCollection {
+                ResourceSet {
                     wheat: 1,
                     sheep: 1,
                     ore: 1,
-                    ..ResourceCollection::ZERO
+                    ..ResourceSet::ZERO
                 },
                 0,
             )
@@ -1568,7 +1568,7 @@ mod tests {
 
     #[test]
     fn legal_actions_include_road_when_affordable() {
-        let action = context_action_with_resources(ResourceCollection {
+        let action = context_action_with_resources(ResourceSet {
             brick: 1,
             wood: 1,
             wheat: 0,
@@ -1642,7 +1642,7 @@ mod tests {
 
     fn state_with_port_and_resources(
         port_kind: PortKind,
-        resources: ResourceCollection,
+        resources: ResourceSet,
     ) -> GameState {
         let mut init = GameInitializationState::default();
         let (port_pos, _) = init
@@ -1687,9 +1687,9 @@ mod tests {
         let mut state = GameInitializationState::default().finish();
         state
             .transfer_from_bank(
-                ResourceCollection {
+                ResourceSet {
                     brick: 4,
-                    ..ResourceCollection::ZERO
+                    ..ResourceSet::ZERO
                 },
                 0,
             )
@@ -1717,9 +1717,9 @@ mod tests {
     fn bank_trades_include_universal_and_specific_ports() {
         let universal = state_with_port_and_resources(
             PortKind::Universal,
-            ResourceCollection {
+            ResourceSet {
                 brick: 3,
-                ..ResourceCollection::ZERO
+                ..ResourceSet::ZERO
             },
         );
         assert!(context_bank_trades(&universal, P0).iter().any(|trade| {
@@ -1728,9 +1728,9 @@ mod tests {
 
         let specific = state_with_port_and_resources(
             PortKind::Special(Resource::Brick),
-            ResourceCollection {
+            ResourceSet {
                 brick: 2,
-                ..ResourceCollection::ZERO
+                ..ResourceSet::ZERO
             },
         );
         assert!(context_bank_trades(&specific, P0).iter().any(|trade| {
@@ -1742,10 +1742,10 @@ mod tests {
     fn specific_port_trades_only_use_the_acquired_port_resource() {
         let state = state_with_port_and_resources(
             PortKind::Special(Resource::Brick),
-            ResourceCollection {
+            ResourceSet {
                 brick: 2,
                 wood: 2,
-                ..ResourceCollection::ZERO
+                ..ResourceSet::ZERO
             },
         );
 
@@ -1788,10 +1788,8 @@ mod tests {
                 assert_ne!(first, second);
             }
             let mut candidate = state.clone();
-            let mut rng = crate::gameplay::random::GameRandom::seeded(42);
             assert!(
-                rng.with_rng(|rng| candidate.use_dev_card_with_rng(usage, P0, rng))
-                    .is_ok(),
+                candidate.use_dev_card(usage, P0, None).is_ok(),
                 "legal roadbuild usage should be accepted: {usage:?}"
             );
         }

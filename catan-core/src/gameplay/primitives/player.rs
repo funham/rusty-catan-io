@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::gameplay::primitives::{
     dev_card::{DevCardData, DevCardDataPlayingError, DevCardKind, UsableDevCard},
-    resource::ResourceCollection,
+    resource::ResourceSet,
 };
 
 #[derive(
@@ -179,20 +179,20 @@ impl PlayerDataContainer {
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct PlayerData {
-    pub resources: ResourceCollection,
+    pub resources: ResourceSet,
     pub dev_cards: DevCardData,
 }
 
 impl PlayerData {
-    pub fn can_pay(&self, resources: &ResourceCollection) -> bool {
+    pub fn can_pay(&self, resources: &ResourceSet) -> bool {
         self.resources.has_enough(resources)
     }
 
-    pub fn receive(&mut self, resources: ResourceCollection) {
+    pub fn receive(&mut self, resources: ResourceSet) {
         self.resources += &resources;
     }
 
-    pub fn pay<E>(&mut self, resources: ResourceCollection, err: E) -> Result<(), E> {
+    pub fn pay<E>(&mut self, resources: ResourceSet, err: E) -> Result<(), E> {
         self.resources
             .subtract_in_place(&resources)
             .map_err(|_| err)
@@ -202,12 +202,12 @@ impl PlayerData {
 pub struct PlayerDataProxy<'a> {
     player_id: PlayerId,
     container: &'a PlayerDataContainer,
-    pub resources: &'a ResourceCollection,
+    pub resources: &'a ResourceSet,
     pub dev_cards: &'a DevCardData,
 }
 
 impl<'a> PlayerDataProxy<'a> {
-    pub fn resources(&self) -> &'a ResourceCollection {
+    pub fn resources(&self) -> &'a ResourceSet {
         &self.container.players[self.player_id.index()].resources
     }
 
@@ -229,7 +229,7 @@ pub struct PlayerDataProxyMut<'a> {
 }
 
 impl<'a> PlayerDataProxyMut<'a> {
-    pub fn resources(&mut self) -> &mut ResourceCollection {
+    pub fn resources(&mut self) -> &mut ResourceSet {
         &mut self.container.players[self.player_id.index()].resources
     }
 

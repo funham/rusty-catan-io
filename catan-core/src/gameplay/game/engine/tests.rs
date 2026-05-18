@@ -19,7 +19,7 @@ use crate::{
             build::{Build, Road},
             dev_card::{DevCardKind, DevCardUsage, UsableDevCard},
             player::PlayerId,
-            resource::{Resource, ResourceCollection},
+            resource::{Resource, ResourceSet},
             trade::{BankTrade, BankTradeKind, PlayerTrade, PublicTradeOffer},
         },
     },
@@ -32,17 +32,17 @@ const P1: PlayerId = PlayerId::new(1);
 const P2: PlayerId = PlayerId::new(2);
 const P99: PlayerId = PlayerId::new(99);
 
-fn one_brick() -> ResourceCollection {
-    ResourceCollection {
+fn one_brick() -> ResourceSet {
+    ResourceSet {
         brick: 1,
-        ..ResourceCollection::ZERO
+        ..ResourceSet::ZERO
     }
 }
 
-fn one_wood() -> ResourceCollection {
-    ResourceCollection {
+fn one_wood() -> ResourceSet {
+    ResourceSet {
         wood: 1,
-        ..ResourceCollection::ZERO
+        ..ResourceSet::ZERO
     }
 }
 
@@ -311,9 +311,9 @@ fn reducer_applies_bank_trade_event_with_exact_exchange() {
         .unwrap()
         .game
         .transfer_from_bank(
-            ResourceCollection {
+            ResourceSet {
                 brick: 4,
-                ..ResourceCollection::ZERO
+                ..ResourceSet::ZERO
             },
             0,
         )
@@ -410,9 +410,9 @@ fn decider_valid_bank_trade_emits_trade_and_reopens_regular_decision() {
     active
         .game
         .transfer_from_bank(
-            ResourceCollection {
+            ResourceSet {
                 brick: 4,
-                ..ResourceCollection::ZERO
+                ..ResourceSet::ZERO
             },
             P0,
         )
@@ -798,9 +798,9 @@ fn characterization_bank_trade_event_follows_decision_close() {
     engine.test_force_regular_action_phase(0);
     engine.test_give_resources(
         0,
-        ResourceCollection {
+        ResourceSet {
             brick: 4,
-            ..ResourceCollection::ZERO
+            ..ResourceSet::ZERO
         },
     );
     let decision = engine.open_decision_for_test(0, DecisionKind::RegularCommand);
@@ -998,11 +998,11 @@ fn buying_dev_card_emits_private_drawn_card_event() {
     engine.test_force_regular_action_phase(0);
     engine.test_give_resources(
         0,
-        ResourceCollection {
+        ResourceSet {
             wheat: 1,
             sheep: 1,
             ore: 1,
-            ..ResourceCollection::ZERO
+            ..ResourceSet::ZERO
         },
     );
     engine

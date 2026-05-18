@@ -98,7 +98,7 @@ pub fn resource_distribution_for_roll(
 fn add_distribution(
     by_player: &mut ResourceDistribution,
     player_id: PlayerId,
-    resources: crate::gameplay::primitives::resource::ResourceCollection,
+    resources: crate::gameplay::primitives::resource::ResourceSet,
 ) {
     if let Some((_, existing)) = by_player
         .iter_mut()

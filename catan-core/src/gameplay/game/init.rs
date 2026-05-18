@@ -67,9 +67,7 @@ impl GameInitializationState {
     ) -> Self {
         let board = Arc::new(BoardLayout::new(field_build_param));
         let mut bank = Bank::default();
-        options
-            .random
-            .with_rng(|rng| bank.shuffle_dev_cards_with_rng(rng));
+        options.random.shuffle_dev_cards(&mut bank.dev_cards);
         Self::from_board_and_bank(board, bank)
     }
 

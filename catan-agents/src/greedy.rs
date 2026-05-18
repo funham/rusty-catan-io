@@ -16,7 +16,7 @@ use catan_core::{
             Tile,
             build::Build,
             player::PlayerId,
-            resource::{Resource, ResourceCollection},
+            resource::{Resource, ResourceSet},
             trade::BankTrade,
         },
     },
@@ -317,9 +317,9 @@ fn bank_trade_objective_score(
 }
 
 fn resources_after_bank_trade(
-    resources: &ResourceCollection,
+    resources: &ResourceSet,
     trade: BankTrade,
-) -> Option<ResourceCollection> {
+) -> Option<ResourceSet> {
     let mut resources = *resources;
     resources.subtract_in_place(&trade.to_bank()).ok()?;
     resources += &trade.from_bank();
@@ -329,7 +329,7 @@ fn resources_after_bank_trade(
 fn next_objective_score_for_resources(
     context: &PlayerDecisionContext<'_>,
     player_id: PlayerId,
-    resources: &ResourceCollection,
+    resources: &ResourceSet,
 ) -> (u8, usize) {
     let city_count = legal::legal_city_spots_count_with_resources(context, player_id, resources);
     if city_count > 0 {

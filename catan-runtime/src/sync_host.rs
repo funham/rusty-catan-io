@@ -127,11 +127,6 @@ impl SyncGameHost {
         }
     }
 
-    pub fn with_dice_seed(mut self, seed: u64) -> Self {
-        self.engine.set_dice_seed(seed);
-        self
-    }
-
     pub fn add_observer(&mut self, observer: Box<dyn OutputObserver>) {
         self.observers.push(observer);
     }
@@ -232,9 +227,12 @@ pub fn bot_seat(policy: Box<dyn BotPolicy>) -> Box<dyn Seat> {
 mod tests {
     use super::*;
     use catan_agents::{bot::decline_trade_command, lazy::LazyAgent};
-    use catan_core::gameplay::game::{
-        decision::{DecisionKind, OpenDecision},
-        event::GameEvent,
+    use catan_core::gameplay::{
+        game::{
+            decision::{DecisionKind, OpenDecision},
+            event::GameEvent,
+        },
+        random::GameRandom,
     };
 
     const P0: PlayerId = PlayerId::new(0);
@@ -255,10 +253,10 @@ mod tests {
             seats,
             RunOptions {
                 max_turns: Some(1),
+                random: GameRandom::seeded(0),
                 ..RunOptions::default()
             },
-        )
-        .with_dice_seed(0);
+        );
 
         host.start();
         assert!(matches!(
@@ -332,7 +330,14 @@ mod tests {
         let observer = Box::new(CountingObserver {
             outputs: output_count.clone(),
         });
-        let mut host = SyncGameHost::new(init, seats, RunOptions::default()).with_dice_seed(0);
+        let mut host = SyncGameHost::new(
+            init,
+            seats,
+            RunOptions {
+                random: GameRandom::seeded(0),
+                ..RunOptions::default()
+            },
+        );
 
         host.add_observer(observer);
         host.start();
@@ -373,10 +378,10 @@ mod tests {
             seats,
             RunOptions {
                 max_turns: Some(0),
+                random: GameRandom::seeded(0),
                 ..RunOptions::default()
             },
-        )
-        .with_dice_seed(0);
+        );
 
         host.add_observer(observer);
         host.start();

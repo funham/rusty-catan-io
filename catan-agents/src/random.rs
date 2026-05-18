@@ -16,7 +16,7 @@ use catan_core::{
         primitives::{
             dev_card::{DevCardUsage, UsableDevCard},
             player::PlayerId,
-            resource::{Resource, ResourceCollection},
+            resource::{Resource, ResourceSet},
             trade::{BankTrade, BankTradeKind},
         },
     },
@@ -393,7 +393,7 @@ fn rand_dev_card_usage_of_kind(
                 .flat_map(|first| {
                     Resource::iter().filter_map(move |second| {
                         let requested = [first, second].into_iter().fold(
-                            ResourceCollection::default(),
+                            ResourceSet::default(),
                             |mut acc, resource| {
                                 acc += &resource.into();
                                 acc
@@ -445,7 +445,7 @@ pub fn rand_drop_half(context: PlayerDecisionContext<'_>, rng: &mut impl Rng) ->
 
     match context.search {
         Some(search) => {
-            let mut to_drop = ResourceCollection::default();
+            let mut to_drop = ResourceSet::default();
             let search = search.make_owned();
             let mut res = search
                 .state
@@ -455,9 +455,8 @@ pub fn rand_drop_half(context: PlayerDecisionContext<'_>, rng: &mut impl Rng) ->
                 .clone();
 
             for _ in 0..number_to_drop {
-                let card = res
-                    .pop_random(rng)
-                    .expect(&format!("must contain {} cards", number_to_drop));
+                let card = pop_random_resource(&mut res, rng)
+                    .unwrap_or_else(|| panic!("must contain {number_to_drop} cards"));
                 to_drop[card] += 1;
             }
 
@@ -468,4 +467,22 @@ pub fn rand_drop_half(context: PlayerDecisionContext<'_>, rng: &mut impl Rng) ->
             lazy::lazy_drop_half(context)
         }
     }
+}
+
+fn pop_random_resource(resources: &mut ResourceSet, rng: &mut impl Rng) -> Option<Resource> {
+    if resources.is_empty() {
+        return None;
+    }
+
+    let mut offset = rng.random_range(0..resources.total());
+    for resource in Resource::iter() {
+        let count = resources[resource];
+        if offset < count {
+            resources.subtract_in_place(&resource.into()).ok()?;
+            return Some(resource);
+        }
+        offset -= count;
+    }
+
+    None
 }

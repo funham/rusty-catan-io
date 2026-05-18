@@ -16,7 +16,7 @@ use crate::gameplay::{
         build::{Build, Establishment},
         dev_card::UsableDevCard,
         player::player_ids,
-        resource::ResourceCollection,
+        resource::ResourceSet,
         trade::{BankTrade, BankTradeKind, PersonalTradeOffer, PublicTradeOffer},
     },
 };
@@ -24,7 +24,6 @@ use crate::{
     algorithm, constants,
     math::dice::{DiceOutcome, DiceRoll},
 };
-use rand::{SeedableRng, rngs::SmallRng};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DecisionContext {
@@ -663,7 +662,7 @@ fn decide_drop_half(
     active: &crate::gameplay::game::lifecycle::ActiveEngine,
     decision: OpenDecision,
     required: u16,
-    resources: ResourceCollection,
+    resources: ResourceSet,
     events: &mut EventBatch,
 ) {
     let player_id = decision.player_id;
@@ -848,9 +847,8 @@ fn decide_use_dev_card(
 ) {
     let player_id = decision.player_id;
     let mut candidate = active.game.clone();
-    let mut rng = SmallRng::seed_from_u64(0);
     if candidate
-        .use_dev_card_with_rng(usage, player_id, &mut rng)
+        .use_dev_card(usage, player_id, context.stolen_resource)
         .is_err()
     {
         reject_illegal(events, &decision, "invalid dev-card usage");
@@ -1196,7 +1194,7 @@ fn decide_initial_placement(
         });
         if setup_turn.get_rounds_played() == 1 {
             let resources = initial_resources(&active.game.board, settlement);
-            if resources != ResourceCollection::ZERO {
+            if resources != ResourceSet::ZERO {
                 events.push(GameEvent::InitialResourcesGranted {
                     player_id,
                     resources,
@@ -1261,8 +1259,8 @@ fn decide_initial_placement(
     });
 }
 
-fn initial_resources(board: &BoardLayout, settlement: Establishment) -> ResourceCollection {
-    let mut resources = ResourceCollection::ZERO;
+fn initial_resources(board: &BoardLayout, settlement: Establishment) -> ResourceSet {
+    let mut resources = ResourceSet::ZERO;
     for hex in settlement
         .vtx
         .as_set()

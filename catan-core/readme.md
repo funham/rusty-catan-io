@@ -18,7 +18,6 @@ This framework implements the complete logic of Settlers of Catan, exposing a cl
 #### **`crate::math`**
 *Probabilistic modeling and dice mechanics*
 - **`DiceVal`**: Type-safe representation of dice outcomes (2-12)
-- **`DiceRoller` trait**: Abstract interface for dice randomization, supporting custom RNGs, deterministic sequences, or external input sources
 - **`Probable` trait**: Framework for probabilistic events
   - Example: Probability calculation for dice rolls: $P(DiceVal(n)) = \frac{|\{(a, b) \in D_6\ |\ a+b=n\}|}{36}$
 - **Probability models**: Support for combining events through conjunction and disjunction operations
@@ -37,6 +36,7 @@ This framework implements the complete logic of Settlers of Catan, exposing a cl
 #### **`crate::gameplay`**
 *Deterministic game engine and domain model*
 - **`Field`**: Complete board state including terrain, numbers, ports, and player constructions
+- **`GameRandom`**: Domain-level random provider for dice rolls, development-card shuffling, and hidden resource selection
 - **`GameState`** (Model): Comprehensive game state tracking
   - Player resources, development cards, and victory points
   - Bank and resource supply

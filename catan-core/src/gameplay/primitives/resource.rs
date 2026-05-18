@@ -3,7 +3,6 @@ use std::{
     ops::{Add, AddAssign, Index, IndexMut},
 };
 
-use rand::{Rng, RngExt};
 use serde::{Deserialize, Serialize};
 
 #[derive(
@@ -97,9 +96,9 @@ impl<T: Default + Copy> TryFrom<&[(Resource, T)]> for ResourceMap<T> {
     }
 }
 
-pub type ResourceCollection = ResourceMap<u16>;
+pub type ResourceSet = ResourceMap<u16>;
 
-impl std::fmt::Display for ResourceCollection {
+impl std::fmt::Display for ResourceSet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{{")?;
         write!(f, "Brick: {}, ", self.brick)?;
@@ -114,13 +113,13 @@ impl std::fmt::Display for ResourceCollection {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResourceCollectionError {
     InsufficientResources {
-        available: ResourceCollection,
-        required: ResourceCollection,
+        available: ResourceSet,
+        required: ResourceSet,
     },
     ResourceAppearsTwice,
 }
 
-impl ResourceCollection {
+impl ResourceSet {
     pub const ZERO: Self = Self {
         brick: 0,
         wood: 0,
@@ -130,9 +129,9 @@ impl ResourceCollection {
     };
 
     pub fn transfer(
-        from: &mut ResourceCollection,
-        to: &mut ResourceCollection,
-        resources: ResourceCollection,
+        from: &mut ResourceSet,
+        to: &mut ResourceSet,
+        resources: ResourceSet,
     ) -> Result<(), ResourceCollectionError> {
         let remainder = from.try_sub(&resources)?;
         *from = remainder;
@@ -140,12 +139,12 @@ impl ResourceCollection {
         Ok(())
     }
 
-    pub fn has_enough(&self, set: &ResourceCollection) -> bool {
+    pub fn has_enough(&self, set: &ResourceSet) -> bool {
         Resource::iter().into_iter().all(|r| self[r] >= set[r])
     }
 
-    pub fn missing(&self, target: &ResourceCollection) -> ResourceCollection {
-        ResourceCollection {
+    pub fn missing(&self, target: &ResourceSet) -> ResourceSet {
+        ResourceSet {
             brick: target.brick.saturating_sub(self.brick),
             wood: target.wood.saturating_sub(self.wood),
             wheat: target.wheat.saturating_sub(self.wheat),
@@ -162,12 +161,12 @@ impl ResourceCollection {
         Resource::iter().into_iter().map(|r| self[r] as u16).sum()
     }
 
-    pub fn checked_sub(&self, rhs: &ResourceCollection) -> Option<ResourceCollection> {
+    pub fn checked_sub(&self, rhs: &ResourceSet) -> Option<ResourceSet> {
         if !self.has_enough(rhs) {
             return None;
         }
 
-        Some(ResourceCollection {
+        Some(ResourceSet {
             brick: self.brick - rhs.brick,
             wood: self.wood - rhs.wood,
             wheat: self.wheat - rhs.wheat,
@@ -178,8 +177,8 @@ impl ResourceCollection {
 
     pub fn try_sub(
         &self,
-        rhs: &ResourceCollection,
-    ) -> Result<ResourceCollection, ResourceCollectionError> {
+        rhs: &ResourceSet,
+    ) -> Result<ResourceSet, ResourceCollectionError> {
         self.checked_sub(rhs)
             .ok_or(ResourceCollectionError::InsufficientResources {
                 available: *self,
@@ -189,43 +188,10 @@ impl ResourceCollection {
 
     pub fn subtract_in_place(
         &mut self,
-        rhs: &ResourceCollection,
+        rhs: &ResourceSet,
     ) -> Result<(), ResourceCollectionError> {
         *self = self.try_sub(rhs)?;
         Ok(())
-    }
-
-    pub fn peek_random<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<Resource> {
-        // Calculate total and return None if empty
-        if self.is_empty() {
-            return None;
-        }
-
-        log::debug!("self.total={}", self.total());
-
-        let rand_val: u16 = rng.random_range(0..self.total());
-        let mut cum_total: u16 = 0;
-
-        // Find which resource corresponds to the random value
-        for (resource, count) in self.unroll() {
-            cum_total += count;
-
-            if rand_val < cum_total {
-                return Some(resource);
-            }
-        }
-
-        unreachable!("peek random: total == 0?")
-    }
-
-    pub fn pop_random<R: Rng + ?Sized>(&mut self, rng: &mut R) -> Option<Resource> {
-        match self.peek_random(rng) {
-            Some(resource) => {
-                self.subtract_in_place(&resource.into()).ok()?;
-                Some(resource)
-            }
-            None => None,
-        }
     }
 
     pub fn unroll(&self) -> impl Iterator<Item = (Resource, u16)> {
@@ -233,19 +199,19 @@ impl ResourceCollection {
     }
 }
 
-impl Add for ResourceCollection {
-    type Output = ResourceCollection;
+impl Add for ResourceSet {
+    type Output = ResourceSet;
 
-    fn add(self, rhs: ResourceCollection) -> Self::Output {
+    fn add(self, rhs: ResourceSet) -> Self::Output {
         self + &rhs
     }
 }
 
-impl Add<&ResourceCollection> for ResourceCollection {
-    type Output = ResourceCollection;
+impl Add<&ResourceSet> for ResourceSet {
+    type Output = ResourceSet;
 
-    fn add(self, rhs: &ResourceCollection) -> Self::Output {
-        ResourceCollection {
+    fn add(self, rhs: &ResourceSet) -> Self::Output {
+        ResourceSet {
             brick: self.brick + rhs.brick,
             wood: self.wood + rhs.wood,
             wheat: self.wheat + rhs.wheat,
@@ -255,35 +221,35 @@ impl Add<&ResourceCollection> for ResourceCollection {
     }
 }
 
-impl AddAssign for ResourceCollection {
-    fn add_assign(&mut self, rhs: ResourceCollection) {
+impl AddAssign for ResourceSet {
+    fn add_assign(&mut self, rhs: ResourceSet) {
         *self += &rhs;
     }
 }
 
-impl AddAssign<&ResourceCollection> for ResourceCollection {
-    fn add_assign(&mut self, rhs: &ResourceCollection) {
+impl AddAssign<&ResourceSet> for ResourceSet {
+    fn add_assign(&mut self, rhs: &ResourceSet) {
         *self = *self + rhs;
     }
 }
 
-impl From<Resource> for ResourceCollection {
-    fn from(resource: Resource) -> ResourceCollection {
-        let mut res = ResourceCollection::default();
+impl From<Resource> for ResourceSet {
+    fn from(resource: Resource) -> ResourceSet {
+        let mut res = ResourceSet::default();
         res[resource] = 1;
         res
     }
 }
 
-impl From<(Resource, u16)> for ResourceCollection {
-    fn from((resource, count): (Resource, u16)) -> ResourceCollection {
-        let mut res = ResourceCollection::default();
+impl From<(Resource, u16)> for ResourceSet {
+    fn from((resource, count): (Resource, u16)) -> ResourceSet {
+        let mut res = ResourceSet::default();
         res[resource] = count;
         res
     }
 }
 
-impl From<BTreeMap<Resource, u16>> for ResourceCollection {
+impl From<BTreeMap<Resource, u16>> for ResourceSet {
     fn from(value: BTreeMap<Resource, u16>) -> Self {
         let x: Vec<_> = value.into_iter().collect();
         TryFrom::<&[(Resource, u16)]>::try_from(x.as_slice()).unwrap()

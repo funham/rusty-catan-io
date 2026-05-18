@@ -14,7 +14,7 @@ use catan_core::gameplay::{
     primitives::{
         build::{Build, Establishment, EstablishmentType, Road},
         player::PlayerId,
-        resource::{Resource, ResourceCollection},
+        resource::{Resource, ResourceSet},
         trade::BankTrade,
     },
 };
@@ -468,7 +468,7 @@ impl CliUi {
     pub(crate) fn select_drop_cards(
         &mut self,
         model: &UiModel,
-    ) -> io::Result<Option<ResourceCollection>> {
+    ) -> io::Result<Option<ResourceSet>> {
         let Some(private) = &model.private else {
             self.message = "no private resources".to_owned();
             return Ok(None);
@@ -476,7 +476,7 @@ impl CliUi {
 
         let required = private.resources.total() / 2;
         let mut selected_resource = 0;
-        let mut selected = ResourceCollection::ZERO;
+        let mut selected = ResourceSet::ZERO;
         self.message =
             format!("select exactly {required} cards to drop; enter confirms; esc cancels");
 

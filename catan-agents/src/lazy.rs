@@ -9,7 +9,7 @@ use catan_core::{
             input::PlayerCommand,
             view::PlayerDecisionContext,
         },
-        primitives::{player::PlayerId, resource::ResourceCollection},
+        primitives::{player::PlayerId, resource::ResourceSet},
     },
     topology::Hex,
 };
@@ -109,7 +109,7 @@ impl BotPolicy for LazyAgent {
 
 pub fn lazy_drop_half(context: PlayerDecisionContext<'_>) -> DropHalfCommand {
     let number_to_drop = context.private.resources.total() / 2;
-    let mut to_drop = ResourceCollection::default();
+    let mut to_drop = ResourceSet::default();
     for (resource, number) in context.private.resources.unroll() {
         let remaining = number_to_drop - to_drop.total();
 

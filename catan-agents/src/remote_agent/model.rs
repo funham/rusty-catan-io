@@ -16,9 +16,9 @@ use catan_core::gameplay::{
         PortKind, Tile,
         bank::DeckFullnessLevel,
         build::{Establishment, Road},
-        dev_card::{DevCardData, UsableDevCardCollection},
+        dev_card::{DevCardData, UsableDevCardSet},
         player::PlayerId,
-        resource::{ResourceCollection, ResourceMap},
+        resource::{ResourceSet, ResourceMap},
     },
 };
 use serde::{Deserialize, Serialize};
@@ -66,7 +66,7 @@ pub struct UiPublicBank {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum UiPublicBankResources {
-    Exact(ResourceCollection),
+    Exact(ResourceSet),
     Approx(ResourceMap<DeckFullnessLevel>),
 }
 
@@ -76,27 +76,27 @@ pub struct UiPublicPlayer {
     pub resources: UiPublicPlayerResources,
     pub queued_dev_cards: u16,
     pub active_dev_cards: u16,
-    pub played_dev_cards: UsableDevCardCollection,
+    pub played_dev_cards: UsableDevCardSet,
     pub victory_points: Option<u16>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum UiPublicPlayerResources {
-    Exact(ResourceCollection),
+    Exact(ResourceSet),
     Total(u16),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiPrivatePlayer {
     pub player_id: PlayerId,
-    pub resources: ResourceCollection,
+    pub resources: ResourceSet,
     pub dev_cards: DevCardData,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiOmniscient {
     pub players: Vec<UiPrivatePlayer>,
-    pub bank_resources: ResourceCollection,
+    pub bank_resources: ResourceSet,
 }
 
 impl UiModel {

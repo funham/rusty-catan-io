@@ -296,8 +296,7 @@ fn run_one_game(
             max_invalid_actions: config.limits.max_invalid_actions,
             random: GameRandom::seeded(seed),
         },
-    )
-    .with_dice_seed(seed);
+    );
     let result = host.run();
 
     Ok(GameOutcome {
@@ -546,18 +545,18 @@ mod tests {
         let outcome = run_one_game(&config, 0, None).unwrap();
 
         assert!(matches!(outcome.result, GameResult::Win(_)));
-        assert_eq!(outcome.stats.turns_started, 108);
-        assert_eq!(outcome.stats.turns_ended, 107);
-        assert_eq!(outcome.stats.decision_requests, 374);
-        assert_eq!(outcome.stats.regular_actions, 221);
-        assert_eq!(outcome.stats.builds, 51);
-        assert_eq!(outcome.stats.bank_trades, 39);
-        assert_eq!(outcome.stats.dev_cards_bought, 24);
-        assert_eq!(outcome.stats.dev_cards_used, 18);
-        assert_eq!(outcome.stats.dice_rolls, 107);
-        assert_eq!(outcome.stats.resources_distributed, 94);
-        assert_eq!(outcome.stats.player_discards, 2);
-        assert_eq!(outcome.stats.robber_moves, 27);
+        assert_eq!(outcome.stats.turns_started, 129);
+        assert_eq!(outcome.stats.turns_ended, 128);
+        assert_eq!(outcome.stats.decision_requests, 462);
+        assert_eq!(outcome.stats.regular_actions, 270);
+        assert_eq!(outcome.stats.builds, 56);
+        assert_eq!(outcome.stats.bank_trades, 61);
+        assert_eq!(outcome.stats.dev_cards_bought, 25);
+        assert_eq!(outcome.stats.dev_cards_used, 20);
+        assert_eq!(outcome.stats.dice_rolls, 129);
+        assert_eq!(outcome.stats.resources_distributed, 110);
+        assert_eq!(outcome.stats.player_discards, 7);
+        assert_eq!(outcome.stats.robber_moves, 33);
         assert_eq!(outcome.stats.action_rejections, 0);
     }
 

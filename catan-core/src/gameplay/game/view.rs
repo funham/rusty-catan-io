@@ -11,9 +11,9 @@ use crate::{
             PortKind,
             bank::{Bank, DeckFullnessLevel},
             build::BoardBuildData,
-            dev_card::{DevCardData, UsableDevCardCollection},
+            dev_card::{DevCardData, UsableDevCardSet},
             player::PlayerId,
-            resource::{ResourceCollection, ResourceMap},
+            resource::{ResourceSet, ResourceMap},
             turn::GameTurn,
         },
     },
@@ -77,7 +77,7 @@ impl VisibilityConfig {
 
 #[derive(Debug, Clone)]
 pub enum PublicBankResources {
-    Exact(ResourceCollection),
+    Exact(ResourceSet),
     Approx(ResourceMap<DeckFullnessLevel>),
 }
 
@@ -89,7 +89,7 @@ pub struct PublicBankView {
 
 #[derive(Debug, Clone)]
 pub enum PublicPlayerResources {
-    Exact(ResourceCollection),
+    Exact(ResourceSet),
     Total(u16),
 }
 
@@ -115,7 +115,7 @@ impl Default for PublicVpKnowledge {
 pub struct PublicPlayerDevCards {
     pub queued: u16,
     pub active: u16,
-    pub played: UsableDevCardCollection,
+    pub played: UsableDevCardSet,
     pub victory_points: PublicVpKnowledge,
 }
 
@@ -144,7 +144,7 @@ pub struct PublicGameView<'a> {
 #[derive(Debug, Clone, Copy)]
 pub struct PrivatePlayerView<'a> {
     pub player_id: PlayerId,
-    pub resources: &'a ResourceCollection,
+    pub resources: &'a ResourceSet,
     pub dev_cards: &'a DevCardData,
 }
 
@@ -364,7 +364,7 @@ fn public_bank_resource_levels(bank: &Bank) -> ResourceMap<DeckFullnessLevel> {
 
 fn project_player(
     player_id: PlayerId,
-    resources: &ResourceCollection,
+    resources: &ResourceSet,
     dev_cards: &DevCardData,
     policy: VisibilityPolicy,
 ) -> PublicPlayerView {

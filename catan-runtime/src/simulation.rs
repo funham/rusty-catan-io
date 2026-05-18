@@ -33,11 +33,6 @@ impl SimulationHost {
         }
     }
 
-    pub fn with_dice_seed(mut self, seed: u64) -> Self {
-        self.engine.set_dice_seed(seed);
-        self
-    }
-
     pub fn run(&mut self) -> GameResult {
         let mut queue = VecDeque::new();
         let transition = match self.engine.start() {

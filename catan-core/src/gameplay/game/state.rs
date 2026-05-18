@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -13,7 +12,7 @@ use crate::{
             build::{BoardBuildData, Build, BuildingError, EstablishmentType, Road},
             dev_card::DevCardUsage,
             player::{PlayerDataContainer, PlayerId},
-            resource::{Resource, ResourceCollection, ResourceCollectionError},
+            resource::{Resource, ResourceSet, ResourceCollectionError},
             trade::BankTrade,
             turn::GameTurn,
         },
@@ -82,8 +81,8 @@ impl GameState {
     pub fn bank_resource_exchange(
         &mut self,
         player_id: PlayerId,
-        to_bank: ResourceCollection,
-        from_bank: ResourceCollection,
+        to_bank: ResourceSet,
+        from_bank: ResourceSet,
     ) -> Result<(), BankResourceExchangeError> {
         let missing = self.players.get(player_id).resources().missing(&to_bank);
         if !missing.is_empty() {
@@ -210,11 +209,11 @@ impl GameState {
 
     pub fn transfer_to_bank(
         &mut self,
-        resources: ResourceCollection,
+        resources: ResourceSet,
         player_id: impl Into<PlayerId>,
     ) -> Result<(), BankResourceExchangeError> {
         let player_id = player_id.into();
-        ResourceCollection::transfer(
+        ResourceSet::transfer(
             self.players.get_mut(player_id).resources(),
             &mut self.bank.resources,
             resources,
@@ -233,11 +232,11 @@ impl GameState {
 
     pub fn transfer_from_bank(
         &mut self,
-        resources: ResourceCollection,
+        resources: ResourceSet,
         player_id: impl Into<PlayerId>,
     ) -> Result<(), BankResourceExchangeError> {
         let player_id = player_id.into();
-        ResourceCollection::transfer(
+        ResourceSet::transfer(
             &mut self.bank.resources,
             self.players.get_mut(player_id).resources(),
             resources,
@@ -249,7 +248,7 @@ impl GameState {
         &mut self,
         from_id: impl Into<PlayerId>,
         to_id: impl Into<PlayerId>,
-        resources: ResourceCollection,
+        resources: ResourceSet,
     ) -> Result<(), PlayerResourceExchangeError> {
         let from_id = from_id.into();
         let to_id = to_id.into();
@@ -266,19 +265,19 @@ impl GameState {
 
         let (from, to) = self.players.get_mut_both_raw((from_id, to_id));
 
-        ResourceCollection::transfer(&mut from.resources, &mut to.resources, resources)
+        ResourceSet::transfer(&mut from.resources, &mut to.resources, resources)
             .map_err(|_| PlayerResourceExchangeError::AccountIsShort { id: from_id })
     }
 
     pub fn players_resource_exchange(
         &mut self,
-        lhs: (impl Into<PlayerId>, ResourceCollection),
-        rhs: (impl Into<PlayerId>, ResourceCollection),
+        lhs: (impl Into<PlayerId>, ResourceSet),
+        rhs: (impl Into<PlayerId>, ResourceSet),
     ) -> Result<(), PlayerResourceExchangeError> {
         let lhs = (lhs.0.into(), lhs.1);
         let rhs = (rhs.0.into(), rhs.1);
         let has_enough =
-            |(id, rc): &(_, ResourceCollection)| self.players.get(*id).resources.has_enough(rc);
+            |(id, rc): &(_, ResourceSet)| self.players.get(*id).resources.has_enough(rc);
 
         match (has_enough(&lhs), has_enough(&rhs)) {
             (false, _) => Err(PlayerResourceExchangeError::AccountIsShort { id: lhs.0 }),
@@ -294,12 +293,12 @@ impl GameState {
         algorithm::player_order_from(start_id, self.players.count()).collect::<Vec<_>>()
     }
 
-    pub fn use_robbers_with_rng<R: Rng + ?Sized>(
+    pub fn use_robbers(
         &mut self,
         rob_hex: Hex,
         robber_id: PlayerId,
         robbed_id: Option<PlayerId>,
-        rng: &mut R,
+        stolen_resource: Option<Resource>,
     ) -> Result<Option<Resource>, DevCardUsageError> {
         log::trace!("use robbers");
 
@@ -321,12 +320,9 @@ impl GameState {
             return Err(DevCardUsageError::InvalidRobbery);
         }
 
+        self.validate_stolen_resource(robbed_id, stolen_resource)?;
+        let stolen = self.transfer_stolen_resource(robbed_id, robber_id, stolen_resource)?;
         self.board_state.robber_pos = rob_hex;
-        let stolen = if let Some(robbed_id) = robbed_id {
-            self.steal_with_rng(robbed_id, robber_id, rng)
-        } else {
-            None
-        };
         log::trace!("use robbers success");
         Ok(stolen)
     }
@@ -335,11 +331,11 @@ impl GameState {
         algorithm::robbery_candidates(rob_hex, robber_id, &self.builds, &self.players).collect()
     }
 
-    pub fn use_dev_card_with_rng<R: Rng + ?Sized>(
+    pub fn use_dev_card(
         &mut self,
         usage: DevCardUsage,
         user: impl Into<PlayerId>,
-        rng: &mut R,
+        stolen_resource: Option<Resource>,
     ) -> Result<Option<Resource>, DevCardUsageError> {
         let user = user.into();
         if !self
@@ -354,13 +350,22 @@ impl GameState {
 
         match &usage {
             DevCardUsage::Knight { rob_hex, robbed_id } => {
-                self.validate_robbers(*rob_hex, user, *robbed_id)?
+                self.validate_robbers(*rob_hex, user, *robbed_id)?;
+                self.validate_stolen_resource(*robbed_id, stolen_resource)?;
             }
             DevCardUsage::YearOfPlenty(list) => self.validate_year_of_plenty(*list)?,
             DevCardUsage::RoadBuild(poses) => {
                 self.validated_roadbuild_state(*poses, user)?;
             }
-            DevCardUsage::Monopoly(_) => {}
+            DevCardUsage::Monopoly(_) => {
+                if stolen_resource.is_some() {
+                    return Err(DevCardUsageError::InvalidRobbery);
+                }
+            }
+        }
+
+        if !matches!(usage, DevCardUsage::Knight { .. }) && stolen_resource.is_some() {
+            return Err(DevCardUsageError::InvalidRobbery);
         }
 
         if self
@@ -374,7 +379,7 @@ impl GameState {
 
         let stolen = match usage {
             DevCardUsage::Knight { rob_hex, robbed_id } => {
-                self.use_robbers_with_rng(rob_hex, user, robbed_id, rng)?
+                self.use_robbers(rob_hex, user, robbed_id, stolen_resource)?
             }
             DevCardUsage::YearOfPlenty(list) => {
                 self.apply_year_of_plenty(list, user)?;
@@ -415,30 +420,48 @@ impl GameState {
         }
     }
 
-    fn steal_with_rng<R: Rng + ?Sized>(
+    fn validate_stolen_resource(
+        &self,
+        robbed_id: Option<PlayerId>,
+        stolen_resource: Option<Resource>,
+    ) -> Result<(), DevCardUsageError> {
+        match (robbed_id, stolen_resource) {
+            (Some(id), Some(resource)) => self
+                .players
+                .get(id)
+                .resources()
+                .has_enough(&resource.into())
+                .then_some(())
+                .ok_or(DevCardUsageError::InvalidRobbery),
+            (Some(id), None) if self.players.get(id).resources().is_empty() => Ok(()),
+            (Some(_), None) => Err(DevCardUsageError::InvalidRobbery),
+            (None, None) => Ok(()),
+            (None, Some(_)) => Err(DevCardUsageError::InvalidRobbery),
+        }
+    }
+
+    fn transfer_stolen_resource(
         &mut self,
-        robbed_id: PlayerId,
+        robbed_id: Option<PlayerId>,
         robber_id: PlayerId,
-        rng: &mut R,
-    ) -> Option<Resource> {
+        stolen_resource: Option<Resource>,
+    ) -> Result<Option<Resource>, DevCardUsageError> {
         log::trace!("steal");
-        let robbed_account = self.players.get(robbed_id).resources();
-        let stolen = robbed_account.peek_random(rng);
-        log::trace!("peek random success");
-        if let Some(card) = stolen {
-            if let Err(e) = self.players_resource_transfer(robbed_id, robber_id, card.into()) {
-                log::error!("stealing non-existent card: {:?}", e);
-                return None;
-            }
+        if let (Some(robbed_id), Some(resource)) = (robbed_id, stolen_resource) {
+            self.players_resource_transfer(robbed_id, robber_id, resource.into())
+                .map_err(|err| {
+                    log::error!("stealing non-existent card: {:?}", err);
+                    DevCardUsageError::InvalidRobbery
+                })?;
         }
         log::trace!("steal success");
-        stolen
+        Ok(stolen_resource)
     }
 
     fn validate_year_of_plenty(&self, list: [Resource; 2]) -> Result<(), DevCardUsageError> {
         let requested =
             list.into_iter()
-                .fold(ResourceCollection::default(), |mut acc, resource| {
+                .fold(ResourceSet::default(), |mut acc, resource| {
                     acc += &resource.into();
                     acc
                 });
@@ -520,12 +543,10 @@ mod tests {
             primitives::{
                 dev_card::{DevCardKind, DevCardUsage, UsableDevCard},
                 player::PlayerId,
-                resource::{Resource, ResourceCollection},
+                resource::{Resource, ResourceSet},
             },
         },
     };
-    use rand::SeedableRng;
-
     const P0: PlayerId = PlayerId::new(0);
     const P1: PlayerId = PlayerId::new(1);
 
@@ -581,10 +602,10 @@ mod tests {
         ];
         state
             .transfer_from_bank(
-                ResourceCollection {
+                ResourceSet {
                     brick: 3,
                     sheep: 2,
-                    ..ResourceCollection::ZERO
+                    ..ResourceSet::ZERO
                 },
                 0,
             )
@@ -647,15 +668,14 @@ mod tests {
             .transfer_from_bank(Resource::Brick.into(), 1)
             .expect("bank should fund test player");
 
-        let mut rng = rand::rngs::SmallRng::seed_from_u64(42);
         state
-            .use_dev_card_with_rng(
+            .use_dev_card(
                 DevCardUsage::Knight {
                     rob_hex: victim_hex,
                     robbed_id: Some(P1),
                 },
                 P0,
-                &mut rng,
+                Some(Resource::Brick),
             )
             .expect("knight usage should be legal");
 
@@ -678,18 +698,17 @@ mod tests {
         let initial_robber = state.board_state.robber_pos;
         give_active_knight(&mut state, 0);
         state
-            .transfer_from_bank(ResourceCollection::from(Resource::Brick), 1)
+            .transfer_from_bank(ResourceSet::from(Resource::Brick), 1)
             .expect("bank should fund test player");
 
-        let mut rng = rand::rngs::SmallRng::seed_from_u64(42);
         let err = state
-            .use_dev_card_with_rng(
+            .use_dev_card(
                 DevCardUsage::Knight {
                     rob_hex: victim_hex,
                     robbed_id: None,
                 },
                 P0,
-                &mut rng,
+                None,
             )
             .expect_err("target must be provided when a player can be robbed");
 

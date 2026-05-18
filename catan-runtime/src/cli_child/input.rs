@@ -13,7 +13,7 @@ use catan_core::{
         build::{Build, Establishment, EstablishmentType, Road},
         dev_card::{DevCardUsage, UsableDevCard},
         player::PlayerId,
-        resource::{Resource, ResourceCollection},
+        resource::{Resource, ResourceSet},
         trade::{BankTrade, BankTradeKind},
     },
     topology::{Hex, HexIndex, Intersection, Path as BoardPath, repr::Dual},
@@ -361,7 +361,7 @@ impl PartialBuildMode {
         }
     }
 
-    fn cost(self) -> ResourceCollection {
+    fn cost(self) -> ResourceSet {
         match self {
             Self::Settlement => constants::costs::SETTLEMENT,
             Self::Road => constants::costs::ROAD,
@@ -560,7 +560,7 @@ pub(crate) fn read_resource_collection(
     ui: &mut CliUi,
     model: &UiModel,
     prompt: &str,
-) -> io::Result<ResourceCollection> {
+) -> io::Result<ResourceSet> {
     log::trace!("Reading resource collection");
     loop {
         let line = ui.prompt(model, prompt)?;
@@ -576,7 +576,7 @@ pub(crate) fn read_resource_collection(
             .collect::<Result<Vec<_>, _>>();
         match parts {
             Ok(parts) if parts.len() == 5 => {
-                let resources = ResourceCollection {
+                let resources = ResourceSet {
                     brick: parts[0],
                     wood: parts[1],
                     wheat: parts[2],
