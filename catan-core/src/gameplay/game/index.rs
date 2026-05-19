@@ -4,7 +4,7 @@ use crate::{
     gameplay::{
         constants::capacities::PLAYER_PORTS_INLINE,
         field::state::BuildCollection,
-        game::state::GameState,
+        game::state::{GameState, TableState},
         primitives::{
             PortKind,
             build::{Build, Establishment, EstablishmentType, Road},
@@ -26,6 +26,10 @@ pub struct GameIndex {
 
 impl GameIndex {
     pub fn rebuild(state: &GameState) -> Self {
+        Self::rebuild_table(&state.table)
+    }
+
+    pub fn rebuild_table(state: &TableState) -> Self {
         let longest_road_lengths = Self::longest_road_lengths(state);
         let longest_road_owner =
             Self::longest_road_owner(state.builds.longest_road(), &longest_road_lengths);
@@ -39,7 +43,7 @@ impl GameIndex {
         }
     }
 
-    fn get_ports_acquired(state: &GameState) -> Vec<SmallSet<PortKind, PLAYER_PORTS_INLINE>> {
+    fn get_ports_acquired(state: &TableState) -> Vec<SmallSet<PortKind, PLAYER_PORTS_INLINE>> {
         algorithm::get_ports_acquired(state.board.ports_intersection(), &state.builds)
     }
 
@@ -101,7 +105,7 @@ impl GameIndex {
             Self::longest_road_owner(state.builds.longest_road(), &self.longest_road_lengths);
     }
 
-    fn longest_road_lengths(state: &GameState) -> Vec<u16> {
+    fn longest_road_lengths(state: &TableState) -> Vec<u16> {
         player_ids(state.players.count())
             .map(|player_id| {
                 let blockers = Self::opponent_establishments(state, player_id);
@@ -113,7 +117,7 @@ impl GameIndex {
     }
 
     fn opponent_establishments(
-        state: &GameState,
+        state: &TableState,
         player_id: PlayerId,
     ) -> SmallSet<Intersection, 32> {
         state
@@ -124,7 +128,7 @@ impl GameIndex {
             .collect()
     }
 
-    fn refresh_longest_road_length(&mut self, state: &GameState, player_id: PlayerId) {
+    fn refresh_longest_road_length(&mut self, state: &TableState, player_id: PlayerId) {
         let blockers = Self::opponent_establishments(state, player_id);
         self.longest_road_lengths[player_id.index()] = state.builds[player_id]
             .roads
@@ -154,7 +158,7 @@ impl GameIndex {
 
     fn refresh_player_ports_after_settlement(
         &mut self,
-        state: &GameState,
+        state: &TableState,
         player_id: PlayerId,
         settlement: Establishment,
     ) {
@@ -165,7 +169,7 @@ impl GameIndex {
 
     fn refresh_opponents_blocked_by_settlement(
         &mut self,
-        state: &GameState,
+        state: &TableState,
         player_id: PlayerId,
         settlement: Establishment,
     ) {
@@ -184,7 +188,7 @@ impl GameIndex {
     }
 
     fn player_has_road_touching(
-        state: &GameState,
+        state: &TableState,
         player_id: PlayerId,
         intersection: Intersection,
     ) -> bool {
@@ -235,6 +239,18 @@ impl GameIndex {
             Some(best)
         } else {
             None
+        }
+    }
+}
+
+impl Default for GameIndex {
+    fn default() -> Self {
+        Self {
+            all_builds: Vec::new(),
+            longest_road_lengths: Vec::new(),
+            longest_road_owner: None,
+            largest_army_owner: None,
+            ports_acquired: Vec::new(),
         }
     }
 }

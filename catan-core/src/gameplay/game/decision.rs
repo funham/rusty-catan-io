@@ -16,6 +16,20 @@ pub struct OpenDecision {
     pub lifetime: DecisionLifetime,
 }
 
+impl OpenDecision {
+    pub fn id(&self) -> DecisionId {
+        self.id
+    }
+
+    pub fn player_id(&self) -> PlayerId {
+        self.player_id
+    }
+
+    pub fn kind(&self) -> DecisionKind {
+        self.kind
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DecisionLifetime {
     OneShot,
@@ -34,6 +48,33 @@ pub enum DecisionKind {
     DropHalf { required: u16 },
     TradeResponse { session: TradeSessionId },
     TradeOwnerAction { session: TradeSessionId },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct DecisionAllocator {
+    next: u64,
+}
+
+impl DecisionAllocator {
+    pub(crate) fn new(next: u64) -> Self {
+        Self { next }
+    }
+
+    pub(crate) fn open(
+        &mut self,
+        player_id: PlayerId,
+        kind: DecisionKind,
+        lifetime: DecisionLifetime,
+    ) -> OpenDecision {
+        let decision = OpenDecision {
+            id: DecisionId(self.next),
+            player_id,
+            kind,
+            lifetime,
+        };
+        self.next += 1;
+        decision
+    }
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]

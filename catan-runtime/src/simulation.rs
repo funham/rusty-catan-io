@@ -5,7 +5,7 @@ use catan_core::gameplay::{
     game::{
         engine::GameEngine,
         init::GameInitializationState,
-        input::{GameInput, PlayerCommand},
+        input::PlayerCommand,
         output::GameOutput,
         projector,
         run::{GameResult, GameRunStats, RunOptions},
@@ -63,18 +63,20 @@ impl SimulationHost {
             let GameOutput::DecisionOpened(decision) = output else {
                 continue;
             };
-            let player_id = decision.player_id;
+            let player_id = decision.player_id();
             let Some(command) = self.command_for(player_id, &decision) else {
                 return GameResult::Interrupted {
                     reason: format!("bot {player_id} did not produce a command"),
                 };
             };
 
-            let transition = match self.engine.apply(GameInput::Submit {
-                player_id,
-                decision_id: decision.id,
-                command,
-            }) {
+            let Some(response) = decision.respond_command(command) else {
+                return GameResult::Interrupted {
+                    reason: format!("bot {player_id} produced a command for the wrong decision"),
+                };
+            };
+
+            let transition = match self.engine.submit(response) {
                 Ok(transition) => transition,
                 Err(err) => {
                     return GameResult::Interrupted {
@@ -98,15 +100,15 @@ impl SimulationHost {
     fn command_for(
         &mut self,
         player_id: PlayerId,
-        decision: &catan_core::gameplay::game::decision::OpenDecision,
+        decision: &catan_core::gameplay::game::input::DecisionRequest,
     ) -> Option<PlayerCommand> {
         let policy = self.visibility.player_policy(player_id);
         let factory = ContextFactory {
-            state: self.engine.state(),
+            state: self.engine.table(),
             index: self.engine.index(),
             visibility: &self.visibility,
         };
-        let search = Some(SearchFactory::new(self.engine.state(), policy, player_id));
+        let search = Some(SearchFactory::new(self.engine.table(), policy, player_id));
         let context = factory.player_decision_context(player_id, search);
         self.bots[player_id.index()].command_for(decision, context)
     }

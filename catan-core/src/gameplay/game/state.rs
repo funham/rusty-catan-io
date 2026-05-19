@@ -23,14 +23,34 @@ use crate::{
 use crate::topology::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GameState {
+pub struct TableState {
     #[serde(with = "arc_board_layout")]
     pub board: Arc<BoardLayout>,
     pub board_state: BoardState,
-    pub turn: GameTurn,
     pub bank: Bank,
     pub players: PlayerDataContainer,
     pub builds: BoardBuildData,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GameState {
+    #[serde(flatten)]
+    pub table: TableState,
+    pub turn: GameTurn,
+}
+
+impl std::ops::Deref for GameState {
+    type Target = TableState;
+
+    fn deref(&self) -> &Self::Target {
+        &self.table
+    }
+}
+
+impl std::ops::DerefMut for GameState {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.table
+    }
 }
 
 mod arc_board_layout {
@@ -78,6 +98,12 @@ pub enum BuyDevCardError {
 }
 
 impl GameState {
+    pub fn into_parts(self) -> (TableState, GameTurn) {
+        (self.table, self.turn)
+    }
+}
+
+impl TableState {
     pub fn bank_resource_exchange(
         &mut self,
         player_id: PlayerId,

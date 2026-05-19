@@ -86,7 +86,7 @@ fn build_initial_engine(
             let loaded = snapshot::load_checkpoint(path)
                 .map_err(|err| format!("failed to load snapshot {}: {err}", path.display()))?;
             let snapshot = loaded.snapshot;
-            let snapshot_players = snapshot.state.players.count();
+            let snapshot_players = snapshot.state.table().players.count();
             if snapshot_players != player_count {
                 return Err(format!(
                     "snapshot has {snapshot_players} players but config declares {player_count}"

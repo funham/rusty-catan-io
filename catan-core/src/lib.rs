@@ -8,7 +8,7 @@ pub use gameplay::constants;
 pub use gameplay::game::{
     engine::GameEngine,
     init::GameInitializationState,
-    input::{GameInput, PlayerCommand},
+    input::{DecisionRequest, DecisionResponse, PlayerCommand},
     output::GameOutput,
     run::{GameResult, RunOptions},
 };

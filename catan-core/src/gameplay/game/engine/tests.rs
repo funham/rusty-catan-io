@@ -7,7 +7,9 @@ use crate::{
             decision::{DecisionKind, DecisionLifetime, OpenDecision},
             event::{EventBatch, GameEvent},
             init::GameInitializationState,
-            input::{GameInput, PlayerCommand, TradeCommand, TradeResponseCommand},
+            input::{
+                DecisionRequest, GameInput, PlayerCommand, TradeCommand, TradeResponseCommand,
+            },
             lifecycle::EngineCore,
             output::{CommandRejectionReason, GameOutput},
             phase::GamePhase,
@@ -78,7 +80,7 @@ fn apply_to_sink(
     status
 }
 
-fn first_open_decision(outputs: &[GameOutput]) -> OpenDecision {
+fn first_open_decision(outputs: &[GameOutput]) -> DecisionRequest {
     outputs
         .iter()
         .find_map(|output| match output {
@@ -100,6 +102,7 @@ fn output_events(outputs: &[GameOutput]) -> Vec<&GameEvent> {
 }
 
 fn add_two_initial_settlements(engine: &mut GameEngine) -> Hex {
+    engine.core.force_playing_for_tests();
     let mut victim_hex = None;
 
     for player_id in [P0, P1] {
@@ -339,14 +342,14 @@ fn reducer_applies_bank_trade_event_with_exact_exchange() {
 
 #[test]
 fn decider_start_emits_game_started_and_initial_decision() {
-    let lifecycle = EngineCore::active(GameInitializationState::default().finish());
+    let lifecycle = EngineCore::unstarted(GameInitializationState::default());
 
     let events = decider::decide(&lifecycle, GameInput::Start);
 
     assert!(matches!(events.as_slice(), [
         GameEvent::GameStarted,
         GameEvent::DecisionOpened(decision),
-    ] if decision.player_id == 0 && matches!(decision.kind, DecisionKind::InitialPlacement)));
+    ] if decision.player_id() == 0 && matches!(decision.kind(), DecisionKind::InitialPlacement)));
     assert!(!events.spilled());
 }
 
@@ -368,7 +371,7 @@ fn decider_end_move_emits_turn_transition_events() {
         &lifecycle,
         GameInput::Submit {
             player_id: P0,
-            decision_id: decision.id,
+            decision_id: decision.id(),
             command: PlayerCommand::Regular(RegularCommand::EndMove),
         },
     );
@@ -391,7 +394,7 @@ fn decider_end_move_emits_turn_transition_events() {
                 kind: DecisionKind::InitCommand,
                 lifetime: DecisionLifetime::OneShot,
             }),
-        ] if *decision_id == decision.id && id.0 == 8
+        ] if *decision_id == decision.id() && id.0 == 8
     ));
 }
 
@@ -428,7 +431,7 @@ fn decider_valid_bank_trade_emits_trade_and_reopens_regular_decision() {
         &lifecycle,
         GameInput::Submit {
             player_id: P0,
-            decision_id: decision.id,
+            decision_id: decision.id(),
             command: PlayerCommand::Regular(RegularCommand::TradeWithBank(trade)),
         },
     );
@@ -447,7 +450,7 @@ fn decider_valid_bank_trade_emits_trade_and_reopens_regular_decision() {
                 kind: DecisionKind::RegularCommand,
                 lifetime: DecisionLifetime::OneShot,
             }),
-        ] if *decision_id == decision.id
+        ] if *decision_id == decision.id()
             && emitted.kind == trade.kind
             && emitted.give == trade.give
             && emitted.take == trade.take
@@ -499,7 +502,7 @@ fn decider_valid_build_emits_build_and_reopens_regular_decision() {
         &lifecycle,
         GameInput::Submit {
             player_id: P0,
-            decision_id: decision.id,
+            decision_id: decision.id(),
             command: PlayerCommand::Regular(RegularCommand::Build(build)),
         },
     );
@@ -518,7 +521,7 @@ fn decider_valid_build_emits_build_and_reopens_regular_decision() {
                 kind: DecisionKind::RegularCommand,
                 lifetime: DecisionLifetime::OneShot,
             }),
-        ] if *decision_id == decision.id
+        ] if *decision_id == decision.id()
             && matches!((emitted, build), (Build::Road(left), Build::Road(right)) if left.path == right.path)
             && id.0 == 8
     ));
@@ -542,7 +545,7 @@ fn decider_roll_dice_harvest_emits_complete_facts() {
         &lifecycle,
         GameInput::Submit {
             player_id: P0,
-            decision_id: decision.id,
+            decision_id: decision.id(),
             command: PlayerCommand::InitCommand(
                 crate::gameplay::game::command::InitCommand::RollDice,
             ),
@@ -570,7 +573,7 @@ fn decider_roll_dice_harvest_emits_complete_facts() {
                 kind: DecisionKind::PostDiceCommand,
                 lifetime: DecisionLifetime::OneShot,
             }),
-        ] if *decision_id == decision.id && *value == DiceRoll::eight() && id.0 == 8
+        ] if *decision_id == decision.id() && *value == DiceRoll::eight() && id.0 == 8
     ));
 }
 
@@ -592,7 +595,7 @@ fn decider_roll_dice_seven_opens_discard_or_robber_decision() {
         &lifecycle,
         GameInput::Submit {
             player_id: P0,
-            decision_id: decision.id,
+            decision_id: decision.id(),
             command: PlayerCommand::InitCommand(
                 crate::gameplay::game::command::InitCommand::RollDice,
             ),
@@ -619,7 +622,7 @@ fn decider_roll_dice_seven_opens_discard_or_robber_decision() {
                 kind: DecisionKind::MoveRobber,
                 lifetime: DecisionLifetime::OneShot,
             }),
-        ] if *decision_id == decision.id && *value == DiceRoll::seven() && id.0 == 8
+        ] if *decision_id == decision.id() && *value == DiceRoll::seven() && id.0 == 8
     ));
 }
 
@@ -646,7 +649,7 @@ fn decider_buy_dev_card_emits_private_draw_fact_and_reopens_regular_decision() {
         &lifecycle,
         GameInput::Submit {
             player_id: P0,
-            decision_id: decision.id,
+            decision_id: decision.id(),
             command: PlayerCommand::Regular(RegularCommand::BuyDevCard),
         },
     );
@@ -666,7 +669,7 @@ fn decider_buy_dev_card_emits_private_draw_fact_and_reopens_regular_decision() {
                 kind: DecisionKind::RegularCommand,
                 lifetime: DecisionLifetime::OneShot,
             }),
-        ] if *decision_id == decision.id && id.0 == 8
+        ] if *decision_id == decision.id() && id.0 == 8
     ));
 }
 
@@ -695,7 +698,7 @@ fn decider_use_dev_card_emits_usage_and_post_dev_card_decision() {
         &lifecycle,
         GameInput::Submit {
             player_id: P0,
-            decision_id: decision.id,
+            decision_id: decision.id(),
             command: PlayerCommand::InitCommand(
                 crate::gameplay::game::command::InitCommand::UseDevCard(usage.clone()),
             ),
@@ -716,7 +719,7 @@ fn decider_use_dev_card_emits_usage_and_post_dev_card_decision() {
                 kind: DecisionKind::PostDevCardCommand,
                 lifetime: DecisionLifetime::OneShot,
             }),
-        ] if *decision_id == decision.id && *emitted == usage && id.0 == 8
+        ] if *decision_id == decision.id() && *emitted == usage && id.0 == 8
     ));
 }
 
@@ -726,9 +729,8 @@ fn start_opens_one_shot_init_decision() {
 
     let decision = first_open_decision(&outputs);
 
-    assert_eq!(decision.player_id, 0);
-    assert!(matches!(decision.kind, DecisionKind::InitialPlacement));
-    assert_eq!(decision.lifetime, DecisionLifetime::OneShot);
+    assert_eq!(decision.player_id(), 0);
+    assert!(matches!(decision.kind(), DecisionKind::InitialPlacement));
 }
 
 #[test]
@@ -738,12 +740,11 @@ fn start_updates_reducer_lifecycle_mirror() {
 
     let active = engine
         .lifecycle()
-        .as_active()
-        .expect("started engine should have active lifecycle");
+        .as_setup()
+        .expect("started engine should have setup lifecycle");
 
-    assert!(matches!(active.phase, GamePhase::InitialPlacement));
-    assert!(active.pending.get(decision.id).is_some());
-    assert_eq!(active.next_decision_id, decision.id.0 + 1);
+    assert!(active.pending.get(decision.id()).is_some());
+    assert_eq!(active.next_decision_id, decision.id().0 + 1);
 }
 
 #[test]
@@ -778,7 +779,7 @@ fn start_emits_domain_decision_opened_event() {
         matches!(
             output_event(output),
             Some(GameEvent::DecisionOpened(decision))
-                if decision.player_id == 0 && matches!(decision.kind, DecisionKind::InitialPlacement)
+                if decision.player_id() == 0 && matches!(decision.kind(), DecisionKind::InitialPlacement)
         )
     }));
 }
@@ -819,7 +820,7 @@ fn characterization_bank_trade_event_follows_decision_close() {
         &mut engine,
         GameInput::Submit {
             player_id: P0,
-            decision_id: decision.id,
+            decision_id: decision.id(),
             command: PlayerCommand::Regular(RegularCommand::TradeWithBank(BankTrade {
                 kind: BankTradeKind::BankGeneric,
                 give: Resource::Brick,
@@ -840,7 +841,7 @@ fn characterization_bank_trade_event_follows_decision_close() {
                 kind: DecisionKind::RegularCommand,
                 ..
             }),
-        ] if *decision_id == decision.id
+        ] if *decision_id == decision.id()
     ));
 }
 
@@ -906,7 +907,7 @@ fn wrong_player_is_rejected_without_closing_decision() {
         &mut engine,
         GameInput::Submit {
             player_id: P1,
-            decision_id: decision.id,
+            decision_id: decision.id(),
             command: PlayerCommand::MoveRobber(crate::gameplay::game::command::MoveRobberCommand(
                 Hex::new(0, 0),
             )),
@@ -922,7 +923,7 @@ fn wrong_player_is_rejected_without_closing_decision() {
                 player_id: P1,
                 decision_id: Some(id),
                 reason: CommandRejectionReason::WrongPlayer { expected: P0 },
-            } if *id == decision.id
+            } if *id == decision.id()
         )
     }));
 }
@@ -937,7 +938,7 @@ fn wrong_player_rejection_emits_domain_command_rejected_event() {
         &mut engine,
         GameInput::Submit {
             player_id: P1,
-            decision_id: decision.id,
+            decision_id: decision.id(),
             command: PlayerCommand::MoveRobber(crate::gameplay::game::command::MoveRobberCommand(
                 Hex::new(0, 0),
             )),
@@ -953,7 +954,7 @@ fn wrong_player_rejection_emits_domain_command_rejected_event() {
                 decision_id: Some(id),
                 reason: CommandRejectionReason::WrongPlayer { expected: P0 },
                 counts_toward_limit: false,
-            }) if *id == decision.id
+            }) if *id == decision.id()
         )
     }));
 }
@@ -973,7 +974,7 @@ fn stale_decision_is_rejected_after_one_shot_closes() {
         &mut engine,
         GameInput::Submit {
             player_id: P0,
-            decision_id: decision.id,
+            decision_id: decision.id(),
             command: PlayerCommand::InitialPlacement(placement),
         },
         &mut sink,
@@ -983,7 +984,7 @@ fn stale_decision_is_rejected_after_one_shot_closes() {
         &mut engine,
         GameInput::Submit {
             player_id: P0,
-            decision_id: decision.id,
+            decision_id: decision.id(),
             command: PlayerCommand::InitialPlacement(placement),
         },
         &mut stale_sink,
@@ -996,7 +997,7 @@ fn stale_decision_is_rejected_after_one_shot_closes() {
                 player_id: P0,
                 decision_id: Some(id),
                 reason: CommandRejectionReason::StaleDecision,
-            } if *id == decision.id
+            } if *id == decision.id()
         )
     }));
 }
@@ -1028,7 +1029,7 @@ fn buying_dev_card_emits_private_drawn_card_event() {
         &mut engine,
         GameInput::Submit {
             player_id: P0,
-            decision_id: decision.id,
+            decision_id: decision.id(),
             command: PlayerCommand::Regular(
                 crate::gameplay::game::command::RegularCommand::BuyDevCard,
             ),
@@ -1059,7 +1060,7 @@ fn moving_robber_emits_stolen_resource_event() {
         &mut engine,
         GameInput::Submit {
             player_id: P0,
-            decision_id: decision.id,
+            decision_id: decision.id(),
             command: PlayerCommand::MoveRobber(crate::gameplay::game::command::MoveRobberCommand(
                 victim_hex,
             )),
@@ -1092,7 +1093,7 @@ fn reusable_trade_response_decision_can_be_updated_until_session_closes() {
         &mut engine,
         GameInput::Submit {
             player_id: P0,
-            decision_id: owner_decision.id,
+            decision_id: owner_decision.id(),
             command: PlayerCommand::Trade(TradeCommand::Propose {
                 scope: TradeScope::Public,
                 offer: PublicTradeOffer {
@@ -1109,8 +1110,8 @@ fn reusable_trade_response_decision_can_be_updated_until_session_closes() {
         .iter()
         .find_map(|output| match output {
             GameOutput::DecisionOpened(decision)
-                if decision.player_id == 1
-                    && matches!(decision.kind, DecisionKind::TradeResponse { .. }) =>
+                if decision.player_id() == 1
+                    && matches!(decision.kind(), DecisionKind::TradeResponse { .. }) =>
             {
                 Some(decision.clone())
             }
@@ -1123,7 +1124,7 @@ fn reusable_trade_response_decision_can_be_updated_until_session_closes() {
         &mut engine,
         GameInput::Submit {
             player_id: P1,
-            decision_id: response_decision.id,
+            decision_id: response_decision.id(),
             command: PlayerCommand::Trade(TradeCommand::Respond(TradeResponseCommand::Accept {
                 offer_id: 0.into(),
             })),
@@ -1134,7 +1135,7 @@ fn reusable_trade_response_decision_can_be_updated_until_session_closes() {
         &mut engine,
         GameInput::Submit {
             player_id: P1,
-            decision_id: response_decision.id,
+            decision_id: response_decision.id(),
             command: PlayerCommand::Trade(TradeCommand::Respond(TradeResponseCommand::Reject)),
         },
         &mut update_sink,
@@ -1526,7 +1527,7 @@ fn submit_after_game_end_is_rejected_without_mutation() {
         &mut engine,
         GameInput::Submit {
             player_id: P0,
-            decision_id: decision.id,
+            decision_id: decision.id(),
             command: PlayerCommand::Regular(
                 crate::gameplay::game::command::RegularCommand::EndMove,
             ),

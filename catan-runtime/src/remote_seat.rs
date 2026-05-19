@@ -45,7 +45,7 @@ impl Seat for RemoteCliSeat {
 
     fn on_frame(&mut self, frame: SeatFrame<'_>, commands: &mut SeatCommandBuffer) {
         if let GameOutput::DecisionOpened(decision) = frame.output
-            && decision.player_id != self.player_id
+            && decision.player_id() != self.player_id
         {
             return;
         }
@@ -67,7 +67,7 @@ impl Seat for RemoteCliSeat {
         let GameOutput::DecisionOpened(decision) = output else {
             return;
         };
-        if decision.player_id != self.player_id {
+        if decision.player_id() != self.player_id {
             return;
         }
 
@@ -75,14 +75,14 @@ impl Seat for RemoteCliSeat {
             match read_frame::<CliToHost>(&mut self.stream) {
                 Ok(CliToHost::SubmitCommand {
                     player_id,
-                    decision_id,
+                    decision_id: _,
                     command,
                 }) => {
-                    commands.push(SeatCommand {
-                        player_id,
-                        decision_id,
-                        command,
-                    });
+                    if player_id == self.player_id
+                        && let Some(response) = decision.respond_command(command)
+                    {
+                        commands.push(SeatCommand { response });
+                    }
                     return;
                 }
                 Ok(CliToHost::Error { message }) => {
@@ -228,7 +228,7 @@ fn player_frame(
     context: &PlayerDecisionContext<'_>,
 ) -> (GameOutput, UiModel, LegalDecisionOptions) {
     let robber_pos = match output {
-        GameOutput::DecisionOpened(decision) => match decision.kind {
+        GameOutput::DecisionOpened(decision) => match decision.kind() {
             DecisionKind::ChooseRobbedPlayer { robber_pos } => Some(robber_pos),
             _ => None,
         },
@@ -319,8 +319,8 @@ mod tests {
             write_frame(
                 &mut child_stream,
                 &CliToHost::SubmitCommand {
-                    player_id: decision.player_id,
-                    decision_id: decision.id,
+                    player_id: decision.player_id(),
+                    decision_id: decision.id(),
                     command: catan_core::gameplay::game::input::PlayerCommand::Regular(
                         catan_core::gameplay::game::command::RegularCommand::EndMove,
                     ),
@@ -341,12 +341,14 @@ mod tests {
             visibility: &visibility,
         };
         let view = factory.player_decision_context(0, None);
-        let output = GameOutput::DecisionOpened(OpenDecision {
-            id: catan_core::gameplay::game::decision::DecisionId(7),
-            player_id: P0,
-            kind: DecisionKind::RegularCommand,
-            lifetime: DecisionLifetime::OneShot,
-        });
+        let output = GameOutput::DecisionOpened(
+            catan_core::gameplay::game::input::DecisionRequest::from_open_decision(&OpenDecision {
+                id: catan_core::gameplay::game::decision::DecisionId(7),
+                player_id: P0,
+                kind: DecisionKind::RegularCommand,
+                lifetime: DecisionLifetime::OneShot,
+            }),
+        );
 
         seat.on_frame(
             SeatFrame {
@@ -390,12 +392,14 @@ mod tests {
             visibility: &visibility,
         };
         let view = factory.player_decision_context(0, None);
-        let output = GameOutput::DecisionOpened(OpenDecision {
-            id: catan_core::gameplay::game::decision::DecisionId(8),
-            player_id: P1,
-            kind: DecisionKind::RegularCommand,
-            lifetime: DecisionLifetime::OneShot,
-        });
+        let output = GameOutput::DecisionOpened(
+            catan_core::gameplay::game::input::DecisionRequest::from_open_decision(&OpenDecision {
+                id: catan_core::gameplay::game::decision::DecisionId(8),
+                player_id: P1,
+                kind: DecisionKind::RegularCommand,
+                lifetime: DecisionLifetime::OneShot,
+            }),
+        );
 
         seat.on_frame(
             SeatFrame {

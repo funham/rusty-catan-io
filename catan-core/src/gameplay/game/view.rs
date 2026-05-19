@@ -6,7 +6,7 @@ use crate::{
     gameplay::{
         constants::capacities::{PLAYER_PORTS_INLINE, PLAYER_VIEW_INLINE},
         field::state::{BoardLayout, BoardState},
-        game::{index::GameIndex, query::GameQuery, state::GameState},
+        game::{index::GameIndex, query::GameQuery, state::TableState},
         primitives::{
             PortKind,
             bank::{Bank, DeckFullnessLevel},
@@ -14,7 +14,6 @@ use crate::{
             dev_card::{DevCardData, UsableDevCardSet},
             player::PlayerId,
             resource::{ResourceMap, ResourceSet},
-            turn::GameTurn,
         },
     },
     topology::Hex,
@@ -130,7 +129,6 @@ type PublicPlayerViews = SmallVec<[PublicPlayerView; PLAYER_VIEW_INLINE]>;
 
 #[derive(Debug, Clone)]
 pub struct PublicGameView<'a> {
-    pub turn: &'a GameTurn,
     pub board: &'a BoardLayout,
     pub board_state: &'a BoardState,
     pub bank: PublicBankView,
@@ -150,13 +148,13 @@ pub struct PrivatePlayerView<'a> {
 
 #[derive(Debug, Clone, Copy)]
 pub struct OmniscientGameView<'a> {
-    pub state: &'a GameState,
+    pub state: &'a TableState,
     pub index: &'a GameIndex,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct SearchFactory<'a> {
-    state: &'a GameState,
+    state: &'a TableState,
     policy: VisibilityPolicy,
     root_player: PlayerId,
 }
@@ -165,7 +163,7 @@ pub struct SearchFactory<'a> {
 pub struct SearchSeed {
     pub root_player: PlayerId,
     pub policy: VisibilityPolicy,
-    pub state: GameState,
+    pub state: TableState,
 }
 
 #[derive(Debug, Clone)]
@@ -193,7 +191,7 @@ pub struct PlayerNotificationContext<'a> {
 }
 
 pub struct ContextFactory<'a> {
-    pub state: &'a GameState,
+    pub state: &'a TableState,
     pub index: &'a GameIndex,
     pub visibility: &'a VisibilityConfig,
 }
@@ -221,7 +219,7 @@ impl<'a> PublicGameView<'a> {
 
 impl<'a> SearchFactory<'a> {
     pub fn new(
-        state: &'a GameState,
+        state: &'a TableState,
         policy: VisibilityPolicy,
         root_player: impl Into<PlayerId>,
     ) -> Self {
@@ -241,7 +239,7 @@ impl<'a> SearchFactory<'a> {
         }
     }
 
-    pub fn state(&self) -> &'a GameState {
+    pub fn state(&self) -> &'a TableState {
         self.state
     }
 }
@@ -287,7 +285,6 @@ impl<'a> ContextFactory<'a> {
         let query = GameQuery::new(self.state, self.index);
 
         PublicGameView {
-            turn: &self.state.turn,
             board: &self.state.board,
             board_state: &self.state.board_state,
             bank: self.project_bank(policy),

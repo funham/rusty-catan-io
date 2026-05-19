@@ -8,11 +8,12 @@ use catan_core::{
                 MoveRobberCommand, PostDevCardCommand, PostDiceCommand, RegularCommand,
                 TradeAnswer,
             },
-            decision::{DecisionKind, OpenDecision},
+            decision::DecisionKind,
             event::{
                 GameEvent, GameObserver, ObserverKind, ObserverNotificationContext,
                 PlayerNotification,
             },
+            input::DecisionRequest,
             input::{PlayerCommand, TradeCommand, TradeResponseCommand},
             view::{PlayerDecisionContext, PlayerNotificationContext},
         },
@@ -195,10 +196,10 @@ impl BotPolicy for RemoteCliAgent {
 
     fn command_for(
         &mut self,
-        decision: &OpenDecision,
+        request: &DecisionRequest,
         context: PlayerDecisionContext<'_>,
     ) -> Option<PlayerCommand> {
-        match decision.kind {
+        match request.kind() {
             DecisionKind::InitialPlacement => Some(PlayerCommand::InitialPlacement(
                 self.init_stage_action(context),
             )),
@@ -225,7 +226,7 @@ impl BotPolicy for RemoteCliAgent {
                     TradeAnswer::Decline => TradeCommand::Respond(TradeResponseCommand::Reject),
                 }))
             }
-            DecisionKind::TradeOwnerAction { .. } => unsupported_decision_command(decision.kind),
+            DecisionKind::TradeOwnerAction { .. } => unsupported_decision_command(request),
         }
     }
 }

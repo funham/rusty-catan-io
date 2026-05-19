@@ -4,8 +4,7 @@ use crate::gameplay::{
         decision::{DecisionId, DecisionKind, OpenDecision},
         event::GameEvent,
         index::GameIndex,
-        lifecycle::{ActiveEngine, EngineCore, FinishedEngine},
-        phase::{GamePhase, TradePhase, TurnPhase},
+        lifecycle::{EngineState, FinishedEngine, PlayingEngine, SetupEngine},
         run::GameResult,
         trade::{TradeOfferId, TradeResponseState, TradeScope, TradeSession, TradeSessionId},
     },
@@ -24,8 +23,8 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ReplayError {
-    ExpectedActiveLifecycle,
+pub enum EngineApplyError {
+    WrongState,
     InvalidInitialPlacement,
     InvalidResourceTransfer,
     InvalidBuild,
@@ -35,34 +34,80 @@ pub enum ReplayError {
 }
 
 #[inline]
-pub fn reduce(lifecycle: &mut EngineCore, event: &GameEvent) -> Result<(), ReplayError> {
+pub fn apply_event(lifecycle: &mut EngineState, event: &GameEvent) -> Result<(), EngineApplyError> {
     match event {
         GameEvent::GameFinished { result, .. } => finish(lifecycle, result),
+        GameEvent::GameStarted => game_started(lifecycle),
         GameEvent::CommandRejected {
             counts_toward_limit,
             ..
         } => {
             if *counts_toward_limit {
-                if let Some(active) = lifecycle.active_mut() {
+                if let Some(active) = lifecycle.setup_mut() {
+                    active.invalid_actions += 1;
+                    active.stats.action_rejections += 1;
+                } else if let Some(active) = lifecycle.playing_mut() {
                     active.invalid_actions += 1;
                     active.stats.action_rejections += 1;
                 }
             }
             Ok(())
         }
-        _ => {
-            let active = lifecycle
-                .active_mut()
-                .ok_or(ReplayError::ExpectedActiveLifecycle)?;
-            reduce_active(active, event)
-        }
+        GameEvent::InitialPlacementBuilt { .. }
+        | GameEvent::InitialResourcesGranted { .. }
+        | GameEvent::TurnStarted { .. } => apply_setup_or_playing(lifecycle, event),
+        _ => match lifecycle {
+            EngineState::Setup(setup) => apply_setup(setup, event),
+            EngineState::Playing(active) => apply_playing(active, event),
+            _ => Err(EngineApplyError::WrongState),
+        },
     }
 }
 
+#[cfg(test)]
+pub fn reduce(lifecycle: &mut EngineState, event: &GameEvent) -> Result<(), EngineApplyError> {
+    apply_event(lifecycle, event)
+}
+
 #[inline]
-fn reduce_active(active: &mut ActiveEngine, event: &GameEvent) -> Result<(), ReplayError> {
+fn game_started(lifecycle: &mut EngineState) -> Result<(), EngineApplyError> {
+    let EngineState::Unstarted(unstarted) =
+        std::mem::replace(lifecycle, EngineState::interrupted_placeholder())
+    else {
+        return Err(EngineApplyError::WrongState);
+    };
+    let mut setup = unstarted.into_setup();
+    setup.stats.game_started += 1;
+    *lifecycle = EngineState::Setup(setup);
+    Ok(())
+}
+
+#[inline]
+fn apply_setup_or_playing(
+    lifecycle: &mut EngineState,
+    event: &GameEvent,
+) -> Result<(), EngineApplyError> {
+    match lifecycle {
+        EngineState::Setup(setup) => apply_setup(setup, event)?,
+        EngineState::Playing(active) => apply_playing(active, event)?,
+        _ => return Err(EngineApplyError::WrongState),
+    }
+    if matches!(lifecycle, EngineState::Setup(_)) && matches!(event, GameEvent::TurnStarted { .. })
+    {
+        let setup = lifecycle.take_setup().ok_or(EngineApplyError::WrongState)?;
+        let mut active = setup.into_playing();
+        if let GameEvent::TurnStarted { player_id, .. } = event {
+            turn_started(&mut active, *player_id);
+        }
+        *lifecycle = EngineState::Playing(active);
+    }
+    Ok(())
+}
+
+#[inline]
+fn apply_playing(active: &mut PlayingEngine, event: &GameEvent) -> Result<(), EngineApplyError> {
     match event {
-        GameEvent::GameStarted => game_started(active),
+        GameEvent::GameStarted => return Err(EngineApplyError::WrongState),
         GameEvent::DecisionOpened(decision) => decision_opened(active, decision),
         GameEvent::DecisionClosed { decision_id } => decision_closed(active, *decision_id),
         GameEvent::CommandRejected { .. } => {}
@@ -127,57 +172,91 @@ fn reduce_active(active: &mut ActiveEngine, event: &GameEvent) -> Result<(), Rep
 }
 
 #[inline]
-fn game_started(active: &mut ActiveEngine) {
-    active.stats.game_started += 1;
-}
-
-#[inline]
-fn decision_opened(active: &mut ActiveEngine, decision: &OpenDecision) {
+fn decision_opened(active: &mut PlayingEngine, decision: &OpenDecision) {
     active.next_decision_id = active.next_decision_id.max(decision.id.0 + 1);
     active.pending.push(decision.clone());
 
-    if let Some(phase) = phase_for_decision(decision) {
-        active.phase = phase;
-    }
     if !matches!(decision.kind, DecisionKind::InitialPlacement) {
         active.stats.decision_requests += 1;
     }
 }
 
 #[inline]
-fn phase_for_decision(decision: &OpenDecision) -> Option<GamePhase> {
-    match decision.kind {
-        DecisionKind::InitialPlacement => Some(GamePhase::InitialPlacement),
-        DecisionKind::InitCommand => Some(GamePhase::Turn(TurnPhase::InitCommand)),
-        DecisionKind::PostDiceCommand => Some(GamePhase::Turn(TurnPhase::PostDiceCommand)),
-        DecisionKind::PostDevCardCommand => Some(GamePhase::Turn(TurnPhase::PostDevCardCommand)),
-        DecisionKind::RegularCommand => Some(GamePhase::Turn(TurnPhase::RegularCommand)),
-        DecisionKind::MoveRobber => Some(GamePhase::Turn(TurnPhase::MoveRobber)),
-        DecisionKind::ChooseRobbedPlayer { robber_pos } => {
-            Some(GamePhase::Turn(TurnPhase::ChooseRobbedPlayer {
-                robber_pos,
-            }))
-        }
-        DecisionKind::DropHalf { required } => Some(GamePhase::Turn(TurnPhase::DropHalf {
-            player_id: decision.player_id,
-            required,
-        })),
-        DecisionKind::TradeResponse { .. } | DecisionKind::TradeOwnerAction { .. } => None,
-    }
-}
-
-#[inline]
-fn decision_closed(active: &mut ActiveEngine, decision_id: DecisionId) {
+fn decision_closed(active: &mut PlayingEngine, decision_id: DecisionId) {
     active.pending.close(decision_id);
 }
 
 #[inline]
-fn initial_placement_built(
-    active: &mut ActiveEngine,
+fn apply_setup(active: &mut SetupEngine, event: &GameEvent) -> Result<(), EngineApplyError> {
+    match event {
+        GameEvent::DecisionOpened(decision) => setup_decision_opened(active, decision),
+        GameEvent::DecisionClosed { decision_id } => {
+            active.pending.close(*decision_id);
+        }
+        GameEvent::InitialPlacementBuilt {
+            player_id,
+            settlement,
+            road,
+        } => setup_initial_placement_built(active, *player_id, *settlement, *road)?,
+        GameEvent::InitialResourcesGranted {
+            player_id,
+            resources,
+        } => setup_initial_resources_granted(active, *player_id, *resources)?,
+        GameEvent::TurnStarted { .. } => {}
+        _ => return Err(EngineApplyError::WrongState),
+    }
+    Ok(())
+}
+
+#[inline]
+fn setup_decision_opened(active: &mut SetupEngine, decision: &OpenDecision) {
+    active.next_decision_id = active.next_decision_id.max(decision.id.0 + 1);
+    active.pending.push(decision.clone());
+}
+
+#[inline]
+fn setup_initial_placement_built(
+    active: &mut SetupEngine,
     player_id: PlayerId,
     settlement: Intersection,
     road: Road,
-) -> Result<(), ReplayError> {
+) -> Result<(), EngineApplyError> {
+    active
+        .table
+        .builds
+        .try_init_place(
+            player_id,
+            road,
+            Establishment {
+                vtx: settlement,
+                stage: EstablishmentType::Settlement,
+            },
+        )
+        .map_err(|_| EngineApplyError::InvalidInitialPlacement)?;
+    active.setup_turn.next();
+    active.index = GameIndex::rebuild_table(&active.table);
+    Ok(())
+}
+
+#[inline]
+fn setup_initial_resources_granted(
+    active: &mut SetupEngine,
+    player_id: PlayerId,
+    resources: ResourceSet,
+) -> Result<(), EngineApplyError> {
+    active
+        .table
+        .transfer_from_bank(resources, player_id)
+        .map_err(|_| EngineApplyError::InvalidResourceTransfer)
+}
+
+#[inline]
+fn initial_placement_built(
+    active: &mut PlayingEngine,
+    player_id: PlayerId,
+    settlement: Intersection,
+    road: Road,
+) -> Result<(), EngineApplyError> {
     active
         .game
         .builds
@@ -189,28 +268,25 @@ fn initial_placement_built(
                 stage: EstablishmentType::Settlement,
             },
         )
-        .map_err(|_| ReplayError::InvalidInitialPlacement)?;
-    if let Some(setup_turn) = active.setup_turn.as_mut() {
-        setup_turn.next();
-    }
+        .map_err(|_| EngineApplyError::InvalidInitialPlacement)?;
     active.index = GameIndex::rebuild(&active.game);
     Ok(())
 }
 
 #[inline]
 fn initial_resources_granted(
-    active: &mut ActiveEngine,
+    active: &mut PlayingEngine,
     player_id: PlayerId,
     resources: ResourceSet,
-) -> Result<(), ReplayError> {
+) -> Result<(), EngineApplyError> {
     active
         .game
         .transfer_from_bank(resources, player_id)
-        .map_err(|_| ReplayError::InvalidResourceTransfer)
+        .map_err(|_| EngineApplyError::InvalidResourceTransfer)
 }
 
 #[inline]
-fn resources_distributed(active: &mut ActiveEngine, by_player: &[(PlayerId, ResourceSet)]) {
+fn resources_distributed(active: &mut PlayingEngine, by_player: &[(PlayerId, ResourceSet)]) {
     for (player_id, resources) in by_player {
         let _ = active.game.transfer_from_bank(*resources, *player_id);
     }
@@ -218,7 +294,7 @@ fn resources_distributed(active: &mut ActiveEngine, by_player: &[(PlayerId, Reso
 }
 
 #[inline]
-fn dice_rolled(active: &mut ActiveEngine, player_id: PlayerId, value: DiceRoll) {
+fn dice_rolled(active: &mut PlayingEngine, player_id: PlayerId, value: DiceRoll) {
     if matches!(value.resolve(), DiceOutcome::Seven) {
         active.pending_discards =
             algorithm::player_order_from(player_id, active.game.players.count())
@@ -230,23 +306,19 @@ fn dice_rolled(active: &mut ActiveEngine, player_id: PlayerId, value: DiceRoll) 
 
 #[inline]
 fn resource_stolen(
-    active: &mut ActiveEngine,
+    active: &mut PlayingEngine,
     player_id: PlayerId,
     robbed_id: PlayerId,
     resource: Resource,
-) -> Result<(), ReplayError> {
+) -> Result<(), EngineApplyError> {
     active
         .game
         .players_resource_transfer(robbed_id, player_id, resource.into())
-        .map_err(|_| ReplayError::InvalidResourceTransfer)
+        .map_err(|_| EngineApplyError::InvalidResourceTransfer)
 }
 
 #[inline]
-fn turn_started(active: &mut ActiveEngine, player_id: PlayerId) {
-    if let Some(setup_turn) = active.setup_turn.take() {
-        active.game.turn = setup_turn.into_regular();
-        active.index = GameIndex::rebuild(&active.game);
-    }
+fn turn_started(active: &mut PlayingEngine, player_id: PlayerId) {
     active
         .game
         .players
@@ -256,18 +328,22 @@ fn turn_started(active: &mut ActiveEngine, player_id: PlayerId) {
 }
 
 #[inline]
-fn turn_ended(active: &mut ActiveEngine) {
+fn turn_ended(active: &mut PlayingEngine) {
     active.game.turn.next();
     active.stats.turns_ended += 1;
     active.stats.regular_actions += 1;
 }
 
 #[inline]
-fn built(active: &mut ActiveEngine, player_id: PlayerId, build: Build) -> Result<(), ReplayError> {
+fn built(
+    active: &mut PlayingEngine,
+    player_id: PlayerId,
+    build: Build,
+) -> Result<(), EngineApplyError> {
     active
         .game
         .build(player_id, build)
-        .map_err(|_| ReplayError::InvalidBuild)?;
+        .map_err(|_| EngineApplyError::InvalidBuild)?;
     active
         .index
         .refresh_after_build(&active.game, player_id, build);
@@ -277,11 +353,14 @@ fn built(active: &mut ActiveEngine, player_id: PlayerId, build: Build) -> Result
 }
 
 #[inline]
-fn dev_card_bought(active: &mut ActiveEngine, player_id: PlayerId) -> Result<(), ReplayError> {
+fn dev_card_bought(
+    active: &mut PlayingEngine,
+    player_id: PlayerId,
+) -> Result<(), EngineApplyError> {
     active
         .game
         .transfer_to_bank(costs::DEV_CARD, player_id)
-        .map_err(|_| ReplayError::InvalidResourceTransfer)?;
+        .map_err(|_| EngineApplyError::InvalidResourceTransfer)?;
     active.stats.regular_actions += 1;
     active.stats.dev_cards_bought += 1;
     Ok(())
@@ -289,17 +368,17 @@ fn dev_card_bought(active: &mut ActiveEngine, player_id: PlayerId) -> Result<(),
 
 #[inline]
 fn dev_card_drawn(
-    active: &mut ActiveEngine,
+    active: &mut PlayingEngine,
     player_id: PlayerId,
     card: DevCardKind,
-) -> Result<(), ReplayError> {
+) -> Result<(), EngineApplyError> {
     let drawn = active
         .game
         .bank
         .draw_dev_card()
-        .ok_or(ReplayError::InvalidDevCardDraw)?;
+        .ok_or(EngineApplyError::InvalidDevCardDraw)?;
     if drawn != card {
-        return Err(ReplayError::InvalidDevCardDraw);
+        return Err(EngineApplyError::InvalidDevCardDraw);
     }
     active.game.players.get_mut(player_id).dev_cards_add(card);
     Ok(())
@@ -307,16 +386,16 @@ fn dev_card_drawn(
 
 #[inline]
 fn dev_card_used(
-    active: &mut ActiveEngine,
+    active: &mut PlayingEngine,
     player_id: PlayerId,
     usage: &DevCardUsage,
-) -> Result<(), ReplayError> {
+) -> Result<(), EngineApplyError> {
     active
         .game
         .players
         .get_mut(player_id)
         .dev_cards_move_to_used(usage.card_kind())
-        .map_err(|_| ReplayError::InvalidDevCardUse)?;
+        .map_err(|_| EngineApplyError::InvalidDevCardUse)?;
     apply_dev_card_usage(active, player_id, usage)?;
     active
         .index
@@ -327,10 +406,10 @@ fn dev_card_used(
 
 #[inline]
 fn apply_dev_card_usage(
-    active: &mut ActiveEngine,
+    active: &mut PlayingEngine,
     player_id: PlayerId,
     usage: &DevCardUsage,
-) -> Result<(), ReplayError> {
+) -> Result<(), EngineApplyError> {
     match usage {
         DevCardUsage::Knight { .. } => Ok(()),
         DevCardUsage::YearOfPlenty(resources) => {
@@ -338,7 +417,7 @@ fn apply_dev_card_usage(
                 active
                     .game
                     .transfer_from_bank((*resource).into(), player_id)
-                    .map_err(|_| ReplayError::InvalidResourceTransfer)?;
+                    .map_err(|_| EngineApplyError::InvalidResourceTransfer)?;
             }
             Ok(())
         }
@@ -348,7 +427,7 @@ fn apply_dev_card_usage(
                     .game
                     .builds
                     .try_build(player_id, Build::Road(Road { path: *path }))
-                    .map_err(|_| ReplayError::InvalidBuild)?;
+                    .map_err(|_| EngineApplyError::InvalidBuild)?;
             }
             Ok(())
         }
@@ -365,7 +444,7 @@ fn apply_dev_card_usage(
                 active
                     .game
                     .players_resource_transfer(other_id, player_id, resources)
-                    .map_err(|_| ReplayError::InvalidResourceTransfer)?;
+                    .map_err(|_| EngineApplyError::InvalidResourceTransfer)?;
             }
             Ok(())
         }
@@ -374,14 +453,14 @@ fn apply_dev_card_usage(
 
 #[inline]
 fn bank_trade_completed(
-    active: &mut ActiveEngine,
+    active: &mut PlayingEngine,
     player_id: PlayerId,
     trade: BankTrade,
-) -> Result<(), ReplayError> {
+) -> Result<(), EngineApplyError> {
     active
         .game
         .trade_with_bank(player_id, trade)
-        .map_err(|_| ReplayError::InvalidResourceTransfer)?;
+        .map_err(|_| EngineApplyError::InvalidResourceTransfer)?;
     active.stats.regular_actions += 1;
     active.stats.bank_trades += 1;
     Ok(())
@@ -389,14 +468,14 @@ fn bank_trade_completed(
 
 #[inline]
 fn trade_opened(
-    active: &mut ActiveEngine,
+    active: &mut PlayingEngine,
     session_id: TradeSessionId,
     proposer_id: PlayerId,
     scope: TradeScope,
     offer: PlayerTrade,
-) -> Result<(), ReplayError> {
+) -> Result<(), EngineApplyError> {
     if active.trade_sessions.len() != session_id.0 as usize {
-        return Err(ReplayError::InvalidTradeSession);
+        return Err(EngineApplyError::InvalidTradeSession);
     }
     active.trade_sessions.push(TradeSession::new(
         session_id,
@@ -405,62 +484,59 @@ fn trade_opened(
         offer,
         active.game.players.count(),
     ));
-    active.phase = GamePhase::Trade(TradePhase {
-        session: session_id,
-    });
     Ok(())
 }
 
 #[inline]
 fn trade_offer_added(
-    active: &mut ActiveEngine,
+    active: &mut PlayingEngine,
     session_id: TradeSessionId,
     player_id: PlayerId,
     offer_id: TradeOfferId,
     offer: PlayerTrade,
-) -> Result<(), ReplayError> {
+) -> Result<(), EngineApplyError> {
     let session = active
         .trade_sessions
         .get_mut(session_id.0 as usize)
-        .ok_or(ReplayError::InvalidTradeSession)?;
+        .ok_or(EngineApplyError::InvalidTradeSession)?;
     let added = session.add_counter_offer(player_id, offer);
     if added != offer_id {
-        return Err(ReplayError::InvalidTradeSession);
+        return Err(EngineApplyError::InvalidTradeSession);
     }
     Ok(())
 }
 
 #[inline]
 fn trade_response_updated(
-    active: &mut ActiveEngine,
+    active: &mut PlayingEngine,
     session_id: TradeSessionId,
     player_id: PlayerId,
     response: TradeResponseState,
-) -> Result<(), ReplayError> {
+) -> Result<(), EngineApplyError> {
     let session = active
         .trade_sessions
         .get_mut(session_id.0 as usize)
-        .ok_or(ReplayError::InvalidTradeSession)?;
+        .ok_or(EngineApplyError::InvalidTradeSession)?;
     session.set_response(player_id, response);
     Ok(())
 }
 
 #[inline]
 fn trade_completed(
-    active: &mut ActiveEngine,
+    active: &mut PlayingEngine,
     session_id: TradeSessionId,
     proposer_id: PlayerId,
     peer_id: PlayerId,
     offer_id: TradeOfferId,
-) -> Result<(), ReplayError> {
+) -> Result<(), EngineApplyError> {
     let (proposer_resources, peer_resources) = {
         let session = active
             .trade_sessions
             .get_mut(session_id.0 as usize)
-            .ok_or(ReplayError::InvalidTradeSession)?;
+            .ok_or(EngineApplyError::InvalidTradeSession)?;
         let offer = session
             .offer(offer_id)
-            .ok_or(ReplayError::InvalidTradeSession)?;
+            .ok_or(EngineApplyError::InvalidTradeSession)?;
         let resources = (offer.trade.give, offer.trade.take);
         session.open = false;
         resources
@@ -468,35 +544,33 @@ fn trade_completed(
     active
         .game
         .players_resource_exchange((proposer_id, proposer_resources), (peer_id, peer_resources))
-        .map_err(|_| ReplayError::InvalidResourceTransfer)?;
-    active.phase = GamePhase::Turn(TurnPhase::RegularCommand);
+        .map_err(|_| EngineApplyError::InvalidResourceTransfer)?;
     Ok(())
 }
 
 #[inline]
 fn trade_cancelled(
-    active: &mut ActiveEngine,
+    active: &mut PlayingEngine,
     session_id: TradeSessionId,
-) -> Result<(), ReplayError> {
+) -> Result<(), EngineApplyError> {
     let session = active
         .trade_sessions
         .get_mut(session_id.0 as usize)
-        .ok_or(ReplayError::InvalidTradeSession)?;
+        .ok_or(EngineApplyError::InvalidTradeSession)?;
     session.open = false;
-    active.phase = GamePhase::Turn(TurnPhase::RegularCommand);
     Ok(())
 }
 
 #[inline]
 fn player_discarded(
-    active: &mut ActiveEngine,
+    active: &mut PlayingEngine,
     player_id: PlayerId,
     resources: ResourceSet,
-) -> Result<(), ReplayError> {
+) -> Result<(), EngineApplyError> {
     active
         .game
         .transfer_to_bank(resources, player_id)
-        .map_err(|_| ReplayError::InvalidResourceTransfer)?;
+        .map_err(|_| EngineApplyError::InvalidResourceTransfer)?;
     if active.pending_discards.first() == Some(&player_id) {
         active.pending_discards.remove(0);
     }
@@ -505,22 +579,26 @@ fn player_discarded(
 }
 
 #[inline]
-fn robber_moved(active: &mut ActiveEngine, hex: Hex) {
+fn robber_moved(active: &mut PlayingEngine, hex: Hex) {
     active.game.board_state.robber_pos = hex;
     active.stats.robber_moves += 1;
 }
 
-fn finish(lifecycle: &mut EngineCore, result: &GameResult) -> Result<(), ReplayError> {
-    let mut active = lifecycle
-        .take_active()
-        .ok_or(ReplayError::ExpectedActiveLifecycle)?;
+fn finish(lifecycle: &mut EngineState, result: &GameResult) -> Result<(), EngineApplyError> {
+    let mut active = if let Some(active) = lifecycle.take_playing() {
+        active
+    } else if let Some(setup) = lifecycle.take_setup() {
+        setup.into_playing()
+    } else {
+        return Err(EngineApplyError::WrongState);
+    };
     match result {
         GameResult::Win(_) => active.stats.games_ended += 1,
         GameResult::Interrupted { .. } | GameResult::LimitReached { .. } => {
             active.stats.games_interrupted += 1;
         }
     }
-    *lifecycle = EngineCore::Finished(FinishedEngine {
+    *lifecycle = EngineState::Finished(FinishedEngine {
         game: active.game,
         index: active.index,
         result: result.clone(),

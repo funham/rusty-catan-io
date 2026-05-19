@@ -175,8 +175,8 @@ mod tests {
             .unwrap();
         let init = GameInitializationState::default();
         let engine = GameEngine::from_init(init.clone(), RunOptions::default());
-        let state = engine.state();
-        let index = GameIndex::rebuild(&state);
+        let state = engine.table();
+        let index = GameIndex::rebuild_table(state);
         let visibility = VisibilityConfig::default();
         let factory = ContextFactory {
             state: &state,
@@ -214,8 +214,8 @@ mod tests {
                 .unwrap();
         let init = GameInitializationState::default();
         let engine = GameEngine::from_init(init.clone(), RunOptions::default());
-        let state = engine.state();
-        let index = GameIndex::rebuild(&state);
+        let state = engine.table();
+        let index = GameIndex::rebuild_table(state);
         let visibility = VisibilityConfig::default();
         let factory = ContextFactory {
             state: &state,

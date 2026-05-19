@@ -37,7 +37,7 @@ pub fn replay_to_event_seq(
         target_seq,
     )? {
         engine
-            .replay_event(&record.event)
+            .apply_event(&record.event)
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, format!("{err:?}")))?;
     }
     Ok(engine)

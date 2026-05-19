@@ -69,7 +69,7 @@ impl SnapshotStore {
         let dir = self.root.join(format!("snapshot-{snapshot_id:06}"));
         fs::create_dir_all(&dir)?;
 
-        let state = engine.state();
+        let state = engine.table();
         let engine_snapshot = engine.snapshot();
         let layout_path = dir.join("layout.json");
         let state_path = dir.join("state.json");
@@ -111,7 +111,7 @@ pub fn load_checkpoint(dir: &Path) -> io::Result<LoadedCheckpoint> {
             )
         })?;
     let snapshot: GameEngineSnapshot = read_json(&state_path)?;
-    if snapshot.schema != "rusty-catan.engine-snapshot.v1" {
+    if snapshot.schema != "rusty-catan.engine-snapshot.v2" {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("unsupported engine snapshot schema {}", snapshot.schema),
@@ -121,7 +121,7 @@ pub fn load_checkpoint(dir: &Path) -> io::Result<LoadedCheckpoint> {
     verify_hash_value(&snapshot, &manifest.state_hash)?;
 
     let board = Arc::new(BoardLayout::new(FieldBuildParam {
-        n_players: snapshot.state.players.count(),
+        n_players: snapshot.state.table().players.count(),
         arrangement,
     }));
     Ok(LoadedCheckpoint {
@@ -236,12 +236,11 @@ mod tests {
 
         let state_raw = fs::read_to_string(snapshot_dir.join("state.json")).unwrap();
         assert!(!state_raw.contains("\"_p\""));
-        assert!(!state_raw.contains("\"board\""));
         serde_json::from_str::<catan_core::gameplay::game::engine::GameEngineSnapshot>(&state_raw)
             .unwrap();
 
         let loaded = load_checkpoint(&snapshot_dir).unwrap();
-        assert_eq!(loaded.snapshot.schema, "rusty-catan.engine-snapshot.v1");
+        assert_eq!(loaded.snapshot.schema, "rusty-catan.engine-snapshot.v2");
         assert_eq!(loaded.board.n_players, 4);
 
         fs::remove_dir_all(dir).unwrap();

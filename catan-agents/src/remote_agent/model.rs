@@ -5,7 +5,7 @@ use catan_core::gameplay::{
     },
     game::{
         event::ObserverNotificationContext,
-        state::GameState,
+        state::TableState,
         view::{
             OmniscientGameView, PlayerDecisionContext, PlayerNotificationContext,
             PrivatePlayerView, PublicBankResources, PublicGameView, PublicPlayerResources,
@@ -29,7 +29,7 @@ pub struct UiModel {
     pub public: UiPublicGame,
     pub private: Option<UiPrivatePlayer>,
     pub omniscient: Option<UiOmniscient>,
-    pub snapshot_state: Option<GameState>,
+    pub snapshot_state: Option<TableState>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

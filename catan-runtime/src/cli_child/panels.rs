@@ -171,8 +171,8 @@ fn snapshot_turn_box_lines(model: &UiModel, width: usize) -> Vec<Line<'static>> 
         box_text_line(
             format!(
                 "turns {:>3}  rounds {:>2}  LR {}  LA {}",
-                state.turn.get_turns_played(),
-                state.turn.get_rounds_played(),
+                0,
+                0,
                 player_option_label(state.builds.longest_road()),
                 player_option_label(state.players.best_army())
             ),
@@ -198,7 +198,7 @@ fn snapshot_bank_box_lines(model: &UiModel, width: usize) -> Vec<Line<'static>> 
 }
 
 fn snapshot_bank_content_lines(
-    state: &catan_core::gameplay::game::state::GameState,
+    state: &catan_core::gameplay::game::state::TableState,
 ) -> Vec<Line<'static>> {
     let resources = resource_card_lines(&state.bank.resources, None);
     let dev_cards = dev_deck_card_lines(&state.bank.dev_cards);
@@ -238,7 +238,7 @@ fn snapshot_player_box_lines(
         .as_ref()
         .expect("snapshot_player_box_lines requires exact snapshot state");
     let player = state.players.get(player_id);
-    let is_active = state.turn.get_turn_index() == player_id;
+    let is_active = false;
     let mut title = if is_active {
         format!("p{player_id} active")
     } else {

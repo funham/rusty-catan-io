@@ -5,6 +5,7 @@ use crate::gameplay::primitives::player::PlayerId;
 use super::{
     decision::DecisionId,
     event::{EventTransaction, EventVisibility, GameEvent},
+    input::DecisionRequest,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,7 +31,7 @@ impl GameEventRecord {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GameOutput {
     Event(GameEventRecord),
-    DecisionOpened(super::decision::OpenDecision),
+    DecisionOpened(DecisionRequest),
     DecisionClosed {
         decision_id: DecisionId,
     },

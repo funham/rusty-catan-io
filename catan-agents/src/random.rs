@@ -9,7 +9,8 @@ use catan_core::{
                 ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, InitialPlacementCommand,
                 MoveRobberCommand, PostDevCardCommand, PostDiceCommand, RegularCommand,
             },
-            decision::{DecisionKind, OpenDecision},
+            decision::DecisionKind,
+            input::DecisionRequest,
             input::PlayerCommand,
             view::PlayerDecisionContext,
         },
@@ -104,10 +105,10 @@ impl<R: Rng> BotPolicy for RandomAgent<R> {
 
     fn command_for(
         &mut self,
-        decision: &OpenDecision,
+        request: &DecisionRequest,
         context: PlayerDecisionContext<'_>,
     ) -> Option<PlayerCommand> {
-        match decision.kind {
+        match request.kind() {
             DecisionKind::InitialPlacement => Some(PlayerCommand::InitialPlacement(
                 self.init_stage_action(context),
             )),
@@ -129,7 +130,7 @@ impl<R: Rng> BotPolicy for RandomAgent<R> {
             ),
             DecisionKind::DropHalf { .. } => Some(PlayerCommand::DropHalf(self.drop_half(context))),
             DecisionKind::TradeResponse { .. } | DecisionKind::TradeOwnerAction { .. } => {
-                unsupported_decision_command(decision.kind)
+                unsupported_decision_command(request)
             }
         }
     }

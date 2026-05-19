@@ -9,7 +9,8 @@ use catan_core::{
                 ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, InitialPlacementCommand,
                 MoveRobberCommand, PostDevCardCommand, PostDiceCommand, RegularCommand,
             },
-            decision::{DecisionKind, OpenDecision},
+            decision::DecisionKind,
+            input::DecisionRequest,
             input::PlayerCommand,
             view::{CountingMode, PlayerDecisionContext},
         },
@@ -104,10 +105,10 @@ impl BotPolicy for GreedyAgent {
 
     fn command_for(
         &mut self,
-        decision: &OpenDecision,
+        request: &DecisionRequest,
         context: PlayerDecisionContext<'_>,
     ) -> Option<PlayerCommand> {
-        match decision.kind {
+        match request.kind() {
             DecisionKind::InitialPlacement => Some(PlayerCommand::InitialPlacement(
                 self.initial_placement_decision(context),
             )),
@@ -131,7 +132,7 @@ impl BotPolicy for GreedyAgent {
             ),
             DecisionKind::DropHalf { .. } => Some(PlayerCommand::DropHalf(self.drop_half(context))),
             DecisionKind::TradeResponse { .. } | DecisionKind::TradeOwnerAction { .. } => {
-                unsupported_decision_command(decision.kind)
+                unsupported_decision_command(request)
             }
         }
     }
@@ -314,7 +315,7 @@ fn bank_trade_objective_score(
     context: &PlayerDecisionContext<'_>,
     player_id: PlayerId,
     trade: BankTrade,
-    state: &catan_core::gameplay::game::state::GameState,
+    state: &catan_core::gameplay::game::state::TableState,
 ) -> (u8, usize) {
     if !state.bank.can_pay(&trade.from_bank()) {
         return (0, 0);

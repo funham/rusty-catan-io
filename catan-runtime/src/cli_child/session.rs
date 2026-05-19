@@ -15,7 +15,7 @@ use catan_core::gameplay::game::command::{
 };
 use catan_core::gameplay::game::output::GameOutput;
 use catan_core::gameplay::game::{
-    decision::{DecisionKind, OpenDecision},
+    decision::DecisionKind,
     input::{PlayerCommand, TradeCommand, TradeResponseCommand},
 };
 
@@ -128,24 +128,27 @@ fn run_player_session(
                     }
                 }
                 GameOutput::DecisionOpened(decision) => {
-                    if decision.player_id != player_id {
-                        ui.show_model(&view, format!("waiting for player {}", decision.player_id))
-                            .map_err(|err| format!("failed to draw TUI: {err}"))?;
+                    if decision.player_id() != player_id {
+                        ui.show_model(
+                            &view,
+                            format!("waiting for player {}", decision.player_id()),
+                        )
+                        .map_err(|err| format!("failed to draw TUI: {err}"))?;
                         continue;
                     }
                     let Some(request) = decision_request_from_output(&decision, view, legal) else {
                         let message =
-                            format!("unsupported event protocol decision: {:?}", decision.kind);
+                            format!("unsupported event protocol decision: {:?}", decision.kind());
                         ui.set_message(message)
                             .map_err(|err| format!("failed to draw TUI: {err}"))?;
                         continue;
                     };
                     let response = handle_decision(&mut ui, request)
                         .map_err(|err| format!("failed to handle decision: {err}"))?;
-                    let Some(command) = command_from_decision_response(decision.kind, response)
+                    let Some(command) = command_from_decision_response(decision.kind(), response)
                     else {
                         let message =
-                            format!("unsupported response for decision: {:?}", decision.kind);
+                            format!("unsupported response for decision: {:?}", decision.kind());
                         write_frame(&mut stream, &CliToHost::Error { message })
                             .map_err(|err| format!("failed to send decision error: {err}"))?;
                         continue;
@@ -153,8 +156,8 @@ fn run_player_session(
                     write_frame(
                         &mut stream,
                         &CliToHost::SubmitCommand {
-                            player_id: decision.player_id,
-                            decision_id: decision.id,
+                            player_id: decision.player_id(),
+                            decision_id: decision.id(),
                             command,
                         },
                     )
@@ -203,16 +206,16 @@ fn player_engine_output_message(output: &GameOutput) -> Option<String> {
 }
 
 fn decision_request_from_output(
-    decision: &OpenDecision,
+    decision: &catan_core::gameplay::game::input::DecisionRequest,
     view: UiModel,
     legal: catan_agents::remote_agent::LegalDecisionOptions,
 ) -> Option<DecisionRequestFrame> {
     let envelope = catan_agents::remote_agent::DecisionRequestEnvelope {
-        request_id: decision.id.0,
+        request_id: decision.id().0,
         view,
         legal,
     };
-    Some(match decision.kind {
+    Some(match decision.kind() {
         DecisionKind::InitialPlacement => DecisionRequestFrame::InitStage(envelope),
         DecisionKind::InitCommand => DecisionRequestFrame::InitCommand(envelope),
         DecisionKind::PostDiceCommand => DecisionRequestFrame::PostDice(envelope),
@@ -413,11 +416,7 @@ fn process_host_event(
         },
     ) = (view_mode, event)
     {
-        let turn_no = view
-            .snapshot_state
-            .as_ref()
-            .map(|state| state.turn.get_turns_played())
-            .unwrap_or_default();
+        let turn_no = view.snapshot_state.as_ref().map(|_| 0).unwrap_or_default();
         ui.show_game_ended(view, *winner_id, turn_no, stats)
             .map_err(|err| format!("failed to draw game ended screen: {err}"))?;
         return Ok(true);
@@ -659,9 +658,14 @@ mod tests {
             lifetime: DecisionLifetime::OneShot,
         };
 
-        let request =
-            decision_request_from_output(&decision, test_model(), LegalDecisionOptions::default())
-                .expect("regular decision should map to a request");
+        let decision_request =
+            catan_core::gameplay::game::input::DecisionRequest::from_open_decision(&decision);
+        let request = decision_request_from_output(
+            &decision_request,
+            test_model(),
+            LegalDecisionOptions::default(),
+        )
+        .expect("regular decision should map to a request");
         assert_eq!(request.request_id(), 9);
 
         let command = command_from_decision_response(

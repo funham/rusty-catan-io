@@ -1,7 +1,7 @@
 use crate::{
     algorithm, constants,
     gameplay::{
-        game::{index::GameIndex, state::GameState},
+        game::{index::GameIndex, state::TableState},
         primitives::{build::EstablishmentType, player::PlayerId},
     },
     topology::Hex,
@@ -9,12 +9,12 @@ use crate::{
 
 #[derive(Debug, Clone, Copy)]
 pub struct GameQuery<'a> {
-    state: &'a GameState,
+    state: &'a TableState,
     index: &'a GameIndex,
 }
 
 impl<'a> GameQuery<'a> {
-    pub fn new(state: &'a GameState, index: &'a GameIndex) -> Self {
+    pub fn new(state: &'a TableState, index: &'a GameIndex) -> Self {
         Self { state, index }
     }
 

@@ -3,10 +3,9 @@ use std::collections::VecDeque;
 use catan_agents::bot::BotPolicy;
 use catan_core::gameplay::{
     game::{
-        decision::DecisionId,
         engine::GameEngine,
         init::GameInitializationState,
-        input::{GameInput, PlayerCommand},
+        input::{DecisionRequest, DecisionResponse},
         output::GameOutput,
         projector,
         run::{GameResult, RunOptions},
@@ -23,9 +22,7 @@ pub struct SeatFrame<'a> {
 
 #[derive(Debug, Clone)]
 pub struct SeatCommand {
-    pub player_id: PlayerId,
-    pub decision_id: DecisionId,
-    pub command: PlayerCommand,
+    pub response: DecisionResponse,
 }
 
 #[derive(Debug, Default)]
@@ -85,15 +82,13 @@ impl Seat for BotSeat {
         let GameOutput::DecisionOpened(decision) = frame.output else {
             return;
         };
-        if decision.player_id != self.player_id() {
+        if decision.player_id() != self.player_id() {
             return;
         }
         if let Some(command) = self.policy.command_for(decision, frame.view) {
-            commands.push(SeatCommand {
-                player_id: decision.player_id,
-                decision_id: decision.id,
-                command,
-            });
+            if let Some(response) = decision.respond_command(command) {
+                commands.push(SeatCommand { response });
+            }
         }
     }
 }
@@ -134,8 +129,9 @@ impl SyncGameHost {
     pub fn start(&mut self) {
         if self.engine.is_started() {
             for decision in self.engine.pending_decisions() {
-                self.outputs
-                    .push_back(GameOutput::DecisionOpened(decision.clone()));
+                self.outputs.push_back(GameOutput::DecisionOpened(
+                    DecisionRequest::from_open_decision(decision),
+                ));
             }
         } else {
             let transition = self.engine.start().expect("engine start should reduce");
@@ -160,11 +156,7 @@ impl SyncGameHost {
             if let Some(input) = self.inputs.pop_front() {
                 let transition = self
                     .engine
-                    .apply(GameInput::Submit {
-                        player_id: input.player_id,
-                        decision_id: input.decision_id,
-                        command: input.command,
-                    })
+                    .submit(input.response)
                     .expect("engine submit should reduce");
                 self.outputs
                     .extend(projector::project_transaction(&transition.transaction));
@@ -187,7 +179,7 @@ impl SyncGameHost {
 
     fn deliver_output(&mut self, output: &GameOutput) {
         let factory = ContextFactory {
-            state: self.engine.state(),
+            state: self.engine.table(),
             index: self.engine.index(),
             visibility: &self.visibility,
         };
@@ -202,7 +194,7 @@ impl SyncGameHost {
         for index in 0..self.seats.len() {
             let player_id = self.seats[index].player_id();
             let policy = self.visibility.player_policy(player_id);
-            let search = Some(SearchFactory::new(self.engine.state(), policy, player_id));
+            let search = Some(SearchFactory::new(self.engine.table(), policy, player_id));
             let frame = SeatFrame {
                 player_id,
                 output,
@@ -228,10 +220,7 @@ mod tests {
     use super::*;
     use catan_agents::{bot::decline_trade_command, lazy::LazyAgent};
     use catan_core::gameplay::{
-        game::{
-            decision::{DecisionKind, OpenDecision},
-            event::GameEvent,
-        },
+        game::{decision::DecisionKind, event::GameEvent, input::DecisionRequest},
         random::GameRandom,
     };
 
@@ -267,7 +256,7 @@ mod tests {
 
     struct RecordingSeat {
         id: PlayerId,
-        decision: Option<OpenDecision>,
+        decision: Option<DecisionRequest>,
     }
 
     impl Seat for RecordingSeat {
@@ -277,7 +266,7 @@ mod tests {
 
         fn on_frame(&mut self, frame: SeatFrame<'_>, _commands: &mut SeatCommandBuffer) {
             if let GameOutput::DecisionOpened(decision) = frame.output
-                && decision.player_id == self.id
+                && decision.player_id() == self.id
             {
                 self.decision = Some(decision.clone());
             }

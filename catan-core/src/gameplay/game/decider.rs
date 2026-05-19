@@ -3,12 +3,11 @@ use crate::gameplay::game::{
         self, ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, MoveRobberCommand,
         PostDevCardCommand, PostDiceCommand, RegularCommand,
     },
-    decision::{DecisionId, DecisionKind, DecisionLifetime, OpenDecision},
+    decision::{DecisionAllocator, DecisionId, DecisionKind, DecisionLifetime, OpenDecision},
     event::{EventBatch, GameEndPlayerStats, GameEndStats, GameEvent},
     input::{GameInput, PlayerCommand, TradeCommand, TradeResponseCommand},
-    lifecycle::{ActiveEngine, EngineCore},
+    lifecycle::{EngineState, PlayingEngine, SetupEngine},
     output::CommandRejectionReason,
-    phase::GamePhase,
     run::GameResult,
 };
 use crate::gameplay::{
@@ -36,12 +35,12 @@ pub struct DecisionContext {
     pub stolen_resource: Option<crate::gameplay::primitives::resource::Resource>,
 }
 
-pub fn decide(lifecycle: &EngineCore, input: GameInput) -> EventBatch {
+pub fn decide(lifecycle: &EngineState, input: GameInput) -> EventBatch {
     decide_with_context(lifecycle, input, DecisionContext::default())
 }
 
 pub fn decide_with_context(
-    lifecycle: &EngineCore,
+    lifecycle: &EngineState,
     input: GameInput,
     context: DecisionContext,
 ) -> EventBatch {
@@ -55,38 +54,33 @@ pub fn decide_with_context(
     }
 }
 
-fn decide_start(lifecycle: &EngineCore) -> EventBatch {
+fn decide_start(lifecycle: &EngineState) -> EventBatch {
     let mut events = EventBatch::new();
-    let Some(active) = lifecycle.as_active() else {
+    let EngineState::Unstarted(unstarted) = lifecycle else {
         return events;
     };
-    if active.phase != GamePhase::NotStarted {
-        return events;
-    }
 
-    // TODO: resolve this mess
     events.push(GameEvent::GameStarted);
-    events.push(GameEvent::DecisionOpened(OpenDecision {
-        id: DecisionId(active.next_decision_id),
-        player_id: active.setup_turn.as_ref().map_or_else(
-            || active.game.turn.get_turn_index(),
-            |turn| turn.get_turn_index(),
-        ),
-        kind: DecisionKind::InitialPlacement,
-        lifetime: DecisionLifetime::OneShot,
-    }));
+    let mut decisions = unstarted.decisions();
+    open_decision(
+        &mut events,
+        &mut decisions,
+        unstarted.setup_turn.get_turn_index(),
+        DecisionKind::InitialPlacement,
+        DecisionLifetime::OneShot,
+    );
     events
 }
 
 fn decide_submit(
-    lifecycle: &EngineCore,
+    lifecycle: &EngineState,
     player_id: crate::gameplay::primitives::player::PlayerId,
     decision_id: DecisionId,
     command: PlayerCommand,
     context: DecisionContext,
 ) -> EventBatch {
     let mut events = EventBatch::new();
-    let Some(active) = lifecycle.as_active() else {
+    if matches!(lifecycle, EngineState::Finished(_)) {
         events.push(GameEvent::CommandRejected {
             player_id,
             decision_id: Some(decision_id),
@@ -94,9 +88,8 @@ fn decide_submit(
             counts_toward_limit: false,
         });
         return events;
-    };
-
-    let Some(decision) = active.pending.get(decision_id).cloned() else {
+    }
+    let Some((decision, submit_state)) = submitted_decision(lifecycle, decision_id) else {
         events.push(GameEvent::CommandRejected {
             player_id,
             decision_id: Some(decision_id),
@@ -118,35 +111,59 @@ fn decide_submit(
         return events;
     }
 
-    match command_for_decision(decision.kind, command) {
-        Some(DecisionCommand::InitialPlacement(command)) => {
+    match (submit_state, command_for_decision(decision.kind, command)) {
+        (SubmitState::Setup(active), Some(DecisionCommand::InitialPlacement(command))) => {
             decide_initial_placement(active, decision, command, context, &mut events);
         }
-        Some(DecisionCommand::Regular(command)) => {
+        (SubmitState::Setup(_), _) => {
+            reject(
+                &mut events,
+                decision.player_id,
+                Some(decision.id),
+                CommandRejectionReason::WrongPhase,
+                false,
+            );
+        }
+        (SubmitState::Playing(_), Some(DecisionCommand::InitialPlacement(_))) => {
+            reject(
+                &mut events,
+                decision.player_id,
+                Some(decision.id),
+                CommandRejectionReason::WrongPhase,
+                false,
+            );
+        }
+        (SubmitState::Playing(active), Some(DecisionCommand::Regular(command))) => {
             decide_regular_command(active, decision, command, context, &mut events);
         }
-        Some(DecisionCommand::OpenTrade { scope, trade }) => {
+        (SubmitState::Playing(active), Some(DecisionCommand::OpenTrade { scope, trade })) => {
             decide_open_trade(active, decision, scope, trade, &mut events);
         }
-        Some(DecisionCommand::RollDice { next_kind }) => {
+        (SubmitState::Playing(active), Some(DecisionCommand::RollDice { next_kind })) => {
             decide_roll_dice(active, decision, next_kind, context, &mut events);
         }
-        Some(DecisionCommand::UseDevCard { usage, next_kind }) => {
+        (SubmitState::Playing(active), Some(DecisionCommand::UseDevCard { usage, next_kind })) => {
             decide_use_dev_card(active, decision, usage, next_kind, context, &mut events);
         }
-        Some(DecisionCommand::DropHalf {
-            required,
-            resources,
-        }) => {
+        (
+            SubmitState::Playing(active),
+            Some(DecisionCommand::DropHalf {
+                required,
+                resources,
+            }),
+        ) => {
             decide_drop_half(active, decision, required, resources, &mut events);
         }
-        Some(DecisionCommand::MoveRobber(hex)) => {
+        (SubmitState::Playing(active), Some(DecisionCommand::MoveRobber(hex))) => {
             decide_move_robber(active, decision, hex, context, &mut events);
         }
-        Some(DecisionCommand::ChooseRobbedPlayer {
-            robber_pos,
-            robbed_id,
-        }) => {
+        (
+            SubmitState::Playing(active),
+            Some(DecisionCommand::ChooseRobbedPlayer {
+                robber_pos,
+                robbed_id,
+            }),
+        ) => {
             decide_choose_robbed_player(
                 active,
                 decision,
@@ -156,13 +173,16 @@ fn decide_submit(
                 &mut events,
             );
         }
-        Some(DecisionCommand::TradeResponse { session, command }) => {
+        (
+            SubmitState::Playing(active),
+            Some(DecisionCommand::TradeResponse { session, command }),
+        ) => {
             decide_trade_response(active, decision, session, command, &mut events);
         }
-        Some(DecisionCommand::TradeOwner { session, command }) => {
+        (SubmitState::Playing(active), Some(DecisionCommand::TradeOwner { session, command })) => {
             decide_trade_owner(active, decision, session, command, &mut events);
         }
-        None => {
+        (_, None) => {
             reject(
                 &mut events,
                 decision.player_id,
@@ -173,8 +193,35 @@ fn decide_submit(
         }
     }
 
-    finish_after_invalid_action_limit(active, context, &mut events);
+    if let SubmitState::Playing(active) = submit_state {
+        finish_after_invalid_action_limit(active, context, &mut events);
+    }
     events
+}
+
+#[derive(Clone, Copy)]
+enum SubmitState<'a> {
+    Setup(&'a SetupEngine),
+    Playing(&'a PlayingEngine),
+}
+
+fn submitted_decision(
+    lifecycle: &EngineState,
+    decision_id: DecisionId,
+) -> Option<(OpenDecision, SubmitState<'_>)> {
+    match lifecycle {
+        EngineState::Setup(setup) => setup
+            .pending
+            .get(decision_id)
+            .cloned()
+            .map(|decision| (decision, SubmitState::Setup(setup))),
+        EngineState::Playing(active) => active
+            .pending
+            .get(decision_id)
+            .cloned()
+            .map(|decision| (decision, SubmitState::Playing(active))),
+        EngineState::Finished(_) | EngineState::Unstarted(_) => None,
+    }
 }
 
 enum DecisionCommand {
@@ -279,7 +326,7 @@ fn command_for_decision(kind: DecisionKind, command: PlayerCommand) -> Option<De
 }
 
 fn decide_regular_command(
-    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    active: &PlayingEngine,
     decision: OpenDecision,
     command: RegularCommand,
     context: DecisionContext,
@@ -305,7 +352,7 @@ fn decide_regular_command(
 }
 
 fn finish_after_invalid_action_limit(
-    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    active: &PlayingEngine,
     context: DecisionContext,
     events: &mut EventBatch,
 ) {
@@ -365,8 +412,20 @@ fn reject_illegal(events: &mut EventBatch, decision: &OpenDecision, reason: impl
     );
 }
 
+fn open_decision(
+    events: &mut EventBatch,
+    decisions: &mut DecisionAllocator,
+    player_id: crate::gameplay::primitives::player::PlayerId,
+    kind: DecisionKind,
+    lifetime: DecisionLifetime,
+) {
+    events.push(GameEvent::DecisionOpened(
+        decisions.open(player_id, kind, lifetime),
+    ));
+}
+
 fn decide_open_trade(
-    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    active: &PlayingEngine,
     decision: OpenDecision,
     scope: crate::gameplay::game::trade::TradeScope,
     trade: crate::gameplay::primitives::trade::PlayerTrade,
@@ -392,26 +451,27 @@ fn decide_open_trade(
         offer_id,
         offer: trade,
     });
-    events.push(GameEvent::DecisionOpened(OpenDecision {
-        id: DecisionId(active.next_decision_id),
-        player_id: decision.player_id,
-        kind: DecisionKind::TradeOwnerAction {
+    let mut decisions = active.decisions();
+    open_decision(
+        events,
+        &mut decisions,
+        decision.player_id,
+        DecisionKind::TradeOwnerAction {
             session: session_id,
         },
-        lifetime: DecisionLifetime::UntilSessionClosed(session_id),
-    }));
-    let mut next_decision_id = active.next_decision_id + 1;
+        DecisionLifetime::UntilSessionClosed(session_id),
+    );
     for player_id in player_ids(active.game.players.count()) {
         if player_id != decision.player_id && scope.includes(player_id) {
-            events.push(GameEvent::DecisionOpened(OpenDecision {
-                id: DecisionId(next_decision_id),
+            open_decision(
+                events,
+                &mut decisions,
                 player_id,
-                kind: DecisionKind::TradeResponse {
+                DecisionKind::TradeResponse {
                     session: session_id,
                 },
-                lifetime: DecisionLifetime::UntilSessionClosed(session_id),
-            }));
-            next_decision_id += 1;
+                DecisionLifetime::UntilSessionClosed(session_id),
+            );
         }
     }
 }
@@ -457,7 +517,7 @@ fn invalid_trade_scope_reason(
 }
 
 fn decide_trade_response(
-    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    active: &PlayingEngine,
     decision: OpenDecision,
     session_id: crate::gameplay::game::trade::TradeSessionId,
     command: TradeCommand,
@@ -541,7 +601,7 @@ fn decide_trade_response(
 }
 
 fn decide_trade_owner(
-    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    active: &PlayingEngine,
     decision: OpenDecision,
     session_id: crate::gameplay::game::trade::TradeSessionId,
     command: TradeCommand,
@@ -570,7 +630,7 @@ fn decide_trade_owner(
 }
 
 fn decide_commit_trade(
-    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    active: &PlayingEngine,
     decision: OpenDecision,
     session_id: crate::gameplay::game::trade::TradeSessionId,
     offer_id: crate::gameplay::game::trade::TradeOfferId,
@@ -620,7 +680,7 @@ fn decide_commit_trade(
 }
 
 fn close_session_decisions(
-    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    active: &PlayingEngine,
     session_id: crate::gameplay::game::trade::TradeSessionId,
     events: &mut EventBatch,
 ) {
@@ -636,7 +696,7 @@ fn close_session_decisions(
 }
 
 fn decide_drop_half(
-    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    active: &PlayingEngine,
     decision: OpenDecision,
     required: u16,
     resources: ResourceSet,
@@ -672,25 +732,29 @@ fn decide_drop_half(
     }
     if let Some(next_player) = remaining.next() {
         let required = active.game.players.get(next_player).resources().total() / 2;
-        events.push(GameEvent::DecisionOpened(OpenDecision {
-            id: DecisionId(active.next_decision_id),
-            player_id: next_player,
-            kind: DecisionKind::DropHalf { required },
-            lifetime: DecisionLifetime::OneShot,
-        }));
+        let mut decisions = active.decisions();
+        open_decision(
+            events,
+            &mut decisions,
+            next_player,
+            DecisionKind::DropHalf { required },
+            DecisionLifetime::OneShot,
+        );
     } else {
         let robber_player = active.game.turn.get_turn_index();
-        events.push(GameEvent::DecisionOpened(OpenDecision {
-            id: DecisionId(active.next_decision_id),
-            player_id: robber_player,
-            kind: DecisionKind::MoveRobber,
-            lifetime: DecisionLifetime::OneShot,
-        }));
+        let mut decisions = active.decisions();
+        open_decision(
+            events,
+            &mut decisions,
+            robber_player,
+            DecisionKind::MoveRobber,
+            DecisionLifetime::OneShot,
+        );
     }
 }
 
 fn decide_move_robber(
-    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    active: &PlayingEngine,
     decision: OpenDecision,
     hex: crate::topology::Hex,
     context: DecisionContext,
@@ -749,18 +813,20 @@ fn decide_move_robber(
             events.push(GameEvent::DecisionClosed {
                 decision_id: decision.id,
             });
-            events.push(GameEvent::DecisionOpened(OpenDecision {
-                id: DecisionId(active.next_decision_id),
+            let mut decisions = active.decisions();
+            open_decision(
+                events,
+                &mut decisions,
                 player_id,
-                kind: DecisionKind::ChooseRobbedPlayer { robber_pos: hex },
-                lifetime: DecisionLifetime::OneShot,
-            }));
+                DecisionKind::ChooseRobbedPlayer { robber_pos: hex },
+                DecisionLifetime::OneShot,
+            );
         }
     }
 }
 
 fn decide_choose_robbed_player(
-    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    active: &PlayingEngine,
     decision: OpenDecision,
     robber_pos: crate::topology::Hex,
     robbed_id: crate::gameplay::primitives::player::PlayerId,
@@ -802,20 +868,22 @@ fn decide_choose_robbed_player(
 }
 
 fn reopen_regular(
-    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    active: &PlayingEngine,
     player_id: crate::gameplay::primitives::player::PlayerId,
     events: &mut EventBatch,
 ) {
-    events.push(GameEvent::DecisionOpened(OpenDecision {
-        id: DecisionId(active.next_decision_id),
+    let mut decisions = active.decisions();
+    open_decision(
+        events,
+        &mut decisions,
         player_id,
-        kind: DecisionKind::RegularCommand,
-        lifetime: DecisionLifetime::OneShot,
-    }));
+        DecisionKind::RegularCommand,
+        DecisionLifetime::OneShot,
+    );
 }
 
 fn decide_use_dev_card(
-    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    active: &PlayingEngine,
     decision: OpenDecision,
     usage: crate::gameplay::primitives::dev_card::DevCardUsage,
     next_kind: DecisionKind,
@@ -862,19 +930,17 @@ fn decide_use_dev_card(
         });
         return;
     }
-    events.push(GameEvent::DecisionOpened(OpenDecision {
-        id: DecisionId(active.next_decision_id),
+    let mut decisions = active.decisions();
+    open_decision(
+        events,
+        &mut decisions,
         player_id,
-        kind: next_kind,
-        lifetime: DecisionLifetime::OneShot,
-    }));
+        next_kind,
+        DecisionLifetime::OneShot,
+    );
 }
 
-fn decide_buy_dev_card(
-    active: &crate::gameplay::game::lifecycle::ActiveEngine,
-    decision: OpenDecision,
-    events: &mut EventBatch,
-) {
+fn decide_buy_dev_card(active: &PlayingEngine, decision: OpenDecision, events: &mut EventBatch) {
     let player_id = decision.player_id;
     let Some(card) = active.game.bank.dev_cards.last().copied() else {
         reject_illegal(events, &decision, "development card bank is empty");
@@ -912,17 +978,19 @@ fn decide_buy_dev_card(
             stats: Some(game_end_stats(&candidate, &candidate_index)),
         });
     } else {
-        events.push(GameEvent::DecisionOpened(OpenDecision {
-            id: DecisionId(active.next_decision_id),
+        let mut decisions = active.decisions();
+        open_decision(
+            events,
+            &mut decisions,
             player_id,
-            kind: DecisionKind::RegularCommand,
-            lifetime: DecisionLifetime::OneShot,
-        }));
+            DecisionKind::RegularCommand,
+            DecisionLifetime::OneShot,
+        );
     }
 }
 
 fn decide_roll_dice(
-    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    active: &PlayingEngine,
     decision: OpenDecision,
     next_kind: DecisionKind,
     context: DecisionContext,
@@ -945,12 +1013,14 @@ fn decide_roll_dice(
             events.push(GameEvent::ResourcesDistributed {
                 by_player: algorithm::resource_distribution_for_roll(&active.game, player_id, num),
             });
-            events.push(GameEvent::DecisionOpened(OpenDecision {
-                id: DecisionId(active.next_decision_id),
+            let mut decisions = active.decisions();
+            open_decision(
+                events,
+                &mut decisions,
                 player_id,
-                kind: next_kind,
-                lifetime: DecisionLifetime::OneShot,
-            }));
+                next_kind,
+                DecisionLifetime::OneShot,
+            );
         }
         DiceOutcome::Seven => {
             open_next_discard_or_robber(active, player_id, events);
@@ -959,7 +1029,7 @@ fn decide_roll_dice(
 }
 
 fn open_next_discard_or_robber(
-    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    active: &PlayingEngine,
     robber_player: crate::gameplay::primitives::player::PlayerId,
     events: &mut EventBatch,
 ) {
@@ -969,24 +1039,28 @@ fn open_next_discard_or_robber(
     });
     if let Some(player_id) = first_discard {
         let required = active.game.players.get(player_id).resources().total() / 2;
-        events.push(GameEvent::DecisionOpened(OpenDecision {
-            id: DecisionId(active.next_decision_id),
+        let mut decisions = active.decisions();
+        open_decision(
+            events,
+            &mut decisions,
             player_id,
-            kind: DecisionKind::DropHalf { required },
-            lifetime: DecisionLifetime::OneShot,
-        }));
+            DecisionKind::DropHalf { required },
+            DecisionLifetime::OneShot,
+        );
     } else {
-        events.push(GameEvent::DecisionOpened(OpenDecision {
-            id: DecisionId(active.next_decision_id),
-            player_id: robber_player,
-            kind: DecisionKind::MoveRobber,
-            lifetime: DecisionLifetime::OneShot,
-        }));
+        let mut decisions = active.decisions();
+        open_decision(
+            events,
+            &mut decisions,
+            robber_player,
+            DecisionKind::MoveRobber,
+            DecisionLifetime::OneShot,
+        );
     }
 }
 
 fn decide_build(
-    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    active: &PlayingEngine,
     decision: OpenDecision,
     build: Build,
     events: &mut EventBatch,
@@ -1008,12 +1082,14 @@ fn decide_build(
             stats: Some(game_end_stats(&candidate, &candidate_index)),
         });
     } else {
-        events.push(GameEvent::DecisionOpened(OpenDecision {
-            id: DecisionId(active.next_decision_id),
+        let mut decisions = active.decisions();
+        open_decision(
+            events,
+            &mut decisions,
             player_id,
-            kind: DecisionKind::RegularCommand,
-            lifetime: DecisionLifetime::OneShot,
-        }));
+            DecisionKind::RegularCommand,
+            DecisionLifetime::OneShot,
+        );
     }
 }
 
@@ -1050,7 +1126,7 @@ fn game_end_stats(
 }
 
 fn decide_bank_trade(
-    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    active: &PlayingEngine,
     decision: OpenDecision,
     trade: BankTrade,
     events: &mut EventBatch,
@@ -1065,16 +1141,18 @@ fn decide_bank_trade(
         decision_id: decision.id,
     });
     events.push(GameEvent::BankTradeCompleted { player_id, trade });
-    events.push(GameEvent::DecisionOpened(OpenDecision {
-        id: DecisionId(active.next_decision_id),
+    let mut decisions = active.decisions();
+    open_decision(
+        events,
+        &mut decisions,
         player_id,
-        kind: DecisionKind::RegularCommand,
-        lifetime: DecisionLifetime::OneShot,
-    }));
+        DecisionKind::RegularCommand,
+        DecisionLifetime::OneShot,
+    );
 }
 
 fn can_trade_with_bank(
-    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    active: &PlayingEngine,
     player_id: crate::gameplay::primitives::player::PlayerId,
     trade: BankTrade,
 ) -> bool {
@@ -1099,7 +1177,7 @@ fn can_trade_with_bank(
 }
 
 fn decide_end_move(
-    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    active: &PlayingEngine,
     decision: OpenDecision,
     context: DecisionContext,
     events: &mut EventBatch,
@@ -1129,16 +1207,18 @@ fn decide_end_move(
         player_id: next_turn.get_turn_index(),
         turn_no: next_turn_no,
     });
-    events.push(GameEvent::DecisionOpened(OpenDecision {
-        id: DecisionId(active.next_decision_id),
-        player_id: next_turn.get_turn_index(),
-        kind: DecisionKind::InitCommand,
-        lifetime: DecisionLifetime::OneShot,
-    }));
+    let mut decisions = active.decisions();
+    open_decision(
+        events,
+        &mut decisions,
+        next_turn.get_turn_index(),
+        DecisionKind::InitCommand,
+        DecisionLifetime::OneShot,
+    );
 }
 
 fn decide_initial_placement(
-    active: &ActiveEngine,
+    active: &SetupEngine,
     decision: OpenDecision,
     command: command::InitialPlacementCommand,
     context: DecisionContext,
@@ -1146,75 +1226,8 @@ fn decide_initial_placement(
 ) {
     let (settlement, road) = command.as_builds();
 
-    if let Some(setup_turn) = &active.setup_turn {
-        let mut candidate_builds = active.game.builds.clone();
-        if let Err(err) = candidate_builds.try_init_place(decision.player_id, road, settlement) {
-            events.push(GameEvent::CommandRejected {
-                player_id: decision.player_id,
-                decision_id: Some(decision.id),
-                reason: CommandRejectionReason::IllegalCommand(format!(
-                    "invalid initial placement: {err:?}"
-                )),
-                counts_toward_limit: true,
-            });
-            return;
-        }
-
-        events.push(GameEvent::DecisionClosed {
-            decision_id: decision.id,
-        });
-        events.push(GameEvent::InitialPlacementBuilt {
-            player_id: decision.player_id,
-            settlement: settlement.vtx,
-            road,
-        });
-        if setup_turn.get_rounds_played() == 1 {
-            let resources = initial_resources(&active.game.board, settlement);
-            if resources != ResourceSet::EMPTY {
-                events.push(GameEvent::InitialResourcesGranted {
-                    player_id: decision.player_id,
-                    resources,
-                });
-            }
-        }
-
-        let mut candidate_turn = setup_turn.clone();
-        candidate_turn.next();
-        if candidate_turn.get_rounds_played() < 2 {
-            events.push(GameEvent::DecisionOpened(OpenDecision {
-                id: DecisionId(active.next_decision_id),
-                player_id: candidate_turn.get_turn_index(),
-                kind: DecisionKind::InitialPlacement,
-                lifetime: DecisionLifetime::OneShot,
-            }));
-        } else {
-            let regular_turn = candidate_turn.into_regular();
-            let turn_no = regular_turn.get_turns_played();
-            if let Some(max_turns) = context.max_turns
-                && turn_no >= max_turns
-            {
-                events.push(GameEvent::GameFinished {
-                    result: GameResult::LimitReached { turns: turn_no },
-                    stats: None,
-                });
-                return;
-            }
-            events.push(GameEvent::TurnStarted {
-                player_id: regular_turn.get_turn_index(),
-                turn_no,
-            });
-            events.push(GameEvent::DecisionOpened(OpenDecision {
-                id: DecisionId(active.next_decision_id),
-                player_id: active.game.turn.get_turn_index(),
-                kind: DecisionKind::InitCommand,
-                lifetime: DecisionLifetime::OneShot,
-            }));
-        }
-        return;
-    }
-
-    let mut builds = active.game.builds.clone();
-    if let Err(err) = builds.try_init_place(decision.player_id, road, settlement) {
+    let mut candidate_builds = active.table.builds.clone();
+    if let Err(err) = candidate_builds.try_init_place(decision.player_id, road, settlement) {
         events.push(GameEvent::CommandRejected {
             player_id: decision.player_id,
             decision_id: Some(decision.id),
@@ -1225,6 +1238,7 @@ fn decide_initial_placement(
         });
         return;
     }
+
     events.push(GameEvent::DecisionClosed {
         decision_id: decision.id,
     });
@@ -1233,6 +1247,51 @@ fn decide_initial_placement(
         settlement: settlement.vtx,
         road,
     });
+    if active.setup_turn.get_rounds_played() == 1 {
+        let resources = initial_resources(&active.table.board, settlement);
+        if resources != ResourceSet::EMPTY {
+            events.push(GameEvent::InitialResourcesGranted {
+                player_id: decision.player_id,
+                resources,
+            });
+        }
+    }
+
+    let mut candidate_turn = active.setup_turn.clone();
+    candidate_turn.next();
+    let mut decisions = active.decisions();
+    if candidate_turn.get_rounds_played() < 2 {
+        open_decision(
+            events,
+            &mut decisions,
+            candidate_turn.get_turn_index(),
+            DecisionKind::InitialPlacement,
+            DecisionLifetime::OneShot,
+        );
+    } else {
+        let regular_turn = candidate_turn.into_regular();
+        let turn_no = regular_turn.get_turns_played();
+        if let Some(max_turns) = context.max_turns
+            && turn_no >= max_turns
+        {
+            events.push(GameEvent::GameFinished {
+                result: GameResult::LimitReached { turns: turn_no },
+                stats: None,
+            });
+            return;
+        }
+        events.push(GameEvent::TurnStarted {
+            player_id: regular_turn.get_turn_index(),
+            turn_no,
+        });
+        open_decision(
+            events,
+            &mut decisions,
+            regular_turn.get_turn_index(),
+            DecisionKind::InitCommand,
+            DecisionLifetime::OneShot,
+        );
+    }
 }
 
 fn initial_resources(board: &BoardLayout, settlement: Establishment) -> ResourceSet {

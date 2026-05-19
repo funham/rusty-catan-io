@@ -2,6 +2,10 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
+use super::{
+    decision::{DecisionKind, OpenDecision},
+    input::{DecisionResponse, GameInput, PlayerCommand},
+};
 use crate::{
     algorithm,
     gameplay::{
@@ -12,35 +16,28 @@ use crate::{
             event::{EventCause, EventTransaction, GameEvent},
             index::GameIndex,
             init::GameInitializationState,
-            lifecycle::EngineCore,
-            reducer::{self, ReplayError},
+            lifecycle::EngineState,
+            reducer::{self, EngineApplyError},
             run::{GameResult, GameRunStats, RunOptions},
-            state::GameState,
+            state::{GameState, TableState},
         },
         primitives::{self, player::PlayerId, turn},
         random::GameRandom,
     },
     math::dice::DiceRoll,
 };
-use smallvec::SmallVec;
-
-use super::{
-    decision::{DecisionKind, OpenDecision, PendingDecisions},
-    input::{GameInput, PlayerCommand},
-    phase::GamePhase,
-    trade::TradeSession,
-};
 
 #[cfg(test)]
 use super::{
-    decision::{DecisionId, DecisionLifetime},
-    trade::{TradeOfferId, TradeResponseState, TradeScope, TradeSessionId},
+    decision::{DecisionId, DecisionLifetime, PendingDecisions},
+    trade::{TradeOfferId, TradeResponseState, TradeScope, TradeSession, TradeSessionId},
 };
 #[cfg(test)]
 use crate::gameplay::game::lifecycle::FinishedEngine;
 #[cfg(test)]
 use primitives::{bank::BankResourceExchangeError, resource::ResourceSet, trade::PlayerTrade};
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GameStatus {
     Waiting,
@@ -49,23 +46,25 @@ pub enum GameStatus {
 
 #[derive(Debug, Clone)]
 pub struct EngineTransition {
+    #[cfg(test)]
     pub status: GameStatus,
     pub transaction: EventTransaction,
+    pub result: Option<GameResult>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EngineError {
-    Replay(ReplayError),
+    Apply(EngineApplyError),
 }
 
-impl From<ReplayError> for EngineError {
-    fn from(value: ReplayError) -> Self {
-        Self::Replay(value)
+impl From<EngineApplyError> for EngineError {
+    fn from(value: EngineApplyError) -> Self {
+        Self::Apply(value)
     }
 }
 
 pub struct GameEngine {
-    core: EngineCore,
+    core: EngineState,
     runtime: EngineRuntime,
 }
 
@@ -107,12 +106,14 @@ impl GameStateSnapshot {
 
     pub fn into_state(self, board: Arc<BoardLayout>) -> GameState {
         GameState {
-            board,
-            board_state: self.board_state,
+            table: TableState {
+                board,
+                board_state: self.board_state,
+                bank: self.bank,
+                players: self.players,
+                builds: self.builds,
+            },
             turn: self.turn,
-            bank: self.bank,
-            players: self.players,
-            builds: self.builds,
         }
     }
 }
@@ -120,17 +121,7 @@ impl GameStateSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameEngineSnapshot {
     pub schema: String,
-    pub state: GameStateSnapshot,
-    pub phase: GamePhase,
-    #[serde(default)]
-    pub setup_turn: Option<turn::GameTurn<turn::BackAndForthCycle>>,
-    pub pending: PendingDecisions,
-    pub next_decision_id: u64,
-    pub trade_sessions: SmallVec<[TradeSession; 16]>,
-    pub stats: GameRunStats,
-    pub invalid_actions: u64,
-    pub pending_discards: SmallVec<[PlayerId; 8]>,
-    pub result: Option<GameResult>,
+    pub state: EngineState,
 }
 
 impl GameEngine {
@@ -140,19 +131,16 @@ impl GameEngine {
 
     pub fn new_with_options(game: GameState, options: RunOptions) -> Self {
         Self {
-            core: EngineCore::active(game),
+            core: EngineState::from_game_for_tests(game),
             runtime: EngineRuntime::new(options),
         }
     }
 
     pub fn from_init(init: GameInitializationState, options: RunOptions) -> Self {
-        let game = init.clone().finish();
-        let setup_turn = init.turn;
-        let mut engine = Self::new_with_options(game, options);
-        if let Some(active) = engine.core.active_mut() {
-            active.setup_turn = Some(setup_turn);
+        Self {
+            core: EngineState::unstarted(init),
+            runtime: EngineRuntime::new(options),
         }
-        engine
     }
 
     pub fn from_snapshot(
@@ -160,19 +148,9 @@ impl GameEngine {
         board: Arc<BoardLayout>,
         options: RunOptions,
     ) -> Self {
-        let game = snapshot.state.into_state(board);
-        let core = EngineCore::from_snapshot_parts(
-            game.clone(),
-            snapshot.phase,
-            snapshot.setup_turn.clone(),
-            snapshot.pending.clone(),
-            snapshot.next_decision_id,
-            snapshot.trade_sessions.clone(),
-            snapshot.stats,
-            snapshot.invalid_actions,
-            snapshot.pending_discards.clone(),
-            snapshot.result.clone(),
-        );
+        let _ = board;
+        let mut core = snapshot.state;
+        core.rebuild_indexes();
         Self {
             core,
             runtime: EngineRuntime::new(options),
@@ -180,33 +158,9 @@ impl GameEngine {
     }
 
     pub fn snapshot(&self) -> GameEngineSnapshot {
-        match &self.core {
-            EngineCore::Active(active) => GameEngineSnapshot {
-                schema: "rusty-catan.engine-snapshot.v1".to_owned(),
-                state: GameStateSnapshot::from_state(&active.game),
-                phase: active.phase,
-                setup_turn: active.setup_turn.clone(),
-                pending: active.pending.clone(),
-                next_decision_id: active.next_decision_id,
-                trade_sessions: active.trade_sessions.clone(),
-                stats: active.stats,
-                invalid_actions: active.invalid_actions,
-                pending_discards: active.pending_discards.clone(),
-                result: None,
-            },
-            EngineCore::Finished(finished) => GameEngineSnapshot {
-                schema: "rusty-catan.engine-snapshot.v1".to_owned(),
-                state: GameStateSnapshot::from_state(&finished.game),
-                phase: GamePhase::NotStarted,
-                setup_turn: None,
-                pending: PendingDecisions::default(),
-                next_decision_id: 0,
-                trade_sessions: SmallVec::new(),
-                stats: finished.stats,
-                invalid_actions: 0,
-                pending_discards: SmallVec::new(),
-                result: Some(finished.result.clone()),
-            },
+        GameEngineSnapshot {
+            schema: "rusty-catan.engine-snapshot.v2".to_owned(),
+            state: self.core.clone(),
         }
     }
 
@@ -216,11 +170,13 @@ impl GameEngine {
             events: decider::decide(&self.core, GameInput::Start),
         };
         for event in &transaction.events {
-            reducer::reduce(&mut self.core, event)?;
+            reducer::apply_event(&mut self.core, event)?;
         }
         Ok(EngineTransition {
+            #[cfg(test)]
             status: self.status(),
             transaction,
+            result: self.result().cloned(),
         })
     }
 
@@ -250,14 +206,26 @@ impl GameEngine {
         };
         let transaction = EventTransaction { cause, events };
         for event in &transaction.events {
-            reducer::reduce(&mut self.core, event)?;
+            reducer::apply_event(&mut self.core, event)?;
         }
         Ok(EngineTransition {
+            #[cfg(test)]
             status: self.status(),
             transaction,
+            result: self.result().cloned(),
         })
     }
 
+    pub fn submit(&mut self, response: DecisionResponse) -> Result<EngineTransition, EngineError> {
+        let (player_id, decision_id, command) = response.into_parts();
+        self.apply(GameInput::Submit {
+            player_id,
+            decision_id,
+            command,
+        })
+    }
+
+    #[cfg(test)]
     fn status(&self) -> GameStatus {
         if self.core.result().is_some() {
             GameStatus::Ended
@@ -275,7 +243,7 @@ impl GameEngine {
         else {
             return None;
         };
-        let active = self.core.as_active()?;
+        let active = self.core.as_playing()?;
         let decision = active.pending.get(*decision_id)?;
         if decision.player_id != *player_id {
             return None;
@@ -302,7 +270,7 @@ impl GameEngine {
         else {
             return None;
         };
-        let active = self.core.as_active()?;
+        let active = self.core.as_playing()?;
         let decision = active.pending.get(*decision_id)?;
         if decision.player_id != *player_id {
             return None;
@@ -362,26 +330,30 @@ impl GameEngine {
         self.core.result()
     }
 
-    pub fn lifecycle(&self) -> &EngineCore {
+    pub fn lifecycle(&self) -> &EngineState {
         &self.core
     }
 
-    pub fn replay_event(&mut self, event: &GameEvent) -> Result<(), EngineError> {
-        reducer::reduce(&mut self.core, event)?;
+    pub fn apply_event(&mut self, event: &GameEvent) -> Result<(), EngineError> {
+        reducer::apply_event(&mut self.core, event)?;
         Ok(())
     }
 
     pub fn is_started(&self) -> bool {
-        self.core
-            .as_active()
-            .is_none_or(|active| active.phase != GamePhase::NotStarted)
+        !matches!(self.core, EngineState::Unstarted(_))
     }
 
     pub fn pending_decisions(&self) -> impl Iterator<Item = &OpenDecision> {
         self.core
-            .as_active()
+            .as_setup()
             .into_iter()
-            .flat_map(|active| active.pending.iter())
+            .flat_map(|setup| setup.pending.iter())
+            .chain(
+                self.core
+                    .as_playing()
+                    .into_iter()
+                    .flat_map(|active| active.pending.iter()),
+            )
     }
 
     pub fn index(&self) -> &GameIndex {
@@ -389,11 +361,17 @@ impl GameEngine {
     }
 
     pub fn state(&self) -> &GameState {
-        self.core.state()
+        self.core
+            .game()
+            .expect("full GameState exists only after setup completes")
+    }
+
+    pub fn table(&self) -> &TableState {
+        self.core.table()
     }
 
     pub fn legal_initial_placements(&self, player_id: PlayerId) -> Vec<InitialPlacementCommand> {
-        let state = self.core.state();
+        let state = self.core.table();
         state
             .builds
             .query()
@@ -402,10 +380,10 @@ impl GameEngine {
 
     #[cfg(test)]
     fn finish_core(&mut self, result: GameResult) {
-        let Some(active) = self.core.take_active() else {
+        let Some(active) = self.core.take_playing() else {
             return;
         };
-        self.core = EngineCore::Finished(FinishedEngine {
+        self.core = EngineState::Finished(FinishedEngine {
             game: active.game,
             index: active.index,
             result,
@@ -416,7 +394,7 @@ impl GameEngine {
     #[cfg(test)]
     fn trade_session(&self, id: TradeSessionId) -> Option<&TradeSession> {
         self.core
-            .as_active()
+            .as_playing()
             .and_then(|active| active.trade_sessions.get(id.0 as usize))
     }
 }
@@ -425,11 +403,11 @@ impl GameEngine {
 impl GameEngine {
     pub fn test_force_regular_action_phase(&mut self, player_id: impl Into<PlayerId>) {
         let player_id = player_id.into();
+        self.core.force_playing_for_tests();
         let active = self
             .core
-            .active_mut()
+            .playing_mut()
             .expect("test engine should be active");
-        active.phase = GamePhase::Turn(super::phase::TurnPhase::RegularCommand);
         active.pending = PendingDecisions::default();
         active.next_decision_id = active.next_decision_id.max(100);
         let decision = OpenDecision {
@@ -444,9 +422,10 @@ impl GameEngine {
 
     pub fn test_give_resources(&mut self, player_id: impl Into<PlayerId>, resources: ResourceSet) {
         let player_id = player_id.into();
+        self.core.force_playing_for_tests();
         let active = self
             .core
-            .active_mut()
+            .playing_mut()
             .expect("test engine should be active");
         match active.game.transfer_from_bank(resources, player_id) {
             Ok(()) | Err(BankResourceExchangeError::BankIsShort) => {}
@@ -456,9 +435,10 @@ impl GameEngine {
 
     pub fn test_take_resources(&mut self, player_id: impl Into<PlayerId>, resources: ResourceSet) {
         let player_id = player_id.into();
+        self.core.force_playing_for_tests();
         let active = self
             .core
-            .active_mut()
+            .playing_mut()
             .expect("test engine should be active");
         let _ = active.game.transfer_to_bank(resources, player_id);
     }
@@ -476,9 +456,10 @@ impl GameEngine {
             }
             _ => DecisionLifetime::OneShot,
         };
+        self.core.force_playing_for_tests();
         let active = self
             .core
-            .active_mut()
+            .playing_mut()
             .expect("test engine should be active");
         let decision = OpenDecision {
             id: DecisionId(active.next_decision_id),
@@ -498,9 +479,10 @@ impl GameEngine {
         trade: PlayerTrade,
     ) -> TradeSessionId {
         let proposer = proposer.into();
+        self.core.force_playing_for_tests();
         let active = self
             .core
-            .active_mut()
+            .playing_mut()
             .expect("test engine should be active");
         let id = TradeSessionId(active.trade_sessions.len() as u64);
         let player_count = active.game.players.count();
@@ -523,9 +505,10 @@ impl GameEngine {
         offer_id: TradeOfferId,
     ) {
         let player_id = player_id.into();
+        self.core.force_playing_for_tests();
         let active = self
             .core
-            .active_mut()
+            .playing_mut()
             .expect("test engine should be active");
         active
             .trade_sessions

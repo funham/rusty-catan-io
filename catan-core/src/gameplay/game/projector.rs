@@ -1,5 +1,6 @@
 use crate::gameplay::game::{
     event::{EventTransaction, EventVisibility, GameEvent},
+    input::DecisionRequest,
     output::{GameEventRecord, GameOutput},
 };
 
@@ -16,7 +17,9 @@ pub fn project_transaction(transaction: &EventTransaction) -> Vec<GameOutput> {
         outputs.push(project_event(event.clone()));
         match event {
             GameEvent::DecisionOpened(decision) => {
-                outputs.push(GameOutput::DecisionOpened(decision.clone()));
+                outputs.push(GameOutput::DecisionOpened(
+                    DecisionRequest::from_open_decision(decision),
+                ));
             }
             GameEvent::DecisionClosed { decision_id } => {
                 outputs.push(GameOutput::DecisionClosed {
@@ -102,6 +105,6 @@ mod tests {
         assert!(matches!(outputs.as_slice(), [
             GameOutput::Event(record),
             GameOutput::DecisionOpened(decision),
-        ] if matches!(record.event, GameEvent::DecisionOpened(_)) && decision.id == DecisionId(3)));
+        ] if matches!(record.event, GameEvent::DecisionOpened(_)) && decision.id() == DecisionId(3)));
     }
 }

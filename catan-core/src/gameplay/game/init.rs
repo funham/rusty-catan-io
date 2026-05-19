@@ -86,19 +86,34 @@ impl GameInitializationState {
             players: PlayerDataContainer::new(board.n_players),
             builds: BoardBuildData::new(board.n_players),
             board_state: BoardState::new(&board),
-            board,
             bank,
+            board,
         }
     }
 
     pub fn finish(self) -> GameState {
         GameState {
-            board: self.board,
-            board_state: self.board_state,
+            table: super::state::TableState {
+                board: self.board,
+                board_state: self.board_state,
+                bank: self.bank,
+                players: self.players,
+                builds: self.builds,
+            },
             turn: self.turn.into_regular(),
-            bank: self.bank,
-            players: self.players,
-            builds: self.builds,
         }
+    }
+
+    pub fn into_setup_parts(self) -> (super::state::TableState, GameTurn<BackAndForthCycle>) {
+        (
+            super::state::TableState {
+                board: self.board,
+                board_state: self.board_state,
+                bank: self.bank,
+                players: self.players,
+                builds: self.builds,
+            },
+            self.turn,
+        )
     }
 }
