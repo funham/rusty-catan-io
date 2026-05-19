@@ -144,7 +144,7 @@ mod tests {
                     wheat: 1,
                     sheep: 1,
                     ore: 1,
-                    ..ResourceSet::ZERO
+                    ..ResourceSet::EMPTY
                 },
                 0,
             )

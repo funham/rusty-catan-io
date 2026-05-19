@@ -13,7 +13,7 @@ use crate::{
             build::BoardBuildData,
             dev_card::{DevCardData, UsableDevCardSet},
             player::PlayerId,
-            resource::{ResourceSet, ResourceMap},
+            resource::{ResourceMap, ResourceSet},
             turn::GameTurn,
         },
     },

@@ -42,25 +42,42 @@ impl<'a> GameQuery<'a> {
         self.index.longest_road_lengths[player_id.index()]
     }
 
+    pub fn has_longest_road(&self, player_id: PlayerId) -> bool {
+        self.longest_road_owner() == Some(player_id)
+    }
+
+    pub fn has_largest_army(&self, player_id: PlayerId) -> bool {
+        self.largest_army_owner() == Some(player_id)
+    }
+
+    pub fn longest_road_vp(&self, player_id: PlayerId) -> u16 {
+        self.has_longest_road(player_id)
+            .then_some(constants::vp::LONGEST_ROAD_VP)
+            .unwrap_or(0)
+    }
+
+    pub fn largest_army_vp(&self, player_id: PlayerId) -> u16 {
+        self.has_largest_army(player_id)
+            .then_some(constants::vp::LARGEST_ARMY_VP)
+            .unwrap_or(0)
+    }
+
+    pub fn award_vp(&self, player_id: PlayerId) -> u16 {
+        self.largest_army_vp(player_id) + self.longest_road_vp(player_id)
+    }
+
     pub fn check_win_condition(&self) -> Option<PlayerId> {
         for player_id in self.player_ids_starting_from(PlayerId::new(0)) {
             let vp_sum = {
-                let has_longest_road = self.longest_road_owner() == Some(player_id);
-                let has_largest_army = self.largest_army_owner() == Some(player_id);
-
                 let build_vp = self.count_build_vp(player_id);
                 let dev_card_vp = self.count_dev_card_vp(player_id);
-                let road_vp = has_longest_road
-                    .then_some(constants::LONGEST_ROAD_VP)
-                    .unwrap_or(0);
-                let army_vp = has_largest_army
-                    .then_some(constants::LARGEST_ARMY_VP)
-                    .unwrap_or(0);
+                let road_vp = self.longest_road_vp(player_id);
+                let army_vp = self.largest_army_vp(player_id);
 
                 build_vp + dev_card_vp + road_vp + army_vp
             };
 
-            if vp_sum >= constants::VP_TO_WIN {
+            if vp_sum >= constants::vp::VP_TO_WIN {
                 return Some(player_id);
             }
         }
@@ -77,8 +94,8 @@ impl<'a> GameQuery<'a> {
             .establishments
             .iter()
             .map(|est| match est.stage {
-                EstablishmentType::Settlement => constants::SETTLEMENT_VP,
-                EstablishmentType::City => constants::CITY_VP,
+                EstablishmentType::Settlement => constants::vp::SETTLEMENT_VP,
+                EstablishmentType::City => constants::vp::CITY_VP,
             })
             .sum::<u16>()
     }

@@ -35,14 +35,14 @@ const P99: PlayerId = PlayerId::new(99);
 fn one_brick() -> ResourceSet {
     ResourceSet {
         brick: 1,
-        ..ResourceSet::ZERO
+        ..ResourceSet::EMPTY
     }
 }
 
 fn one_wood() -> ResourceSet {
     ResourceSet {
         wood: 1,
-        ..ResourceSet::ZERO
+        ..ResourceSet::EMPTY
     }
 }
 
@@ -313,7 +313,7 @@ fn reducer_applies_bank_trade_event_with_exact_exchange() {
         .transfer_from_bank(
             ResourceSet {
                 brick: 4,
-                ..ResourceSet::ZERO
+                ..ResourceSet::EMPTY
             },
             0,
         )
@@ -346,7 +346,7 @@ fn decider_start_emits_game_started_and_initial_decision() {
     assert!(matches!(events.as_slice(), [
         GameEvent::GameStarted,
         GameEvent::DecisionOpened(decision),
-    ] if decision.player_id == 0 && matches!(decision.kind, DecisionKind::InitPlacement)));
+    ] if decision.player_id == 0 && matches!(decision.kind, DecisionKind::InitialPlacement)));
     assert!(!events.spilled());
 }
 
@@ -412,7 +412,7 @@ fn decider_valid_bank_trade_emits_trade_and_reopens_regular_decision() {
         .transfer_from_bank(
             ResourceSet {
                 brick: 4,
-                ..ResourceSet::ZERO
+                ..ResourceSet::EMPTY
             },
             P0,
         )
@@ -727,7 +727,7 @@ fn start_opens_one_shot_init_decision() {
     let decision = first_open_decision(&outputs);
 
     assert_eq!(decision.player_id, 0);
-    assert!(matches!(decision.kind, DecisionKind::InitPlacement));
+    assert!(matches!(decision.kind, DecisionKind::InitialPlacement));
     assert_eq!(decision.lifetime, DecisionLifetime::OneShot);
 }
 
@@ -747,18 +747,27 @@ fn start_updates_reducer_lifecycle_mirror() {
 }
 
 #[test]
-fn start_outputs_share_one_transaction_id() {
+fn start_event_outputs_preserve_domain_event_order() {
     let (_engine, outputs) = started_engine();
-    let tx_ids = outputs
+    let events = outputs
         .iter()
         .filter_map(|output| match output {
-            GameOutput::Event(record) => Some(record.tx_id),
+            GameOutput::Event(record) => Some(&record.event),
             _ => None,
         })
-        .collect::<std::collections::BTreeSet<_>>();
+        .collect::<Vec<_>>();
 
-    assert_eq!(tx_ids.len(), 1);
-    assert_eq!(tx_ids.first().copied(), Some(1));
+    assert!(matches!(
+        events.as_slice(),
+        [
+            GameEvent::GameStarted,
+            GameEvent::DecisionOpened(OpenDecision {
+                player_id: P0,
+                kind: DecisionKind::InitialPlacement,
+                ..
+            }),
+        ]
+    ));
 }
 
 #[test]
@@ -769,13 +778,13 @@ fn start_emits_domain_decision_opened_event() {
         matches!(
             output_event(output),
             Some(GameEvent::DecisionOpened(decision))
-                if decision.player_id == 0 && matches!(decision.kind, DecisionKind::InitPlacement)
+                if decision.player_id == 0 && matches!(decision.kind, DecisionKind::InitialPlacement)
         )
     }));
 }
 
 #[test]
-fn characterization_start_event_order_is_transaction_safe() {
+fn characterization_start_event_order_is_stable() {
     let (_engine, outputs) = started_engine();
     let events = output_events(&outputs);
 
@@ -785,7 +794,7 @@ fn characterization_start_event_order_is_transaction_safe() {
             GameEvent::GameStarted,
             GameEvent::DecisionOpened(OpenDecision {
                 player_id: P0,
-                kind: DecisionKind::InitPlacement,
+                kind: DecisionKind::InitialPlacement,
                 ..
             }),
         ]
@@ -800,7 +809,7 @@ fn characterization_bank_trade_event_follows_decision_close() {
         0,
         ResourceSet {
             brick: 4,
-            ..ResourceSet::ZERO
+            ..ResourceSet::EMPTY
         },
     );
     let decision = engine.open_decision_for_test(0, DecisionKind::RegularCommand);
@@ -1002,7 +1011,7 @@ fn buying_dev_card_emits_private_drawn_card_event() {
             wheat: 1,
             sheep: 1,
             ore: 1,
-            ..ResourceSet::ZERO
+            ..ResourceSet::EMPTY
         },
     );
     engine

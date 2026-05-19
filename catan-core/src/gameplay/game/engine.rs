@@ -39,9 +39,7 @@ use super::{
 #[cfg(test)]
 use crate::gameplay::game::lifecycle::FinishedEngine;
 #[cfg(test)]
-use primitives::{
-    bank::BankResourceExchangeError, resource::ResourceSet, trade::PlayerTrade,
-};
+use primitives::{bank::BankResourceExchangeError, resource::ResourceSet, trade::PlayerTrade};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GameStatus {
@@ -75,8 +73,6 @@ pub struct EngineRuntime {
     random: GameRandom,
     max_turns: Option<u64>,
     max_invalid_actions: Option<u64>,
-    next_tx_id: u64,
-    current_tx_id: u64,
 }
 
 impl EngineRuntime {
@@ -85,8 +81,6 @@ impl EngineRuntime {
             random: options.random,
             max_turns: options.max_turns,
             max_invalid_actions: options.max_invalid_actions,
-            next_tx_id: 1,
-            current_tx_id: 0,
         }
     }
 }
@@ -137,7 +131,6 @@ pub struct GameEngineSnapshot {
     pub invalid_actions: u64,
     pub pending_discards: SmallVec<[PlayerId; 8]>,
     pub result: Option<GameResult>,
-    pub next_tx_id: u64,
 }
 
 impl GameEngine {
@@ -180,9 +173,10 @@ impl GameEngine {
             snapshot.pending_discards.clone(),
             snapshot.result.clone(),
         );
-        let mut runtime = EngineRuntime::new(options);
-        runtime.next_tx_id = snapshot.next_tx_id;
-        Self { core, runtime }
+        Self {
+            core,
+            runtime: EngineRuntime::new(options),
+        }
     }
 
     pub fn snapshot(&self) -> GameEngineSnapshot {
@@ -199,7 +193,6 @@ impl GameEngine {
                 invalid_actions: active.invalid_actions,
                 pending_discards: active.pending_discards.clone(),
                 result: None,
-                next_tx_id: self.runtime.next_tx_id,
             },
             EngineCore::Finished(finished) => GameEngineSnapshot {
                 schema: "rusty-catan.engine-snapshot.v1".to_owned(),
@@ -213,15 +206,12 @@ impl GameEngine {
                 invalid_actions: 0,
                 pending_discards: SmallVec::new(),
                 result: Some(finished.result.clone()),
-                next_tx_id: self.runtime.next_tx_id,
             },
         }
     }
 
     pub fn start(&mut self) -> Result<EngineTransition, EngineError> {
-        let tx_id = self.begin_transaction(EventCause::Start);
         let transaction = EventTransaction {
-            tx_id,
             cause: EventCause::Start,
             events: decider::decide(&self.core, GameInput::Start),
         };
@@ -246,7 +236,6 @@ impl GameEngine {
                 decision_id: *decision_id,
             },
         };
-        let tx_id = self.begin_transaction(cause.clone());
         let events = match input {
             GameInput::Start => decider::decide(&self.core, GameInput::Start),
             submit @ GameInput::Submit { .. } => {
@@ -259,11 +248,7 @@ impl GameEngine {
                 decider::decide_with_context(&self.core, submit, context)
             }
         };
-        let transaction = EventTransaction {
-            tx_id,
-            cause,
-            events,
-        };
+        let transaction = EventTransaction { cause, events };
         for event in &transaction.events {
             reducer::reduce(&mut self.core, event)?;
         }
@@ -415,12 +400,6 @@ impl GameEngine {
             .possible_initial_placements(&state.board, player_id)
     }
 
-    fn begin_transaction(&mut self, _cause: EventCause) -> u64 {
-        self.runtime.current_tx_id = self.runtime.next_tx_id;
-        self.runtime.next_tx_id += 1;
-        self.runtime.current_tx_id
-    }
-
     #[cfg(test)]
     fn finish_core(&mut self, result: GameResult) {
         let Some(active) = self.core.take_active() else {
@@ -463,11 +442,7 @@ impl GameEngine {
         active.pending.push(decision);
     }
 
-    pub fn test_give_resources(
-        &mut self,
-        player_id: impl Into<PlayerId>,
-        resources: ResourceSet,
-    ) {
+    pub fn test_give_resources(&mut self, player_id: impl Into<PlayerId>, resources: ResourceSet) {
         let player_id = player_id.into();
         let active = self
             .core
@@ -479,11 +454,7 @@ impl GameEngine {
         }
     }
 
-    pub fn test_take_resources(
-        &mut self,
-        player_id: impl Into<PlayerId>,
-        resources: ResourceSet,
-    ) {
+    pub fn test_take_resources(&mut self, player_id: impl Into<PlayerId>, resources: ResourceSet) {
         let player_id = player_id.into();
         let active = self
             .core

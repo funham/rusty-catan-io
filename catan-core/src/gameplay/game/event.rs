@@ -2,15 +2,19 @@ use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
 use crate::{
+    constants::capacities::{
+        EVENT_BATCH_INLINE, EVENT_RECIPIENTS_INLINE, GAME_END_STATS_INLINE,
+        RESOURCE_DISTRIBUTION_INLINE,
+    },
     gameplay::{
-        game::view::{
-            OmniscientGameView, PlayerNotificationContext, PrivatePlayerView, PublicGameView,
-        },
         game::{
             decision::{DecisionId, OpenDecision},
             output::CommandRejectionReason,
             run::GameResult,
             trade::{TradeOfferId, TradeResponseState, TradeScope, TradeSessionId},
+            view::{
+                OmniscientGameView, PlayerNotificationContext, PrivatePlayerView, PublicGameView,
+            },
         },
         primitives::{
             build::{Build, Road},
@@ -24,12 +28,12 @@ use crate::{
     topology::{Hex, Intersection},
 };
 
-pub type EventBatch = SmallVec<[GameEvent; 32]>;
-pub type ResourceDistribution = SmallVec<[(PlayerId, ResourceSet); 8]>;
-pub type EventRecipients = SmallVec<[PlayerId; 2]>;
-pub type GameEndStats = SmallVec<[GameEndPlayerStats; 6]>;
+pub type EventBatch = SmallVec<[GameEvent; EVENT_BATCH_INLINE]>;
+pub type ResourceDistribution = SmallVec<[(PlayerId, ResourceSet); RESOURCE_DISTRIBUTION_INLINE]>;
+pub type EventRecipients = SmallVec<[PlayerId; EVENT_RECIPIENTS_INLINE]>;
+pub type GameEndStats = SmallVec<[GameEndPlayerStats; GAME_END_STATS_INLINE]>;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EventCause {
     Start,
     PlayerCommand {
@@ -41,15 +45,13 @@ pub enum EventCause {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventTransaction {
-    pub tx_id: u64,
     pub cause: EventCause,
     pub events: EventBatch,
 }
 
 impl EventTransaction {
-    pub fn new(tx_id: u64, cause: EventCause) -> Self {
+    pub fn new(cause: EventCause) -> Self {
         Self {
-            tx_id,
             cause,
             events: EventBatch::new(),
         }

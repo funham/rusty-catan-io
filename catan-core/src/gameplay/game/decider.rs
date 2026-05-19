@@ -1,27 +1,30 @@
 use crate::gameplay::game::{
+    command::{
+        self, ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, MoveRobberCommand,
+        PostDevCardCommand, PostDiceCommand, RegularCommand,
+    },
     decision::{DecisionId, DecisionKind, DecisionLifetime, OpenDecision},
     event::{EventBatch, GameEndPlayerStats, GameEndStats, GameEvent},
     input::{GameInput, PlayerCommand, TradeCommand, TradeResponseCommand},
-    lifecycle::EngineCore,
+    lifecycle::{ActiveEngine, EngineCore},
     output::CommandRejectionReason,
     phase::GamePhase,
     run::GameResult,
 };
 use crate::gameplay::{
     field::state::BoardLayout,
-    game::command::RegularCommand,
     game::{index::GameIndex, query::GameQuery},
     primitives::{
         PortKind, Tile,
         build::{Build, Establishment},
-        dev_card::UsableDevCard,
+        dev_card::{DevCardUsage, UsableDevCard},
         player::player_ids,
         resource::ResourceSet,
-        trade::{BankTrade, BankTradeKind, PersonalTradeOffer, PublicTradeOffer},
+        trade::{BankTrade, BankTradeKind, PersonalTradeOffer, PlayerTrade, PublicTradeOffer},
     },
 };
 use crate::{
-    algorithm, constants,
+    algorithm,
     math::dice::{DiceOutcome, DiceRoll},
 };
 
@@ -61,6 +64,7 @@ fn decide_start(lifecycle: &EngineCore) -> EventBatch {
         return events;
     }
 
+    // TODO: resolve this mess
     events.push(GameEvent::GameStarted);
     events.push(GameEvent::DecisionOpened(OpenDecision {
         id: DecisionId(active.next_decision_id),
@@ -68,7 +72,7 @@ fn decide_start(lifecycle: &EngineCore) -> EventBatch {
             || active.game.turn.get_turn_index(),
             |turn| turn.get_turn_index(),
         ),
-        kind: DecisionKind::InitPlacement,
+        kind: DecisionKind::InitialPlacement,
         lifetime: DecisionLifetime::OneShot,
     }));
     events
@@ -114,189 +118,35 @@ fn decide_submit(
         return events;
     }
 
-    match (decision.kind, command) {
-        (DecisionKind::InitPlacement, PlayerCommand::InitialPlacement(command)) => {
+    match command_for_decision(decision.kind, command) {
+        Some(DecisionCommand::InitialPlacement(command)) => {
             decide_initial_placement(active, decision, command, context, &mut events);
         }
-        (DecisionKind::RegularCommand, PlayerCommand::Regular(RegularCommand::EndMove)) => {
-            decide_end_move(active, decision, context, &mut events);
+        Some(DecisionCommand::Regular(command)) => {
+            decide_regular_command(active, decision, command, context, &mut events);
         }
-        (
-            DecisionKind::PostDiceCommand,
-            PlayerCommand::PostDice(
-                crate::gameplay::game::command::PostDiceCommand::RegularCommand(
-                    RegularCommand::EndMove,
-                ),
-            ),
-        ) => {
-            decide_end_move(active, decision, context, &mut events);
-        }
-        (DecisionKind::RegularCommand, PlayerCommand::Regular(RegularCommand::Build(build))) => {
-            decide_build(active, decision, build, &mut events);
-        }
-        (
-            DecisionKind::PostDiceCommand,
-            PlayerCommand::PostDice(
-                crate::gameplay::game::command::PostDiceCommand::RegularCommand(
-                    RegularCommand::Build(build),
-                ),
-            ),
-        ) => {
-            decide_build(active, decision, build, &mut events);
-        }
-        (DecisionKind::RegularCommand, PlayerCommand::Regular(RegularCommand::BuyDevCard)) => {
-            decide_buy_dev_card(active, decision, &mut events);
-        }
-        (
-            DecisionKind::PostDiceCommand,
-            PlayerCommand::PostDice(
-                crate::gameplay::game::command::PostDiceCommand::RegularCommand(
-                    RegularCommand::BuyDevCard,
-                ),
-            ),
-        ) => {
-            decide_buy_dev_card(active, decision, &mut events);
-        }
-        (
-            DecisionKind::RegularCommand,
-            PlayerCommand::Regular(RegularCommand::OfferPublicTrade(offer)),
-        ) => decide_open_trade(
-            active,
-            decision,
-            crate::gameplay::game::trade::TradeScope::Public,
-            trade_from_public_offer(offer),
-            &mut events,
-        ),
-        (
-            DecisionKind::PostDiceCommand,
-            PlayerCommand::PostDice(
-                crate::gameplay::game::command::PostDiceCommand::RegularCommand(
-                    RegularCommand::OfferPublicTrade(offer),
-                ),
-            ),
-        ) => decide_open_trade(
-            active,
-            decision,
-            crate::gameplay::game::trade::TradeScope::Public,
-            trade_from_public_offer(offer),
-            &mut events,
-        ),
-        (
-            DecisionKind::RegularCommand,
-            PlayerCommand::Regular(RegularCommand::OfferPersonalTrade(offer)),
-        ) => {
-            let (scope, trade) = trade_from_personal_offer(offer);
+        Some(DecisionCommand::OpenTrade { scope, trade }) => {
             decide_open_trade(active, decision, scope, trade, &mut events);
         }
-        (
-            DecisionKind::PostDiceCommand,
-            PlayerCommand::PostDice(
-                crate::gameplay::game::command::PostDiceCommand::RegularCommand(
-                    RegularCommand::OfferPersonalTrade(offer),
-                ),
-            ),
-        ) => {
-            let (scope, trade) = trade_from_personal_offer(offer);
-            decide_open_trade(active, decision, scope, trade, &mut events);
+        Some(DecisionCommand::RollDice { next_kind }) => {
+            decide_roll_dice(active, decision, next_kind, context, &mut events);
         }
-        (
-            DecisionKind::PostDiceCommand,
-            PlayerCommand::PostDice(
-                crate::gameplay::game::command::PostDiceCommand::RegularCommand(
-                    RegularCommand::TradeWithBank(trade),
-                ),
-            ),
-        )
-        | (
-            DecisionKind::RegularCommand,
-            PlayerCommand::Regular(RegularCommand::TradeWithBank(trade)),
-        ) => {
-            decide_bank_trade(active, decision, trade, &mut events);
+        Some(DecisionCommand::UseDevCard { usage, next_kind }) => {
+            decide_use_dev_card(active, decision, usage, next_kind, context, &mut events);
         }
-        (
-            DecisionKind::RegularCommand,
-            PlayerCommand::Trade(TradeCommand::Propose { scope, offer }),
-        ) => decide_open_trade(
-            active,
-            decision,
-            scope,
-            trade_from_public_offer(offer),
-            &mut events,
-        ),
-        (
-            DecisionKind::InitCommand,
-            PlayerCommand::InitCommand(crate::gameplay::game::command::InitCommand::RollDice),
-        ) => {
-            decide_roll_dice(
-                active,
-                decision,
-                DecisionKind::PostDiceCommand,
-                context,
-                &mut events,
-            );
-        }
-        (
-            DecisionKind::PostDevCardCommand,
-            PlayerCommand::PostDevCard(
-                crate::gameplay::game::command::PostDevCardCommand::RollDice,
-            ),
-        ) => {
-            decide_roll_dice(
-                active,
-                decision,
-                DecisionKind::RegularCommand,
-                context,
-                &mut events,
-            );
-        }
-        (
-            DecisionKind::InitCommand,
-            PlayerCommand::InitCommand(crate::gameplay::game::command::InitCommand::UseDevCard(
-                usage,
-            )),
-        ) => {
-            decide_use_dev_card(
-                active,
-                decision,
-                usage,
-                DecisionKind::PostDevCardCommand,
-                context,
-                &mut events,
-            );
-        }
-        (
-            DecisionKind::PostDiceCommand,
-            PlayerCommand::PostDice(crate::gameplay::game::command::PostDiceCommand::UseDevCard(
-                usage,
-            )),
-        ) => {
-            decide_use_dev_card(
-                active,
-                decision,
-                usage,
-                DecisionKind::RegularCommand,
-                context,
-                &mut events,
-            );
-        }
-        (
-            DecisionKind::DropHalf { required },
-            PlayerCommand::DropHalf(crate::gameplay::game::command::DropHalfCommand(resources)),
-        ) => {
+        Some(DecisionCommand::DropHalf {
+            required,
+            resources,
+        }) => {
             decide_drop_half(active, decision, required, resources, &mut events);
         }
-        (
-            DecisionKind::MoveRobber,
-            PlayerCommand::MoveRobber(crate::gameplay::game::command::MoveRobberCommand(hex)),
-        ) => {
+        Some(DecisionCommand::MoveRobber(hex)) => {
             decide_move_robber(active, decision, hex, context, &mut events);
         }
-        (
-            DecisionKind::ChooseRobbedPlayer { robber_pos },
-            PlayerCommand::ChooseRobbedPlayer(
-                crate::gameplay::game::command::ChooseRobbedPlayerCommand(robbed_id),
-            ),
-        ) => {
+        Some(DecisionCommand::ChooseRobbedPlayer {
+            robber_pos,
+            robbed_id,
+        }) => {
             decide_choose_robbed_player(
                 active,
                 decision,
@@ -306,13 +156,13 @@ fn decide_submit(
                 &mut events,
             );
         }
-        (DecisionKind::TradeResponse { session }, PlayerCommand::Trade(command)) => {
+        Some(DecisionCommand::TradeResponse { session, command }) => {
             decide_trade_response(active, decision, session, command, &mut events);
         }
-        (DecisionKind::TradeOwnerAction { session }, PlayerCommand::Trade(command)) => {
+        Some(DecisionCommand::TradeOwner { session, command }) => {
             decide_trade_owner(active, decision, session, command, &mut events);
         }
-        _ => {
+        None => {
             reject(
                 &mut events,
                 decision.player_id,
@@ -325,6 +175,133 @@ fn decide_submit(
 
     finish_after_invalid_action_limit(active, context, &mut events);
     events
+}
+
+enum DecisionCommand {
+    InitialPlacement(crate::gameplay::game::command::InitialPlacementCommand),
+    Regular(RegularCommand),
+    OpenTrade {
+        scope: crate::gameplay::game::trade::TradeScope,
+        trade: PlayerTrade,
+    },
+    RollDice {
+        next_kind: DecisionKind,
+    },
+    UseDevCard {
+        usage: DevCardUsage,
+        next_kind: DecisionKind,
+    },
+    DropHalf {
+        required: u16,
+        resources: ResourceSet,
+    },
+    MoveRobber(crate::topology::Hex),
+    ChooseRobbedPlayer {
+        robber_pos: crate::topology::Hex,
+        robbed_id: crate::gameplay::primitives::player::PlayerId,
+    },
+    TradeResponse {
+        session: crate::gameplay::game::trade::TradeSessionId,
+        command: TradeCommand,
+    },
+    TradeOwner {
+        session: crate::gameplay::game::trade::TradeSessionId,
+        command: TradeCommand,
+    },
+}
+
+fn command_for_decision(kind: DecisionKind, command: PlayerCommand) -> Option<DecisionCommand> {
+    match (kind, command) {
+        (DecisionKind::InitialPlacement, PlayerCommand::InitialPlacement(command)) => {
+            Some(DecisionCommand::InitialPlacement(command))
+        }
+        (DecisionKind::RegularCommand, PlayerCommand::Regular(command))
+        | (
+            DecisionKind::PostDiceCommand,
+            PlayerCommand::PostDice(PostDiceCommand::RegularCommand(command)),
+        ) => Some(DecisionCommand::Regular(command)),
+        (
+            DecisionKind::RegularCommand,
+            PlayerCommand::Trade(TradeCommand::Propose { scope, offer }),
+        ) => Some(DecisionCommand::OpenTrade {
+            scope,
+            trade: trade_from_public_offer(offer),
+        }),
+        (DecisionKind::InitCommand, PlayerCommand::InitCommand(InitCommand::RollDice)) => {
+            Some(DecisionCommand::RollDice {
+                next_kind: DecisionKind::PostDiceCommand,
+            })
+        }
+        (
+            DecisionKind::PostDevCardCommand,
+            PlayerCommand::PostDevCard(PostDevCardCommand::RollDice),
+        ) => Some(DecisionCommand::RollDice {
+            next_kind: DecisionKind::RegularCommand,
+        }),
+        (DecisionKind::InitCommand, PlayerCommand::InitCommand(InitCommand::UseDevCard(usage))) => {
+            Some(DecisionCommand::UseDevCard {
+                usage,
+                next_kind: DecisionKind::PostDevCardCommand,
+            })
+        }
+        (
+            DecisionKind::PostDiceCommand,
+            PlayerCommand::PostDice(PostDiceCommand::UseDevCard(usage)),
+        ) => Some(DecisionCommand::UseDevCard {
+            usage,
+            next_kind: DecisionKind::RegularCommand,
+        }),
+        (
+            DecisionKind::DropHalf { required },
+            PlayerCommand::DropHalf(DropHalfCommand(resources)),
+        ) => Some(DecisionCommand::DropHalf {
+            required,
+            resources,
+        }),
+        (DecisionKind::MoveRobber, PlayerCommand::MoveRobber(MoveRobberCommand(hex))) => {
+            Some(DecisionCommand::MoveRobber(hex))
+        }
+        (
+            DecisionKind::ChooseRobbedPlayer { robber_pos },
+            PlayerCommand::ChooseRobbedPlayer(ChooseRobbedPlayerCommand(robbed_id)),
+        ) => Some(DecisionCommand::ChooseRobbedPlayer {
+            robber_pos,
+            robbed_id,
+        }),
+        (DecisionKind::TradeResponse { session }, PlayerCommand::Trade(command)) => {
+            Some(DecisionCommand::TradeResponse { session, command })
+        }
+        (DecisionKind::TradeOwnerAction { session }, PlayerCommand::Trade(command)) => {
+            Some(DecisionCommand::TradeOwner { session, command })
+        }
+        _ => None,
+    }
+}
+
+fn decide_regular_command(
+    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    decision: OpenDecision,
+    command: RegularCommand,
+    context: DecisionContext,
+    events: &mut EventBatch,
+) {
+    match command {
+        RegularCommand::EndMove => decide_end_move(active, decision, context, events),
+        RegularCommand::Build(build) => decide_build(active, decision, build, events),
+        RegularCommand::BuyDevCard => decide_buy_dev_card(active, decision, events),
+        RegularCommand::OfferPublicTrade(offer) => decide_open_trade(
+            active,
+            decision,
+            crate::gameplay::game::trade::TradeScope::Public,
+            trade_from_public_offer(offer),
+            events,
+        ),
+        RegularCommand::OfferPersonalTrade(offer) => {
+            let (scope, trade) = trade_from_personal_offer(offer);
+            decide_open_trade(active, decision, scope, trade, events);
+        }
+        RegularCommand::TradeWithBank(trade) => decide_bank_trade(active, decision, trade, events),
+    }
 }
 
 fn finish_after_invalid_action_limit(
@@ -1049,11 +1026,11 @@ fn game_end_stats(
         .map(|player_id| {
             let build_vp = query.count_build_vp(player_id);
             let dev_card_vp = query.count_dev_card_vp(player_id);
-            let has_longest_road = query.longest_road_owner() == Some(player_id);
-            let has_largest_army = query.largest_army_owner() == Some(player_id);
-            let award_vp = u16::from(has_longest_road) * constants::LONGEST_ROAD_VP
-                + u16::from(has_largest_army) * constants::LARGEST_ARMY_VP;
+            let has_longest_road = query.has_longest_road(player_id);
+            let has_largest_army = query.has_largest_army(player_id);
+            let award_vp = query.award_vp(player_id);
             let builds = game.builds.by_player(player_id);
+
             GameEndPlayerStats {
                 player_id,
                 total_vp: build_vp + dev_card_vp + award_vp,
@@ -1161,20 +1138,19 @@ fn decide_end_move(
 }
 
 fn decide_initial_placement(
-    active: &crate::gameplay::game::lifecycle::ActiveEngine,
+    active: &ActiveEngine,
     decision: OpenDecision,
-    command: crate::gameplay::game::command::InitialPlacementCommand,
+    command: command::InitialPlacementCommand,
     context: DecisionContext,
     events: &mut EventBatch,
 ) {
-    let player_id = decision.player_id;
     let (settlement, road) = command.as_builds();
 
     if let Some(setup_turn) = &active.setup_turn {
         let mut candidate_builds = active.game.builds.clone();
-        if let Err(err) = candidate_builds.try_init_place(player_id, road, settlement) {
+        if let Err(err) = candidate_builds.try_init_place(decision.player_id, road, settlement) {
             events.push(GameEvent::CommandRejected {
-                player_id,
+                player_id: decision.player_id,
                 decision_id: Some(decision.id),
                 reason: CommandRejectionReason::IllegalCommand(format!(
                     "invalid initial placement: {err:?}"
@@ -1188,15 +1164,15 @@ fn decide_initial_placement(
             decision_id: decision.id,
         });
         events.push(GameEvent::InitialPlacementBuilt {
-            player_id,
+            player_id: decision.player_id,
             settlement: settlement.vtx,
             road,
         });
         if setup_turn.get_rounds_played() == 1 {
             let resources = initial_resources(&active.game.board, settlement);
-            if resources != ResourceSet::ZERO {
+            if resources != ResourceSet::EMPTY {
                 events.push(GameEvent::InitialResourcesGranted {
-                    player_id,
+                    player_id: decision.player_id,
                     resources,
                 });
             }
@@ -1208,7 +1184,7 @@ fn decide_initial_placement(
             events.push(GameEvent::DecisionOpened(OpenDecision {
                 id: DecisionId(active.next_decision_id),
                 player_id: candidate_turn.get_turn_index(),
-                kind: DecisionKind::InitPlacement,
+                kind: DecisionKind::InitialPlacement,
                 lifetime: DecisionLifetime::OneShot,
             }));
         } else {
@@ -1238,9 +1214,9 @@ fn decide_initial_placement(
     }
 
     let mut builds = active.game.builds.clone();
-    if let Err(err) = builds.try_init_place(player_id, road, settlement) {
+    if let Err(err) = builds.try_init_place(decision.player_id, road, settlement) {
         events.push(GameEvent::CommandRejected {
-            player_id,
+            player_id: decision.player_id,
             decision_id: Some(decision.id),
             reason: CommandRejectionReason::IllegalCommand(format!(
                 "invalid initial placement: {err:?}"
@@ -1253,14 +1229,14 @@ fn decide_initial_placement(
         decision_id: decision.id,
     });
     events.push(GameEvent::InitialPlacementBuilt {
-        player_id,
+        player_id: decision.player_id,
         settlement: settlement.vtx,
         road,
     });
 }
 
 fn initial_resources(board: &BoardLayout, settlement: Establishment) -> ResourceSet {
-    let mut resources = ResourceSet::ZERO;
+    let mut resources = ResourceSet::EMPTY;
     for hex in settlement
         .vtx
         .as_set()

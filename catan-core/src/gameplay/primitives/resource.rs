@@ -120,7 +120,7 @@ pub enum ResourceCollectionError {
 }
 
 impl ResourceSet {
-    pub const ZERO: Self = Self {
+    pub const EMPTY: Self = Self {
         brick: 0,
         wood: 0,
         wheat: 0,
@@ -175,10 +175,7 @@ impl ResourceSet {
         })
     }
 
-    pub fn try_sub(
-        &self,
-        rhs: &ResourceSet,
-    ) -> Result<ResourceSet, ResourceCollectionError> {
+    pub fn try_sub(&self, rhs: &ResourceSet) -> Result<ResourceSet, ResourceCollectionError> {
         self.checked_sub(rhs)
             .ok_or(ResourceCollectionError::InsufficientResources {
                 available: *self,
@@ -186,10 +183,7 @@ impl ResourceSet {
             })
     }
 
-    pub fn subtract_in_place(
-        &mut self,
-        rhs: &ResourceSet,
-    ) -> Result<(), ResourceCollectionError> {
+    pub fn subtract_in_place(&mut self, rhs: &ResourceSet) -> Result<(), ResourceCollectionError> {
         *self = self.try_sub(rhs)?;
         Ok(())
     }

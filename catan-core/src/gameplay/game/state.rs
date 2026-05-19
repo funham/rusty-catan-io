@@ -12,7 +12,7 @@ use crate::{
             build::{BoardBuildData, Build, BuildingError, EstablishmentType, Road},
             dev_card::DevCardUsage,
             player::{PlayerDataContainer, PlayerId},
-            resource::{Resource, ResourceSet, ResourceCollectionError},
+            resource::{Resource, ResourceCollectionError, ResourceSet},
             trade::BankTrade,
             turn::GameTurn,
         },
@@ -459,12 +459,12 @@ impl GameState {
     }
 
     fn validate_year_of_plenty(&self, list: [Resource; 2]) -> Result<(), DevCardUsageError> {
-        let requested =
-            list.into_iter()
-                .fold(ResourceSet::default(), |mut acc, resource| {
-                    acc += &resource.into();
-                    acc
-                });
+        let requested = list
+            .into_iter()
+            .fold(ResourceSet::default(), |mut acc, resource| {
+                acc += &resource.into();
+                acc
+            });
 
         self.bank
             .can_pay(&requested)
@@ -605,7 +605,7 @@ mod tests {
                 ResourceSet {
                     brick: 3,
                     sheep: 2,
-                    ..ResourceSet::ZERO
+                    ..ResourceSet::EMPTY
                 },
                 0,
             )

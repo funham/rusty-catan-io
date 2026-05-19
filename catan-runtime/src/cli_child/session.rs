@@ -213,7 +213,7 @@ fn decision_request_from_output(
         legal,
     };
     Some(match decision.kind {
-        DecisionKind::InitPlacement => DecisionRequestFrame::InitStage(envelope),
+        DecisionKind::InitialPlacement => DecisionRequestFrame::InitStage(envelope),
         DecisionKind::InitCommand => DecisionRequestFrame::InitCommand(envelope),
         DecisionKind::PostDiceCommand => DecisionRequestFrame::PostDice(envelope),
         DecisionKind::PostDevCardCommand => DecisionRequestFrame::PostDevCard(envelope),
@@ -233,7 +233,7 @@ fn command_from_decision_response(
     response: DecisionResponseFrame,
 ) -> Option<PlayerCommand> {
     match (kind, response) {
-        (DecisionKind::InitPlacement, DecisionResponseFrame::InitStage(action)) => {
+        (DecisionKind::InitialPlacement, DecisionResponseFrame::InitStage(action)) => {
             Some(PlayerCommand::InitialPlacement(action))
         }
         (DecisionKind::InitCommand, DecisionResponseFrame::InitCommand(action)) => {

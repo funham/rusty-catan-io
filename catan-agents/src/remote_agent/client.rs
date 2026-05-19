@@ -199,7 +199,7 @@ impl BotPolicy for RemoteCliAgent {
         context: PlayerDecisionContext<'_>,
     ) -> Option<PlayerCommand> {
         match decision.kind {
-            DecisionKind::InitPlacement => Some(PlayerCommand::InitialPlacement(
+            DecisionKind::InitialPlacement => Some(PlayerCommand::InitialPlacement(
                 self.init_stage_action(context),
             )),
             DecisionKind::InitCommand => {

@@ -3,9 +3,8 @@ use crate::gameplay::game::{
     output::{GameEventRecord, GameOutput},
 };
 
-pub fn project_event(tx_id: u64, event: GameEvent) -> GameOutput {
+pub fn project_event(event: GameEvent) -> GameOutput {
     GameOutput::Event(GameEventRecord {
-        tx_id,
         visibility: EventVisibility::for_event(&event),
         event,
     })
@@ -14,7 +13,7 @@ pub fn project_event(tx_id: u64, event: GameEvent) -> GameOutput {
 pub fn project_transaction(transaction: &EventTransaction) -> Vec<GameOutput> {
     let mut outputs = Vec::new();
     for event in &transaction.events {
-        outputs.push(project_event(transaction.tx_id, event.clone()));
+        outputs.push(project_event(event.clone()));
         match event {
             GameEvent::DecisionOpened(decision) => {
                 outputs.push(GameOutput::DecisionOpened(decision.clone()));
@@ -46,7 +45,7 @@ pub fn project_transaction(transaction: &EventTransaction) -> Vec<GameOutput> {
 mod tests {
     use crate::gameplay::{
         game::{
-            event::{EventCause, EventTransaction, GameEvent},
+            event::{EventCause, EventTransaction, EventVisibility, GameEvent},
             output::GameOutput,
         },
         primitives::{dev_card::DevCardKind, player::PlayerId},
@@ -58,8 +57,8 @@ mod tests {
     const P2: PlayerId = PlayerId::new(2);
 
     #[test]
-    fn transaction_projection_preserves_tx_id_and_visibility() {
-        let mut transaction = EventTransaction::new(9, EventCause::Start);
+    fn transaction_projection_preserves_event_and_visibility() {
+        let mut transaction = EventTransaction::new(EventCause::Start);
         transaction.events.push(GameEvent::DevCardDrawn {
             player_id: P2,
             card: DevCardKind::VictoryPoint,
@@ -70,11 +69,16 @@ mod tests {
         let [GameOutput::Event(record)] = outputs.as_slice() else {
             panic!("transaction should project to one event output");
         };
-        assert_eq!(record.tx_id, 9);
         assert!(matches!(
             record.event,
             GameEvent::DevCardDrawn { player_id: P2, .. }
         ));
+        let mut expected_recipients = smallvec::SmallVec::new();
+        expected_recipients.push(P2);
+        assert_eq!(
+            record.visibility,
+            EventVisibility::PrivateTo(expected_recipients)
+        );
     }
 
     #[test]
@@ -83,13 +87,13 @@ mod tests {
             DecisionId, DecisionKind, DecisionLifetime, OpenDecision,
         };
 
-        let mut transaction = EventTransaction::new(12, EventCause::Start);
+        let mut transaction = EventTransaction::new(EventCause::Start);
         transaction
             .events
             .push(GameEvent::DecisionOpened(OpenDecision {
                 id: DecisionId(3),
                 player_id: P1,
-                kind: DecisionKind::InitPlacement,
+                kind: DecisionKind::InitialPlacement,
                 lifetime: DecisionLifetime::OneShot,
             }));
 
@@ -98,6 +102,6 @@ mod tests {
         assert!(matches!(outputs.as_slice(), [
             GameOutput::Event(record),
             GameOutput::DecisionOpened(decision),
-        ] if record.tx_id == 12 && decision.id == DecisionId(3)));
+        ] if matches!(record.event, GameEvent::DecisionOpened(_)) && decision.id == DecisionId(3)));
     }
 }

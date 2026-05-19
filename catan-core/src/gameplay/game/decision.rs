@@ -24,7 +24,7 @@ pub enum DecisionLifetime {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DecisionKind {
-    InitPlacement,
+    InitialPlacement,
     InitCommand,
     PostDiceCommand,
     PostDevCardCommand,

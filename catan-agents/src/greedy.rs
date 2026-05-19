@@ -3,6 +3,7 @@ use std::collections::BTreeSet;
 use catan_core::{
     gameplay::{
         constants,
+        field::state::BoardLayout,
         game::{
             command::{
                 ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, InitialPlacementCommand,
@@ -45,7 +46,10 @@ impl GreedyAgent {
 }
 
 impl GreedyAgent {
-    fn init_stage_action(&mut self, context: PlayerDecisionContext<'_>) -> InitialPlacementCommand {
+    fn initial_placement_decision(
+        &mut self,
+        context: PlayerDecisionContext<'_>,
+    ) -> InitialPlacementCommand {
         let action =
             greedy_init_stage_action(&context, self.id, self.first_initial_resources.as_ref());
         if self.first_initial_resources.is_none() {
@@ -57,23 +61,26 @@ impl GreedyAgent {
         action
     }
 
-    fn init_action(&mut self, context: PlayerDecisionContext<'_>) -> InitCommand {
+    fn init_decision(&mut self, context: PlayerDecisionContext<'_>) -> InitCommand {
         greedy_init_action(context, self.id)
     }
 
-    fn after_dice_action(&mut self, context: PlayerDecisionContext<'_>) -> PostDiceCommand {
+    fn post_dice_decision(&mut self, context: PlayerDecisionContext<'_>) -> PostDiceCommand {
         greedy_after_dice_action(context, self.id)
     }
 
-    fn after_dev_card_action(&mut self, _context: PlayerDecisionContext<'_>) -> PostDevCardCommand {
+    fn post_dev_card_decision(
+        &mut self,
+        _context: PlayerDecisionContext<'_>,
+    ) -> PostDevCardCommand {
         PostDevCardCommand::RollDice
     }
 
-    fn regular_action(&mut self, context: PlayerDecisionContext<'_>) -> RegularCommand {
+    fn regular_decision(&mut self, context: PlayerDecisionContext<'_>) -> RegularCommand {
         greedy_regular_action(&context, self.id)
     }
 
-    fn move_robber(&mut self, context: PlayerDecisionContext<'_>) -> MoveRobberCommand {
+    fn move_robber_decision(&mut self, context: PlayerDecisionContext<'_>) -> MoveRobberCommand {
         greedy_move_robber(context)
     }
 
@@ -101,22 +108,24 @@ impl BotPolicy for GreedyAgent {
         context: PlayerDecisionContext<'_>,
     ) -> Option<PlayerCommand> {
         match decision.kind {
-            DecisionKind::InitPlacement => Some(PlayerCommand::InitialPlacement(
-                self.init_stage_action(context),
+            DecisionKind::InitialPlacement => Some(PlayerCommand::InitialPlacement(
+                self.initial_placement_decision(context),
             )),
             DecisionKind::InitCommand => {
-                Some(PlayerCommand::InitCommand(self.init_action(context)))
+                Some(PlayerCommand::InitCommand(self.init_decision(context)))
             }
             DecisionKind::PostDiceCommand => {
-                Some(PlayerCommand::PostDice(self.after_dice_action(context)))
+                Some(PlayerCommand::PostDice(self.post_dice_decision(context)))
             }
             DecisionKind::PostDevCardCommand => Some(PlayerCommand::PostDevCard(
-                self.after_dev_card_action(context),
+                self.post_dev_card_decision(context),
             )),
             DecisionKind::RegularCommand => {
-                Some(PlayerCommand::Regular(self.regular_action(context)))
+                Some(PlayerCommand::Regular(self.regular_decision(context)))
             }
-            DecisionKind::MoveRobber => Some(PlayerCommand::MoveRobber(self.move_robber(context))),
+            DecisionKind::MoveRobber => Some(PlayerCommand::MoveRobber(
+                self.move_robber_decision(context),
+            )),
             DecisionKind::ChooseRobbedPlayer { robber_pos } => Some(
                 PlayerCommand::ChooseRobbedPlayer(self.choose_player_to_rob(context, robber_pos)),
             ),
@@ -129,21 +138,24 @@ impl BotPolicy for GreedyAgent {
 }
 
 pub fn greedy_drop_half(context: PlayerDecisionContext<'_>) -> DropHalfCommand {
-    lazy::lazy_drop_half(context) // TODO: rank cards
+    // TODO: rank cards
+    lazy::lazy_drop_half(context)
 }
 
 pub fn greedy_choose_player_to_rob(
     context: PlayerDecisionContext<'_>,
     robber_pos: Hex,
 ) -> ChooseRobbedPlayerCommand {
-    lazy::lazy_choose_player_to_rob(context, robber_pos) // TODO: try to peek the most wanted card
+    // TODO: maximize for the best recource score expectancy
+    lazy::lazy_choose_player_to_rob(context, robber_pos)
 }
 
 pub fn greedy_move_robber(context: PlayerDecisionContext<'_>) -> MoveRobberCommand {
     let hex = match context.counting() {
         // blocking max amount of players with the most producing hex
         CountingMode::Human => most_occupied_producing_tile(context),
-        CountingMode::Counting => most_occupied_producing_tile(context), // TODO: try to peek the most wanted card
+        // TODO: try to peek the most wanted card
+        CountingMode::Counting => most_occupied_producing_tile(context),
     };
 
     MoveRobberCommand(hex)
@@ -316,10 +328,8 @@ fn bank_trade_objective_score(
     next_objective_score_for_resources(context, player_id, &resources_after_trade)
 }
 
-fn resources_after_bank_trade(
-    resources: &ResourceSet,
-    trade: BankTrade,
-) -> Option<ResourceSet> {
+// TODO: move to legal
+fn resources_after_bank_trade(resources: &ResourceSet, trade: BankTrade) -> Option<ResourceSet> {
     let mut resources = *resources;
     resources.subtract_in_place(&trade.to_bank()).ok()?;
     resources += &trade.from_bank();
@@ -375,20 +385,14 @@ fn initial_settlement_score(
     )
 }
 
-fn settlement_production_score(
-    board: &catan_core::gameplay::field::state::BoardLayout,
-    pos: Intersection,
-) -> u16 {
+fn settlement_production_score(board: &BoardLayout, pos: Intersection) -> u16 {
     intersection_resource_scores(board, pos)
         .into_iter()
         .map(|(_, pts)| pts)
         .sum()
 }
 
-fn intersection_resources(
-    intersection: catan_core::topology::Intersection,
-    board: &catan_core::gameplay::field::state::BoardLayout,
-) -> BTreeSet<Resource> {
+fn intersection_resources(intersection: Intersection, board: &BoardLayout) -> BTreeSet<Resource> {
     intersection_resource_scores(board, intersection)
         .into_iter()
         .map(|(resource, _)| resource)
@@ -396,7 +400,7 @@ fn intersection_resources(
 }
 
 fn intersection_resource_scores(
-    board: &catan_core::gameplay::field::state::BoardLayout,
+    board: &BoardLayout,
     intersection: Intersection,
 ) -> Vec<(Resource, u16)> {
     intersection

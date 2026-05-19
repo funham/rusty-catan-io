@@ -9,7 +9,6 @@ use super::{
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameEventRecord {
-    pub tx_id: u64,
     pub event: GameEvent,
     pub visibility: EventVisibility,
 }
@@ -21,7 +20,6 @@ impl GameEventRecord {
             .iter()
             .cloned()
             .map(|event| Self {
-                tx_id: transaction.tx_id,
                 visibility: EventVisibility::for_event(&event),
                 event,
             })
@@ -93,14 +91,13 @@ mod tests {
     }
 
     #[test]
-    fn transaction_projects_events_with_tx_id_and_visibility() {
-        let mut tx = EventTransaction::new(7, EventCause::Start);
+    fn transaction_projects_events_with_visibility() {
+        let mut tx = EventTransaction::new(EventCause::Start);
         tx.events.push(GameEvent::GameStarted);
 
         let records = GameEventRecord::from_transaction(&tx);
 
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].tx_id, 7);
         assert!(matches!(records[0].event, GameEvent::GameStarted));
         assert_eq!(records[0].visibility, EventVisibility::Public);
     }

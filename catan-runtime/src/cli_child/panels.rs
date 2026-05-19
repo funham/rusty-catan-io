@@ -940,9 +940,9 @@ mod tests {
     fn drop_selection_is_bounded_by_available_resources() {
         let available = ResourceSet {
             brick: 2,
-            ..ResourceSet::ZERO
+            ..ResourceSet::EMPTY
         };
-        let mut selected = ResourceSet::ZERO;
+        let mut selected = ResourceSet::EMPTY;
 
         adjust_drop_selection(&available, &mut selected, Resource::Brick, 1);
         adjust_drop_selection(&available, &mut selected, Resource::Brick, 1);
@@ -960,11 +960,11 @@ mod tests {
         let resources = ResourceSet {
             brick: 2,
             wood: 1,
-            ..ResourceSet::ZERO
+            ..ResourceSet::EMPTY
         };
         let selected = ResourceSet {
             brick: 1,
-            ..ResourceSet::ZERO
+            ..ResourceSet::EMPTY
         };
         let dev_cards = DevCardData::default();
         let lines = drop_personal_lines(0, &resources, &dev_cards, &selected, 2, 0)
@@ -1014,7 +1014,7 @@ mod tests {
                 ResourceSet {
                     brick: 2,
                     wood: 1,
-                    ..ResourceSet::ZERO
+                    ..ResourceSet::EMPTY
                 },
                 0,
             )

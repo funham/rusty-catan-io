@@ -31,7 +31,6 @@ struct CheckpointPolicy {
 struct JournalRecord<'a> {
     schema: String,
     seq: u64,
-    tx_id: u64,
     event: &'a GameEvent,
     visibility: &'a EventVisibility,
 }
@@ -40,7 +39,6 @@ struct JournalRecord<'a> {
 pub struct PersistedJournalRecord {
     pub schema: String,
     pub seq: u64,
-    pub tx_id: u64,
     pub event: GameEvent,
     pub visibility: EventVisibility,
 }
@@ -117,7 +115,6 @@ impl OutputObserver for PersistenceObserver {
         let record = JournalRecord {
             schema: "rusty-catan.journal.v1".to_owned(),
             seq: self.event_seq,
-            tx_id: record.tx_id,
             event: &record.event,
             visibility: &record.visibility,
         };
@@ -187,7 +184,6 @@ mod tests {
             visibility: &visibility,
         };
         let output = GameOutput::Event(GameEventRecord {
-            tx_id: 42,
             event: GameEvent::GameStarted,
             visibility: EventVisibility::Public,
         });
@@ -200,7 +196,8 @@ mod tests {
 
         let journal = fs::read_to_string(dir.join("journal.jsonl")).unwrap();
         assert!(journal.contains("\"schema\":\"rusty-catan.journal.v1\""));
-        assert!(journal.contains("\"tx_id\":42"));
+        assert!(journal.contains("\"seq\":1"));
+        assert!(!journal.contains("\"tx_id\""));
         assert!(journal.contains("\"event\":\"GameStarted\""));
         assert!(journal.contains("\"visibility\":\"Public\""));
         assert!(dir.join("checkpoints").join("snapshot-000001").exists());
@@ -226,9 +223,8 @@ mod tests {
             visibility: &visibility,
         };
 
-        for tx_id in [10, 11, 12] {
+        for _ in 0..3 {
             let output = GameOutput::Event(GameEventRecord {
-                tx_id,
                 event: GameEvent::GameStarted,
                 visibility: EventVisibility::Public,
             });
@@ -245,9 +241,12 @@ mod tests {
 
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].seq, 2);
-        assert_eq!(records[0].tx_id, 11);
         assert_eq!(records[1].seq, 3);
-        assert_eq!(records[1].tx_id, 12);
+        assert!(
+            records
+                .iter()
+                .all(|record| matches!(record.event, GameEvent::GameStarted))
+        );
 
         fs::remove_dir_all(dir).unwrap();
     }

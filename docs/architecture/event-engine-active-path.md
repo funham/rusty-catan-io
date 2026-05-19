@@ -6,7 +6,7 @@
 
 `GameEngine` now owns a single `EngineCore` source of truth instead of mirrored legacy fields plus a
 lifecycle copy. Initialized `Start` and submitted player commands are reducer-driven through
-`decider -> reducer`. `GameOutput::Event` carries transaction metadata and event visibility.
+`decider -> reducer`. `GameOutput::Event` carries event visibility.
 Persistence writes committed event records rather than serialized output envelopes.
 
 ## Target path

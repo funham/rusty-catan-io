@@ -18,7 +18,7 @@ use catan_core::gameplay::{
         build::{Establishment, Road},
         dev_card::{DevCardData, UsableDevCardSet},
         player::PlayerId,
-        resource::{ResourceSet, ResourceMap},
+        resource::{ResourceMap, ResourceSet},
     },
 };
 use serde::{Deserialize, Serialize};

@@ -1442,7 +1442,7 @@ mod tests {
                 brick: 4,
                 wood: 3,
                 wheat: 2,
-                ..ResourceSet::ZERO
+                ..ResourceSet::EMPTY
             },
         );
 
@@ -1540,7 +1540,7 @@ mod tests {
                     wheat: 1,
                     sheep: 1,
                     ore: 1,
-                    ..ResourceSet::ZERO
+                    ..ResourceSet::EMPTY
                 },
                 0,
             )
@@ -1640,10 +1640,7 @@ mod tests {
         );
     }
 
-    fn state_with_port_and_resources(
-        port_kind: PortKind,
-        resources: ResourceSet,
-    ) -> GameState {
+    fn state_with_port_and_resources(port_kind: PortKind, resources: ResourceSet) -> GameState {
         let mut init = GameInitializationState::default();
         let (port_pos, _) = init
             .board
@@ -1689,7 +1686,7 @@ mod tests {
             .transfer_from_bank(
                 ResourceSet {
                     brick: 4,
-                    ..ResourceSet::ZERO
+                    ..ResourceSet::EMPTY
                 },
                 0,
             )
@@ -1719,7 +1716,7 @@ mod tests {
             PortKind::Universal,
             ResourceSet {
                 brick: 3,
-                ..ResourceSet::ZERO
+                ..ResourceSet::EMPTY
             },
         );
         assert!(context_bank_trades(&universal, P0).iter().any(|trade| {
@@ -1730,7 +1727,7 @@ mod tests {
             PortKind::Special(Resource::Brick),
             ResourceSet {
                 brick: 2,
-                ..ResourceSet::ZERO
+                ..ResourceSet::EMPTY
             },
         );
         assert!(context_bank_trades(&specific, P0).iter().any(|trade| {
@@ -1745,7 +1742,7 @@ mod tests {
             ResourceSet {
                 brick: 2,
                 wood: 2,
-                ..ResourceSet::ZERO
+                ..ResourceSet::EMPTY
             },
         );
 

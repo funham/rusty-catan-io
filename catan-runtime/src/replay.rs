@@ -5,15 +5,11 @@ use std::{
 
 use catan_core::gameplay::game::{engine::GameEngine, run::RunOptions};
 
-use crate::{
-    persistence::{PersistedJournalRecord, read_journal_suffix},
-    snapshot::load_latest_checkpoint_at_or_before,
-};
+use crate::{persistence::read_journal_suffix, snapshot::load_latest_checkpoint_at_or_before};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RewindTarget {
     EventSeq(u64),
-    PreviousTransaction { before_tx_id: u64 },
 }
 
 pub fn rewind_engine(
@@ -21,8 +17,7 @@ pub fn rewind_engine(
     target: RewindTarget,
     options: RunOptions,
 ) -> io::Result<GameEngine> {
-    let journal_path = persistence_dir.join("journal.jsonl");
-    let target_seq = resolve_target_seq(&journal_path, target)?;
+    let target_seq = resolve_target_seq(target);
     replay_to_event_seq(persistence_dir, target_seq, options)
 }
 
@@ -48,29 +43,10 @@ pub fn replay_to_event_seq(
     Ok(engine)
 }
 
-fn resolve_target_seq(journal_path: &Path, target: RewindTarget) -> io::Result<u64> {
+fn resolve_target_seq(target: RewindTarget) -> u64 {
     match target {
-        RewindTarget::EventSeq(seq) => Ok(seq),
-        RewindTarget::PreviousTransaction { before_tx_id } => {
-            let records = read_all_journal(journal_path)?;
-            records
-                .iter()
-                .filter(|record| record.tx_id < before_tx_id)
-                .map(|record| record.seq)
-                .max()
-                .ok_or_else(|| {
-                    io::Error::new(
-                        io::ErrorKind::NotFound,
-                        format!("no transaction before tx_id {before_tx_id}"),
-                    )
-                })
-        }
+        RewindTarget::EventSeq(seq) => seq,
     }
-}
-
-fn read_all_journal(journal_path: &Path) -> io::Result<Vec<PersistedJournalRecord>> {
-    let max_seq = u64::MAX;
-    read_journal_suffix(journal_path, 0, max_seq)
 }
 
 pub fn persistence_dir(path: impl Into<PathBuf>) -> PathBuf {

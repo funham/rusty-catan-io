@@ -3,38 +3,31 @@ use crate::gameplay::primitives::{
     resource::ResourceSet,
 };
 
-pub mod capacities {
-    pub const PLAYER_VIEW_INLINE: usize = 8;
-    pub const PLAYER_PORTS_INLINE: usize = 12;
-    pub const PLAYER_ESTABLISHMENTS_INLINE: usize = 12;
-    pub const PLAYER_ROADS_INLINE: usize = 30;
-}
-
 pub mod costs {
     use super::*;
 
     pub const ROAD: ResourceSet = ResourceSet {
         brick: 1,
         wood: 1,
-        ..ResourceSet::ZERO
+        ..ResourceSet::EMPTY
     };
     pub const SETTLEMENT: ResourceSet = ResourceSet {
         brick: 1,
         wood: 1,
         wheat: 1,
         sheep: 1,
-        ..ResourceSet::ZERO
+        ..ResourceSet::EMPTY
     };
     pub const CITY: ResourceSet = ResourceSet {
         ore: 3,
         wheat: 2,
-        ..ResourceSet::ZERO
+        ..ResourceSet::EMPTY
     };
     pub const DEV_CARD: ResourceSet = ResourceSet {
         wheat: 1,
         sheep: 1,
         ore: 1,
-        ..ResourceSet::ZERO
+        ..ResourceSet::EMPTY
     };
 }
 
@@ -60,8 +53,21 @@ pub mod bank {
     };
 }
 
-pub const LONGEST_ROAD_VP: u16 = 2;
-pub const LARGEST_ARMY_VP: u16 = 2;
-pub const VP_TO_WIN: u16 = 10;
-pub const SETTLEMENT_VP: u16 = 1;
-pub const CITY_VP: u16 = 2;
+pub mod vp {
+    pub const LONGEST_ROAD_VP: u16 = 2;
+    pub const LARGEST_ARMY_VP: u16 = 2;
+    pub const VP_TO_WIN: u16 = 10;
+    pub const SETTLEMENT_VP: u16 = 1;
+    pub const CITY_VP: u16 = 2;
+}
+
+pub mod capacities {
+    pub const PLAYER_VIEW_INLINE: usize = 8;
+    pub const PLAYER_PORTS_INLINE: usize = 12;
+    pub const PLAYER_ESTABLISHMENTS_INLINE: usize = 12;
+    pub const PLAYER_ROADS_INLINE: usize = 30;
+    pub const EVENT_BATCH_INLINE: usize = 32;
+    pub const RESOURCE_DISTRIBUTION_INLINE: usize = 8;
+    pub const EVENT_RECIPIENTS_INLINE: usize = 2;
+    pub const GAME_END_STATS_INLINE: usize = 8;
+}

@@ -68,7 +68,7 @@ pub type DevCardSet = DevCardMap<u16>;
 
 impl DevCardSet {
     pub const ZERO: Self = Self {
-        usable: UsableDevCardSet::ZERO,
+        usable: UsableDevCardSet::EMPTY,
         victory_points: 0,
     };
 
@@ -92,7 +92,7 @@ pub struct UsableDevCardMap<T> {
 pub type UsableDevCardSet = UsableDevCardMap<u16>;
 
 impl UsableDevCardSet {
-    pub const ZERO: Self = Self {
+    pub const EMPTY: Self = Self {
         knight: 0,
         year_of_plenty: 0,
         road_build: 0,
