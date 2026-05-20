@@ -324,7 +324,7 @@ impl FieldRenderer {
 
     pub fn player_color(player_id: PlayerId) -> RenderColor {
         const COLORS: [RenderColor; 4] = [
-            RenderColor::Blue,
+            RenderColor::Ansi256(39),
             RenderColor::White,
             RenderColor::Red,
             RenderColor::Ansi256(172),
@@ -560,6 +560,11 @@ mod tests {
         assert!(renderer.canvas().cells().iter().any(|cell| {
             cell.ch == '[' && cell.style.bg == Some(RenderColor::Red) && cell.style.bold
         }));
+    }
+
+    #[test]
+    fn first_player_color_is_bright_blue_for_dark_backgrounds() {
+        assert_eq!(FieldRenderer::player_color(P0), RenderColor::Ansi256(39));
     }
 
     #[test]

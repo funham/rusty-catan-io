@@ -374,7 +374,7 @@ fn can_search_road_with_resources(
 }
 
 pub fn can_buy_dev_card(context: &PlayerDecisionContext<'_>) -> bool {
-    context.public.bank.dev_card_count > 0
+    context.public.bank.dev_cards.has_cards()
         && context
             .private
             .resources

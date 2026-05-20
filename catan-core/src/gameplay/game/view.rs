@@ -80,10 +80,81 @@ pub enum PublicBankResources {
     Approx(ResourceMap<DeckFullnessLevel>),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PublicBankDevCards {
+    Exact(u16),
+    Approx(DeckFullnessLevel),
+}
+
+impl PublicBankDevCards {
+    pub fn has_cards(&self) -> bool {
+        match self {
+            Self::Exact(count) => *count > 0,
+            Self::Approx(level) => *level != DeckFullnessLevel::Empty,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PublicBankView {
     pub resources: PublicBankResources,
-    pub dev_card_count: u16,
+    pub dev_cards: PublicBankDevCards,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        ContextFactory, CountingMode, PublicBankDevCards, PublicBankResources, VisibilityConfig,
+        VisibilityPolicy,
+    };
+    use crate::gameplay::{
+        game::{index::GameIndex, state::SetupGameState},
+        primitives::{bank::DeckFullnessLevel, dev_card::DevCardKind},
+    };
+
+    #[test]
+    fn human_public_bank_projects_dev_deck_as_fullness_level() {
+        let mut state = SetupGameState::default().finish();
+        state.bank.dev_cards = vec![DevCardKind::VictoryPoint; 7];
+        let index = GameIndex::rebuild(&state);
+        let visibility = VisibilityConfig::default();
+        let factory = ContextFactory {
+            state: &state,
+            index: &index,
+            visibility: &visibility,
+        };
+
+        let public = factory.spectator_public_view();
+
+        assert_eq!(
+            public.bank.dev_cards,
+            PublicBankDevCards::Approx(DeckFullnessLevel::Low)
+        );
+    }
+
+    #[test]
+    fn counting_public_bank_projects_exact_dev_deck_count() {
+        let mut state = SetupGameState::default().finish();
+        state.bank.dev_cards.truncate(13);
+        let index = GameIndex::rebuild(&state);
+        let visibility = VisibilityConfig {
+            player_mode: CountingMode::Counting,
+            spectator_mode: CountingMode::Counting,
+        };
+        let factory = ContextFactory {
+            state: &state,
+            index: &index,
+            visibility: &visibility,
+        };
+
+        let public = factory.public_view(VisibilityPolicy::Omniscient);
+
+        assert_eq!(public.bank.dev_cards, PublicBankDevCards::Exact(13));
+        assert!(matches!(
+            public.bank.resources,
+            PublicBankResources::Exact(_)
+        ));
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -118,6 +189,7 @@ pub struct PublicPlayerView {
     pub player_id: PlayerId,
     pub resources: PublicPlayerResources,
     pub dev_cards: PublicPlayerDevCards,
+    pub longest_road_length: u16,
 }
 
 type PublicPlayerViews = SmallVec<[PublicPlayerView; PLAYER_VIEW_INLINE]>;
@@ -303,7 +375,7 @@ impl<'a> ContextFactory<'a> {
     fn project_bank(&self, policy: VisibilityPolicy) -> PublicBankView {
         PublicBankView {
             resources: project_bank_resources(&self.state.bank, policy),
-            dev_card_count: self.state.bank.dev_cards.len() as u16,
+            dev_cards: project_bank_dev_cards(&self.state.bank, policy),
         }
     }
 
@@ -313,10 +385,13 @@ impl<'a> ContextFactory<'a> {
             .iter()
             .enumerate()
             .map(|(player_id, player)| {
+                let player_id =
+                    PlayerId::try_from(player_id).expect("player count should fit in u8");
                 project_player(
-                    PlayerId::try_from(player_id).expect("player count should fit in u8"),
+                    player_id,
                     player.resources(),
                     player.dev_cards(),
+                    self.index.longest_road_lengths[player_id.index()],
                     policy,
                 )
             })
@@ -354,10 +429,32 @@ fn public_bank_resource_levels(bank: &Bank) -> ResourceMap<DeckFullnessLevel> {
     }
 }
 
+fn project_bank_dev_cards(bank: &Bank, policy: VisibilityPolicy) -> PublicBankDevCards {
+    let count = bank.dev_cards.len() as u16;
+    match policy {
+        VisibilityPolicy::Player(PlayerVisibility {
+            counting: CountingMode::Counting,
+            ..
+        })
+        | VisibilityPolicy::Spectator(SpectatorVisibility {
+            counting: CountingMode::Counting,
+        })
+        | VisibilityPolicy::Omniscient => PublicBankDevCards::Exact(count),
+        VisibilityPolicy::Player(PlayerVisibility {
+            counting: CountingMode::Human,
+            ..
+        })
+        | VisibilityPolicy::Spectator(SpectatorVisibility {
+            counting: CountingMode::Human,
+        }) => PublicBankDevCards::Approx(DeckFullnessLevel::dev_card_deck(count)),
+    }
+}
+
 fn project_player(
     player_id: PlayerId,
     resources: &ResourceSet,
     dev_cards: &DevCardData,
+    longest_road_length: u16,
     policy: VisibilityPolicy,
 ) -> PublicPlayerView {
     let resources = match policy {
@@ -382,6 +479,7 @@ fn project_player(
     PublicPlayerView {
         player_id,
         resources,
+        longest_road_length,
         dev_cards: PublicPlayerDevCards {
             queued: dev_cards.queued.total(),
             active: dev_cards.active.total(),

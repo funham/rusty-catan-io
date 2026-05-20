@@ -8,8 +8,8 @@ use catan_core::gameplay::{
         state::TableState,
         view::{
             OmniscientGameView, PlayerDecisionContext, PlayerNotificationContext,
-            PrivatePlayerView, PublicBankResources, PublicGameView, PublicPlayerResources,
-            PublicVpKnowledge,
+            PrivatePlayerView, PublicBankDevCards, PublicBankResources, PublicGameView,
+            PublicPlayerResources, PublicVpKnowledge,
         },
     },
     primitives::{
@@ -61,13 +61,19 @@ pub struct UiBoard {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiPublicBank {
     pub resources: UiPublicBankResources,
-    pub dev_card_count: u16,
+    pub dev_cards: UiPublicBankDevCards,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum UiPublicBankResources {
     Exact(ResourceSet),
     Approx(ResourceMap<DeckFullnessLevel>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum UiPublicBankDevCards {
+    Exact(u16),
+    Approx(DeckFullnessLevel),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -78,6 +84,7 @@ pub struct UiPublicPlayer {
     pub active_dev_cards: u16,
     pub played_dev_cards: UsableDevCardSet,
     pub victory_points: Option<u16>,
+    pub longest_road_length: u16,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -215,6 +222,7 @@ impl UiPublicGame {
                         PublicVpKnowledge::Hidden => None,
                         PublicVpKnowledge::Exact(points) => Some(points),
                     },
+                    longest_road_length: player.longest_road_length,
                 })
                 .collect(),
             builds: public
@@ -255,7 +263,10 @@ impl UiPublicBank {
                 PublicBankResources::Exact(resources) => UiPublicBankResources::Exact(*resources),
                 PublicBankResources::Approx(resources) => UiPublicBankResources::Approx(*resources),
             },
-            dev_card_count: bank.dev_card_count,
+            dev_cards: match bank.dev_cards {
+                PublicBankDevCards::Exact(count) => UiPublicBankDevCards::Exact(count),
+                PublicBankDevCards::Approx(level) => UiPublicBankDevCards::Approx(level),
+            },
         }
     }
 }

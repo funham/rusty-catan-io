@@ -4,7 +4,9 @@
 //! terminal rendering, input parsing, selectors, panels, labels, render adapters, and logging.
 
 mod input;
+mod journal;
 mod labels;
+mod layout;
 mod logging;
 mod panels;
 mod render;

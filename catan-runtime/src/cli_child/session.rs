@@ -128,6 +128,7 @@ fn run_player_session(
                     }
                 }
                 GameOutput::DecisionOpened(decision) => {
+                    ui.set_active_player(Some(decision.player_id()));
                     if decision.player_id() != player_id {
                         ui.show_model(
                             &view,
@@ -323,7 +324,7 @@ fn run_observer_session(mut stream: UnixStream, mut ui: CliUi) -> Result<(), Str
                     )? {
                         return Ok(());
                     }
-                    state.latest = SessionViewState::view(view, format!("event: {event:?}"));
+                    state.latest = SessionViewState::view(view, ui.current_message());
                 }
                 HostToCli::Output { output, view, .. } => match output {
                     GameOutput::Event(record) => {
@@ -338,13 +339,20 @@ fn run_observer_session(mut stream: UnixStream, mut ui: CliUi) -> Result<(), Str
                         )? {
                             return Ok(());
                         }
-                        state.latest =
-                            SessionViewState::view(*view, format!("event: {:?}", record.event));
+                        state.latest = SessionViewState::view(*view, ui.current_message());
                     }
-                    other => {
-                        state.latest.message = format!("engine output: {other:?}");
-                        draw_latest_or_message(&mut ui, &state.latest, state.event_count)?;
-                    }
+                    other => match other {
+                        GameOutput::DecisionOpened(decision) => {
+                            ui.set_active_player(Some(decision.player_id()));
+                            state.latest = SessionViewState::view(*view, ui.current_message());
+                            draw_latest_or_message(&mut ui, &state.latest, state.event_count)?;
+                        }
+                        GameOutput::DecisionClosed { .. } | GameOutput::CommandRejected { .. } => {
+                            state.latest = SessionViewState::view(*view, ui.current_message());
+                            draw_latest_or_message(&mut ui, &state.latest, state.event_count)?;
+                        }
+                        GameOutput::Event(_) => unreachable!("event output handled above"),
+                    },
                 },
                 HostToCli::DecisionRequest(request) => {
                     let message =
@@ -409,6 +417,7 @@ fn process_host_event(
         "processing event: {:?}",
         event
     );
+    let event_message = ui.record_game_event(event);
     if let (
         CliViewMode::Normal,
         catan_core::gameplay::game::event::GameEvent::GameFinished {
@@ -423,7 +432,7 @@ fn process_host_event(
         return Ok(true);
     }
 
-    let message = format!("event: {event:?}");
+    let message = event_message.unwrap_or_else(|| ui.current_message());
     match observer_event_count {
         Some(event_count) => {
             log::trace!(

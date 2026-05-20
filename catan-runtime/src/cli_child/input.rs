@@ -34,7 +34,7 @@ pub(crate) fn read_init_action(
     log::trace!("Reading init action");
     loop {
         let model = &envelope.view;
-        let line = ui.prompt(model, "action [roll]: ")?;
+        let line = ui.prompt(model, "command: ")?;
         let line = line.trim();
         if line.is_empty() || matches!(line, "roll" | "r") {
             log::trace!("Init action: RollDice");
@@ -63,7 +63,7 @@ pub(crate) fn read_post_dice_action(
     log::trace!("Reading post-dice action");
     loop {
         let model = &envelope.view;
-        let line = ui.prompt(model, "action: ")?;
+        let line = ui.prompt(model, "command: ")?;
         if let Some(usage) = parse_dev_card_usage(&line) {
             log::trace!("Post-dice action: UseDevCard({:?})", usage);
             return Ok(PostDiceCommand::UseDevCard(usage));
@@ -99,7 +99,7 @@ pub(crate) fn read_regular_action(
     log::trace!("Reading regular action");
     loop {
         let model = &envelope.view;
-        let line = ui.prompt(model, "action: ")?;
+        let line = ui.prompt(model, "command: ")?;
         match handle_interactive_regular_action(ui, envelope, &line)? {
             CommandOutcome::Accepted(action) => {
                 log::trace!("Regular interactive action: {:?}", action);

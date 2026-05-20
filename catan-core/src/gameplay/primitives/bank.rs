@@ -48,7 +48,7 @@ impl Bank {
 
         BankViewOwned {
             resources,
-            dev_card_count: self.dev_cards.len() as u16,
+            dev_cards: DeckFullnessLevel::dev_card_deck(self.dev_cards.len() as u16),
         }
     }
 }
@@ -72,7 +72,7 @@ impl Default for Bank {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BankViewOwned {
     pub resources: ResourceMap<DeckFullnessLevel>,
-    pub dev_card_count: u16,
+    pub dev_cards: DeckFullnessLevel,
 }
 
 impl BankViewOwned {
@@ -80,8 +80,8 @@ impl BankViewOwned {
         self.resources[resource]
     }
 
-    pub fn dev_cards_fullness(&self) -> u16 {
-        self.dev_card_count
+    pub fn dev_cards_fullness(&self) -> DeckFullnessLevel {
+        self.dev_cards
     }
 }
 
@@ -94,6 +94,15 @@ pub enum DeckFullnessLevel {
 }
 
 impl DeckFullnessLevel {
+    pub fn dev_card_deck(count: u16) -> Self {
+        match count {
+            0 => Self::Empty,
+            1..=7 => Self::Low,
+            8..=13 => Self::Medium,
+            _ => Self::High,
+        }
+    }
+
     pub fn new(n: u16) -> Option<Self> {
         [Self::Empty, Self::Low, Self::Medium, Self::High]
             .into_iter()

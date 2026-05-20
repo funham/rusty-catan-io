@@ -35,11 +35,13 @@ use ratatui::{
 };
 
 use super::{
+    journal::{EventJournal, JournalEntry},
     labels::{bank_trade_label, build_label, hex_label, intersection_label, path_label},
+    layout::{NormalLayoutAreas, SnapshotLayoutAreas, normal_layout_areas, snapshot_layout_areas},
     panels::{
-        adjust_drop_selection, bank_trade_menu_lines, drop_personal_lines, game_ended_lines,
-        personal_model_lines, player_menu_lines, public_model_lines, resource_picker_lines,
-        snapshot_state_lines,
+        adjust_drop_selection, bank_panel_lines, bank_trade_menu_lines, drop_personal_lines,
+        game_ended_lines, personal_model_lines, player_menu_lines, public_player_lines,
+        resource_picker_lines, snapshot_state_lines,
     },
     render::{field_lines, field_lines_cropped_left, field_size},
     selectors::{
@@ -57,6 +59,9 @@ pub(crate) struct CliUi {
     personal_override: Option<Vec<Line<'static>>>,
     observer_event_count: u64,
     observer_summary: Option<String>,
+    journal: EventJournal,
+    active_player: Option<PlayerId>,
+    show_command_help: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,6 +93,9 @@ impl CliUi {
             personal_override: None,
             observer_event_count: 0,
             observer_summary: None,
+            journal: EventJournal::new(64),
+            active_player: None,
+            show_command_help: false,
         })
     }
 
@@ -99,6 +107,7 @@ impl CliUi {
         self.overlay.preview.clear();
         self.public_override = None;
         self.personal_override = None;
+        self.show_command_help = false;
         self.draw(None, "", "")
     }
 
@@ -114,6 +123,7 @@ impl CliUi {
         self.overlay.preview.clear();
         self.public_override = None;
         self.personal_override = None;
+        self.show_command_help = false;
         self.draw(Some(model), "", "")
     }
 
@@ -126,6 +136,30 @@ impl CliUi {
         self.observer_event_count = event_count;
         self.observer_summary = Some(ui_model_summary(model));
         self.show_model(model, message)
+    }
+
+    pub(crate) fn record_game_event(
+        &mut self,
+        event: &catan_core::gameplay::game::event::GameEvent,
+    ) -> Option<String> {
+        match event {
+            catan_core::gameplay::game::event::GameEvent::TurnStarted { player_id, .. } => {
+                self.active_player = Some(*player_id);
+            }
+            catan_core::gameplay::game::event::GameEvent::GameFinished { .. } => {
+                self.active_player = None;
+            }
+            _ => {}
+        }
+        self.journal.push_event(event)
+    }
+
+    pub(crate) fn set_active_player(&mut self, player_id: Option<PlayerId>) {
+        self.active_player = player_id;
+    }
+
+    pub(crate) fn current_message(&self) -> String {
+        self.message.clone()
     }
 
     pub(crate) fn show_game_ended(
@@ -141,6 +175,7 @@ impl CliUi {
         self.overlay.preview.clear();
         self.public_override = Some(game_ended_lines(model, winner_id, turn_no, stats));
         self.personal_override = None;
+        self.show_command_help = false;
         loop {
             self.draw(Some(model), "[press esc to quit]", "")?;
             if let CrosstermEvent::Key(key) = event::read()?
@@ -162,6 +197,7 @@ impl CliUi {
         self.overlay.preview.clear();
         self.public_override = None;
         self.personal_override = None;
+        self.show_command_help = false;
         loop {
             self.draw(Some(model), prompt, &input)?;
             if let CrosstermEvent::Key(key) = event::read()?
@@ -169,16 +205,27 @@ impl CliUi {
             {
                 match key.code {
                     KeyCode::Enter => {
+                        if input.trim() == "help" {
+                            self.show_command_help = true;
+                            input.clear();
+                            continue;
+                        }
                         log::trace!("User input: {}", input);
+                        self.show_command_help = false;
                         return Ok(input.trim().to_owned());
                     }
                     KeyCode::Backspace => {
+                        self.show_command_help = false;
                         input.pop();
                     }
                     KeyCode::Esc => {
+                        self.show_command_help = false;
                         input.clear();
                     }
-                    KeyCode::Char(c) => input.push(c),
+                    KeyCode::Char(c) => {
+                        self.show_command_help = false;
+                        input.push(c);
+                    }
                     _ => {}
                 }
             }
@@ -657,20 +704,20 @@ impl CliUi {
         let view_mode = self.view_mode;
         let observer_event_count = self.observer_event_count;
         let observer_summary = self.observer_summary.clone();
+        let journal_entries = self.journal.entries().cloned().collect::<Vec<_>>();
+        let active_player = self.active_player;
+        let show_command_help = self.show_command_help;
         self.terminal.draw(|frame| match view_mode {
             CliViewMode::Normal => {
-                let chunks = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([
-                        Constraint::Length(3),
-                        Constraint::Min(8),
-                        Constraint::Length(5),
-                    ])
-                    .split(frame.area());
+                let layout = normal_layout_areas(
+                    frame.area(),
+                    field_size(),
+                    command_panel_line_count(view_mode, prompt, input, show_command_help),
+                );
 
                 render_status(
                     frame,
-                    chunks[0],
+                    layout.status,
                     &message,
                     observer_event_count,
                     observer_summary.as_deref(),
@@ -679,36 +726,63 @@ impl CliUi {
                 match model {
                     Some(model) => render_normal_layout(
                         frame,
-                        chunks[1],
+                        layout,
                         model,
                         &overlay,
-                        public_override,
-                        personal_override,
+                        NormalRenderState {
+                            public_override,
+                            personal_override,
+                            journal_entries: &journal_entries,
+                            active_player,
+                        },
                     ),
-                    None => render_waiting_layout(frame, chunks[1]),
+                    None => render_waiting_layout(frame, layout.field),
                 }
 
-                render_command(frame, chunks[2], view_mode, prompt, input);
+                render_command(
+                    frame,
+                    layout.command,
+                    view_mode,
+                    prompt,
+                    input,
+                    show_command_help,
+                );
             }
             CliViewMode::Snapshot => {
-                let chunks = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([Constraint::Length(3), Constraint::Min(8)])
-                    .split(frame.area());
+                let layout = snapshot_layout_areas(
+                    frame.area(),
+                    field_size(),
+                    command_panel_line_count(view_mode, prompt, input, show_command_help),
+                );
 
                 render_status(
                     frame,
-                    chunks[0],
+                    layout.status,
                     &message,
                     observer_event_count,
                     observer_summary.as_deref(),
                 );
 
                 match model {
-                    Some(model) => {
-                        render_snapshot_layout(frame, chunks[1], model, &overlay, prompt, input)
-                    }
-                    None => render_snapshot_waiting_layout(frame, chunks[1], prompt, input),
+                    Some(model) => render_snapshot_layout(
+                        frame,
+                        layout,
+                        model,
+                        &overlay,
+                        CommandRenderState {
+                            prompt,
+                            input,
+                            show_help: show_command_help,
+                        },
+                        active_player,
+                    ),
+                    None => render_snapshot_waiting_layout(
+                        frame,
+                        layout,
+                        prompt,
+                        input,
+                        show_command_help,
+                    ),
                 }
             }
         })?;
@@ -729,121 +803,294 @@ fn render_status(
         Span::raw(message.to_owned()),
         Span::raw(observer_status_suffix(event_count, summary)),
     ]))
-    .block(Block::default().borders(Borders::ALL).title("Status"));
+    .block(panel_block("Status"));
     frame.render_widget(title, area);
+}
+
+fn render_journal(frame: &mut Frame<'_>, area: Rect, entries: &[JournalEntry]) {
+    let visible_rows = usize::from(area.height.saturating_sub(2));
+    let visible_cols = usize::from(area.width.saturating_sub(2));
+    let lines = if entries.is_empty() {
+        vec![Line::from(Span::styled(
+            "no events yet",
+            Style::default().fg(Color::Gray),
+        ))]
+    } else {
+        entries
+            .iter()
+            .rev()
+            .take(visible_rows.max(1))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .map(|entry| journal_entry_line(entry, visible_cols))
+            .collect()
+    };
+    let journal = Paragraph::new(lines)
+        .wrap(Wrap { trim: false })
+        .block(panel_block("Events"));
+    frame.render_widget(journal, area);
+}
+
+fn journal_entry_line(entry: &JournalEntry, visible_cols: usize) -> Line<'static> {
+    match entry {
+        JournalEntry::Event { text, .. } => styled_event_text(text),
+        JournalEntry::Divider => {
+            Line::from(Span::styled("─".repeat(visible_cols), subtle_panel_style()))
+        }
+    }
+}
+
+fn styled_event_text(text: &str) -> Line<'static> {
+    let mut spans = Vec::new();
+    let mut token = String::new();
+    for ch in text.chars() {
+        if ch.is_alphanumeric() {
+            token.push(ch);
+        } else {
+            push_event_token(&mut spans, &token);
+            token.clear();
+            spans.push(Span::raw(ch.to_string()));
+        }
+    }
+    push_event_token(&mut spans, &token);
+    Line::from(spans)
+}
+
+fn push_event_token(spans: &mut Vec<Span<'static>>, token: &str) {
+    if token.is_empty() {
+        return;
+    }
+    if let Some(player_id) = parse_player_token(token) {
+        spans.push(Span::styled(
+            token.to_owned(),
+            player_event_style(player_id),
+        ));
+    } else if let Some(style) = resource_event_style(token) {
+        spans.push(Span::styled(token.to_owned(), style));
+    } else if matches!(
+        token,
+        "development" | "Knight" | "Monopoly" | "Road" | "Building" | "Plenty"
+    ) {
+        spans.push(Span::styled(
+            token.to_owned(),
+            Style::default().fg(Color::Magenta),
+        ));
+    } else {
+        spans.push(Span::raw(token.to_owned()));
+    }
+}
+
+fn parse_player_token(token: &str) -> Option<PlayerId> {
+    token
+        .strip_prefix('p')
+        .and_then(|digits| digits.parse::<u8>().ok())
+        .map(PlayerId::new)
+}
+
+fn player_event_style(player_id: PlayerId) -> Style {
+    Style::default().fg(catan_render::adapters::ratatui::color(
+        catan_render::field::FieldRenderer::player_color(player_id),
+    ))
+}
+
+fn resource_event_style(token: &str) -> Option<Style> {
+    let resource = match token {
+        "Brick" | "brick" => Resource::Brick,
+        "Wood" | "wood" => Resource::Wood,
+        "Wheat" | "wheat" => Resource::Wheat,
+        "Sheep" | "sheep" => Resource::Sheep,
+        "Ore" | "ore" => Resource::Ore,
+        _ => return None,
+    };
+    Some(Style::default().fg(catan_render::adapters::ratatui::color(
+        catan_render::field::FieldRenderer::resource_color(resource),
+    )))
+}
+
+fn render_bank(frame: &mut Frame<'_>, area: Rect, model: &UiModel) {
+    let bank = Paragraph::new(bank_panel_lines(model))
+        .wrap(Wrap { trim: false })
+        .block(panel_block("Bank"));
+    frame.render_widget(bank, area);
+}
+
+fn render_players(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    model: &UiModel,
+    active_player: Option<PlayerId>,
+) {
+    if model.public.players.is_empty() || area.height == 0 || area.width == 0 {
+        return;
+    }
+
+    let constraints =
+        vec![
+            Constraint::Ratio(1, model.public.players.len().try_into().unwrap_or(u32::MAX),);
+            model.public.players.len()
+        ];
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(constraints)
+        .split(area);
+
+    for (idx, player) in model.public.players.iter().enumerate() {
+        let is_active = active_player == Some(player.player_id);
+        let title = format!("p{}", player.player_id);
+        let block = panel_block(&title).border_style(if is_active {
+            active_panel_style()
+        } else {
+            subtle_panel_style()
+        });
+        let panel = Paragraph::new(public_player_lines(model, player))
+            .wrap(Wrap { trim: false })
+            .block(block);
+        frame.render_widget(panel, chunks[idx]);
+    }
+}
+
+fn right_column_area(layout: NormalLayoutAreas) -> Rect {
+    let x = layout.journal.x;
+    let y = layout.journal.y;
+    let width = layout
+        .journal
+        .width
+        .max(layout.bank.width)
+        .max(layout.players.width);
+    let bottom = layout
+        .journal
+        .bottom()
+        .max(layout.bank.bottom())
+        .max(layout.players.bottom());
+    Rect::new(x, y, width, bottom.saturating_sub(y))
+}
+
+fn panel_block(title: &str) -> Block<'_> {
+    Block::default()
+        .borders(Borders::ALL)
+        .border_style(subtle_panel_style())
+        .title(title.to_owned())
+}
+
+fn subtle_panel_style() -> Style {
+    Style::default().fg(Color::Indexed(244))
+}
+
+fn active_panel_style() -> Style {
+    Style::default().fg(Color::Indexed(39))
+}
+
+struct NormalRenderState<'a> {
+    public_override: Option<Vec<Line<'static>>>,
+    personal_override: Option<Vec<Line<'static>>>,
+    journal_entries: &'a [JournalEntry],
+    active_player: Option<PlayerId>,
+}
+
+#[derive(Clone, Copy)]
+struct CommandRenderState<'a> {
+    prompt: &'a str,
+    input: &'a str,
+    show_help: bool,
 }
 
 fn render_normal_layout(
     frame: &mut Frame<'_>,
-    area: Rect,
+    layout: NormalLayoutAreas,
     model: &UiModel,
     overlay: &FieldOverlay,
-    public_override: Option<Vec<Line<'static>>>,
-    personal_override: Option<Vec<Line<'static>>>,
+    state: NormalRenderState<'_>,
 ) {
-    let (field_width, field_height) = field_size();
-    let field_pane_width = field_width.saturating_add(2);
-    let field_pane_height = field_height.saturating_add(2);
-    let body_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(field_pane_width), Constraint::Min(36)])
-        .split(area);
+    let field = Paragraph::new(field_lines(model, overlay)).block(panel_block("Field"));
+    frame.render_widget(field, layout.field);
 
-    let field_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(field_pane_height), Constraint::Min(8)])
-        .split(body_chunks[0]);
-
-    let field = Paragraph::new(field_lines(model, overlay))
-        .block(Block::default().borders(Borders::ALL).title("Field"));
-    frame.render_widget(field, field_chunks[0]);
-
-    let has_public_override = public_override.is_some();
-    let title = if has_public_override {
-        "Game Ended"
+    if let Some(lines) = state.public_override {
+        let area = right_column_area(layout);
+        let public = Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .block(panel_block("Game Ended"));
+        frame.render_widget(public, area);
     } else {
-        "Public"
-    };
-    let public = Paragraph::new(public_override.unwrap_or_else(|| public_model_lines(model)))
-        .wrap(Wrap { trim: false })
-        .block(Block::default().borders(Borders::ALL).title(title));
-    frame.render_widget(public, body_chunks[1]);
+        render_journal(frame, layout.journal, state.journal_entries);
+        render_bank(frame, layout.bank, model);
+        render_players(frame, layout.players, model, state.active_player);
+    }
 
-    let personal = Paragraph::new(personal_override.unwrap_or_else(|| personal_model_lines(model)))
-        .wrap(Wrap { trim: false })
-        .block(Block::default().borders(Borders::ALL).title("Personal"));
-    frame.render_widget(personal, field_chunks[1]);
+    let personal = Paragraph::new(
+        state
+            .personal_override
+            .unwrap_or_else(|| personal_model_lines(model)),
+    )
+    .wrap(Wrap { trim: false })
+    .block(panel_block("Private"));
+    frame.render_widget(personal, layout.personal);
 }
 
 fn render_snapshot_layout(
     frame: &mut Frame<'_>,
-    area: Rect,
+    layout: SnapshotLayoutAreas,
     model: &UiModel,
     overlay: &FieldOverlay,
-    prompt: &str,
-    input: &str,
+    command: CommandRenderState<'_>,
+    active_player: Option<PlayerId>,
 ) {
-    let (field_width, field_height) = field_size();
-    let snapshot_field_crop = 2;
-    let field_pane_width = field_width
-        .saturating_sub(snapshot_field_crop)
-        .saturating_add(2);
-    let field_pane_height = field_height.saturating_add(2);
-    let body_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(field_pane_width), Constraint::Min(42)])
-        .split(area);
-    let left_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(field_pane_height), Constraint::Min(5)])
-        .split(body_chunks[0]);
-
+    let snapshot_field_crop: usize = 2;
     let field = Paragraph::new(field_lines_cropped_left(
         model,
         overlay,
-        usize::from(snapshot_field_crop),
+        snapshot_field_crop,
     ))
-    .block(Block::default().borders(Borders::ALL).title("Field"));
-    frame.render_widget(field, left_chunks[0]);
+    .block(panel_block("Field"));
+    frame.render_widget(field, layout.field);
 
-    render_command(frame, left_chunks[1], CliViewMode::Snapshot, prompt, input);
+    render_command(
+        frame,
+        layout.command,
+        CliViewMode::Snapshot,
+        command.prompt,
+        command.input,
+        command.show_help,
+    );
 
-    let state_inner_width = body_chunks[1].width.saturating_sub(2);
-    let state = Paragraph::new(snapshot_state_lines(model, state_inner_width))
-        .wrap(Wrap { trim: false })
-        .block(Block::default().borders(Borders::ALL).title("State"));
-    frame.render_widget(state, body_chunks[1]);
+    let state_inner_width = layout.state.width.saturating_sub(2);
+    let state = Paragraph::new(snapshot_state_lines(
+        model,
+        state_inner_width,
+        active_player,
+    ))
+    .wrap(Wrap { trim: false })
+    .block(panel_block("State"));
+    frame.render_widget(state, layout.state);
 }
 
-fn render_snapshot_waiting_layout(frame: &mut Frame<'_>, area: Rect, prompt: &str, input: &str) {
-    let (field_width, field_height) = field_size();
-    let snapshot_field_crop = 2;
-    let field_pane_width = field_width
-        .saturating_sub(snapshot_field_crop)
-        .saturating_add(2);
-    let field_pane_height = field_height.saturating_add(2);
-    let body_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(field_pane_width), Constraint::Min(42)])
-        .split(area);
-    let left_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(field_pane_height), Constraint::Min(5)])
-        .split(body_chunks[0]);
-
-    render_waiting_layout(frame, left_chunks[0]);
-    render_command(frame, left_chunks[1], CliViewMode::Snapshot, prompt, input);
+fn render_snapshot_waiting_layout(
+    frame: &mut Frame<'_>,
+    layout: SnapshotLayoutAreas,
+    prompt: &str,
+    input: &str,
+    show_command_help: bool,
+) {
+    render_waiting_layout(frame, layout.field);
+    render_command(
+        frame,
+        layout.command,
+        CliViewMode::Snapshot,
+        prompt,
+        input,
+        show_command_help,
+    );
 
     let state = Paragraph::new(vec![Line::from("waiting for game state")])
         .wrap(Wrap { trim: false })
-        .block(Block::default().borders(Borders::ALL).title("State"));
-    frame.render_widget(state, body_chunks[1]);
+        .block(panel_block("State"));
+    frame.render_widget(state, layout.state);
 }
 
 fn render_waiting_layout(frame: &mut Frame<'_>, area: Rect) {
     let body = Paragraph::new(vec![Line::from("waiting for game state")])
         .wrap(Wrap { trim: false })
-        .block(Block::default().borders(Borders::ALL).title("Game"));
+        .block(panel_block("Game"));
     frame.render_widget(body, area);
 }
 
@@ -853,13 +1100,28 @@ fn render_command(
     view_mode: CliViewMode,
     prompt: &str,
     input: &str,
+    show_help: bool,
 ) {
     let inner_width = usize::from(area.width.saturating_sub(2));
-    let help = match view_mode {
-        CliViewMode::Normal => "Text: Esc clears, Enter submits. Select: arrows/tab, Enter.",
-        CliViewMode::Snapshot => "s: save latest state",
-    };
+    let input = Paragraph::new(command_panel_lines(
+        view_mode,
+        prompt,
+        input,
+        show_help,
+        inner_width,
+    ))
+    .wrap(Wrap { trim: false })
+    .block(panel_block("Command"));
+    frame.render_widget(input, area);
+}
 
+fn command_panel_lines(
+    view_mode: CliViewMode,
+    prompt: &str,
+    input: &str,
+    show_help: bool,
+    inner_width: usize,
+) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     if !prompt.is_empty() {
         lines.push(Line::from(fit_command_text(prompt, inner_width)));
@@ -870,12 +1132,41 @@ fn render_command(
             Style::default().fg(Color::Yellow),
         )));
     }
-    lines.push(Line::from(fit_command_text(help, inner_width)));
+    if show_help {
+        lines.extend(command_help_lines(view_mode, inner_width));
+    }
+    lines
+}
 
-    let input = Paragraph::new(lines)
-        .wrap(Wrap { trim: false })
-        .block(Block::default().borders(Borders::ALL).title("Command"));
-    frame.render_widget(input, area);
+fn command_panel_line_count(
+    view_mode: CliViewMode,
+    prompt: &str,
+    input: &str,
+    show_help: bool,
+) -> usize {
+    command_panel_lines(view_mode, prompt, input, show_help, usize::MAX).len()
+}
+
+fn command_help_lines(view_mode: CliViewMode, width: usize) -> Vec<Line<'static>> {
+    let help = match view_mode {
+        CliViewMode::Normal => [
+            "roll/r, end/e, buy dev/bd",
+            "build: br, bs, bc or build road|settlement|city ...",
+            "bank-trade: bt or bank-trade give take G4|G3|S2",
+            "dev: kn, yp, m, rb or use knight|yop|monopoly|roadbuild ...",
+            "drop: five resource counts or drop",
+        ]
+        .as_slice(),
+        CliViewMode::Snapshot => ["s saves the latest exact state snapshot"].as_slice(),
+    };
+    help.iter()
+        .map(|line| {
+            Line::from(Span::styled(
+                fit_command_text(line, width),
+                Style::default().fg(Color::Gray),
+            ))
+        })
+        .collect()
 }
 
 fn fit_command_text(text: &str, width: usize) -> String {
@@ -908,5 +1199,37 @@ fn observer_status_suffix(event_count: u64, summary: Option<&str>) -> String {
         (0, _) => String::new(),
         (count, Some(summary)) => format!("  | events:{count} {summary}"),
         (count, None) => format!("  | events:{count}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CliViewMode, command_panel_lines};
+
+    #[test]
+    fn command_panel_hides_action_hints_by_default() {
+        let rendered = command_panel_lines(CliViewMode::Normal, "command: ", "", false, 80)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("command:"));
+        assert!(!rendered.contains("roll"));
+        assert!(!rendered.contains("bank-trade"));
+        assert!(!rendered.contains("help"));
+    }
+
+    #[test]
+    fn command_panel_shows_action_hints_after_help_command() {
+        let rendered = command_panel_lines(CliViewMode::Normal, "command: ", "", true, 80)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("roll"));
+        assert!(rendered.contains("bank-trade"));
+        assert!(rendered.contains("dev"));
     }
 }

@@ -5,7 +5,8 @@ mod protocol;
 pub use client::{RemoteCliAgent, RemoteCliObserver};
 pub use model::{
     UiBoard, UiModel, UiOmniscient, UiPlayerBuilds, UiPrivatePlayer, UiPublicBank,
-    UiPublicBankResources, UiPublicGame, UiPublicPlayer, UiPublicPlayerResources, ui_model_summary,
+    UiPublicBankDevCards, UiPublicBankResources, UiPublicGame, UiPublicPlayer,
+    UiPublicPlayerResources, ui_model_summary,
 };
 pub use protocol::{
     CliRole, CliToHost, DecisionRequestEnvelope, DecisionRequestFrame, DecisionResponseFrame,
