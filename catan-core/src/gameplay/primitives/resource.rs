@@ -135,7 +135,7 @@ impl ResourceSet {
     ) -> Result<(), ResourceCollectionError> {
         let remainder = from.try_sub(&resources)?;
         *from = remainder;
-        *to += &resources;
+        *to += resources;
         Ok(())
     }
 
@@ -158,7 +158,7 @@ impl ResourceSet {
     }
 
     pub fn total(&self) -> u16 {
-        Resource::iter().into_iter().map(|r| self[r] as u16).sum()
+        Resource::iter().map(|r| self[r]).sum()
     }
 
     pub fn checked_sub(&self, rhs: &ResourceSet) -> Option<ResourceSet> {
@@ -189,7 +189,7 @@ impl ResourceSet {
     }
 
     pub fn unroll(&self) -> impl Iterator<Item = (Resource, u16)> {
-        Resource::iter().into_iter().map(|r| (r, self[r]))
+        Resource::iter().map(|r| (r, self[r]))
     }
 }
 
@@ -197,14 +197,6 @@ impl Add for ResourceSet {
     type Output = ResourceSet;
 
     fn add(self, rhs: ResourceSet) -> Self::Output {
-        self + &rhs
-    }
-}
-
-impl Add<&ResourceSet> for ResourceSet {
-    type Output = ResourceSet;
-
-    fn add(self, rhs: &ResourceSet) -> Self::Output {
         ResourceSet {
             brick: self.brick + rhs.brick,
             wood: self.wood + rhs.wood,
@@ -217,13 +209,7 @@ impl Add<&ResourceSet> for ResourceSet {
 
 impl AddAssign for ResourceSet {
     fn add_assign(&mut self, rhs: ResourceSet) {
-        *self += &rhs;
-    }
-}
-
-impl AddAssign<&ResourceSet> for ResourceSet {
-    fn add_assign(&mut self, rhs: &ResourceSet) {
-        *self = *self + rhs;
+        *self = *self + rhs
     }
 }
 

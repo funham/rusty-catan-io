@@ -16,6 +16,6 @@ impl<T: HasPos> HasPos for &T {
     type Pos = <T as HasPos>::Pos;
 
     fn pos(&self) -> Self::Pos {
-        <T as HasPos>::pos(&self)
+        <T as HasPos>::pos(self)
     }
 }

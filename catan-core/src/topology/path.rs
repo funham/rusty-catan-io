@@ -21,6 +21,9 @@ pub mod repr {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct Path<Repr: repr::Representation = repr::Canon>(FixedSet<Hex, 2>, PhantomData<Repr>);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PathEndpointError;
+
 impl Serialize for Path {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -73,10 +76,10 @@ impl TryFrom<(Intersection, Intersection)> for Path {
             return Err(EdgeConstructError::NotNeighboringVertices);
         };
 
-        Ok(Self {
-            0: FixedSet::try_from([inter[0], inter[1]]).unwrap(),
-            1: PhantomData::default(),
-        })
+        Ok(Self(
+            FixedSet::try_from([inter[0], inter[1]]).unwrap(),
+            PhantomData,
+        ))
     }
 }
 
@@ -91,10 +94,7 @@ impl TryFrom<(Intersection, Intersection)> for Path<repr::Dual> {
 
     fn try_from(value: (Intersection, Intersection)) -> Result<Self, Self::Error> {
         match symmetric_difference_hexes_3(value.0.as_arr(), value.1.as_arr()) {
-            Some([a, b]) => Ok(Self {
-                0: [a, b].try_into().unwrap(),
-                1: PhantomData::default(),
-            }),
+            Some([a, b]) => Ok(Self([a, b].try_into().unwrap(), PhantomData)),
             None => Err(EdgeDualConstructError::NotNeighboringVertices),
         }
     }
@@ -107,10 +107,7 @@ impl TryFrom<(Hex, Hex)> for Path<repr::Dual> {
         let (h1, h2) = value;
 
         match common_neighbors(h1, h2) {
-            Some(_) => Ok(Self(
-                FixedSet::try_from([h1, h2]).unwrap(),
-                PhantomData::default(),
-            )),
+            Some(_) => Ok(Self(FixedSet::try_from([h1, h2]).unwrap(), PhantomData)),
             _ => Err(EdgeDualConstructError::NotAdjacentHexes),
         }
     }
@@ -136,10 +133,10 @@ impl Path<repr::Dual> {
 impl Path<repr::Canon> {
     pub(crate) fn from_adjacent_hexes(h1: Hex, h2: Hex) -> Self {
         debug_assert_eq!(h1.distance(&h2), 1);
-        Self {
-            0: FixedSet::try_from([h1, h2]).expect("adjacent path hexes should be unique"),
-            1: PhantomData::default(),
-        }
+        Self(
+            FixedSet::try_from([h1, h2]).expect("adjacent path hexes should be unique"),
+            PhantomData,
+        )
     }
 
     pub fn as_set(&self) -> FixedSet<Hex, 2> {
@@ -152,7 +149,7 @@ impl Path<repr::Canon> {
     }
 
     pub fn as_arr(&self) -> [Hex; 2] {
-        self.0.clone().into()
+        self.0.into()
     }
 
     pub fn axis(&self) -> Axis {
@@ -165,7 +162,7 @@ impl Path<repr::Canon> {
 
         Path::<repr::Dual>(
             FixedSet::try_from([d1, d2]).expect("path dual hexes should be unique"),
-            PhantomData::default(),
+            PhantomData,
         )
     }
 
@@ -184,11 +181,11 @@ impl Path<repr::Canon> {
     }
 
     /// Err if `v` is not a part of a path
-    pub fn opposite(&self, v: Intersection) -> Result<Intersection, ()> {
+    pub fn opposite(&self, v: Intersection) -> Result<Intersection, PathEndpointError> {
         match self.intersections() {
             [v1, v2] if v1 == v => Ok(v2),
             [v1, v2] if v2 == v => Ok(v1),
-            _ => Err(()),
+            _ => Err(PathEndpointError),
         }
     }
 

@@ -1291,7 +1291,7 @@ fn initial_resources(board: &BoardLayout, settlement: Establishment) -> Resource
         .filter(|hex| hex.norm() <= board.arrangement.radius() as usize)
     {
         if let Tile::Resource { resource, .. } = board.arrangement[hex] {
-            resources += &resource.into();
+            resources += resource.into();
         }
     }
     resources

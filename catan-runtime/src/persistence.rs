@@ -125,7 +125,7 @@ impl OutputObserver for PersistenceObserver {
         }
 
         if let Some(policy) = self.checkpoints.as_mut()
-            && self.event_seq % policy.every == 0
+            && self.event_seq.is_multiple_of(policy.every)
             && let Err(err) = policy
                 .store
                 .write_checkpoint_at(frame.engine, self.event_seq)
@@ -179,11 +179,11 @@ mod tests {
         let index = GameIndex::rebuild_table(state);
         let visibility = VisibilityConfig::default();
         let factory = ContextFactory {
-            state: &state,
+            state,
             index: &index,
             visibility: &visibility,
         };
-        let output = GameOutput::Event(GameEventRecord {
+        let output = GameOutput::event(GameEventRecord {
             event: GameEvent::GameStarted,
             visibility: EventVisibility::Public,
         });
@@ -218,13 +218,13 @@ mod tests {
         let index = GameIndex::rebuild_table(state);
         let visibility = VisibilityConfig::default();
         let factory = ContextFactory {
-            state: &state,
+            state,
             index: &index,
             visibility: &visibility,
         };
 
         for _ in 0..3 {
-            let output = GameOutput::Event(GameEventRecord {
+            let output = GameOutput::event(GameEventRecord {
                 event: GameEvent::GameStarted,
                 visibility: EventVisibility::Public,
             });

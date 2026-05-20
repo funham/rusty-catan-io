@@ -52,11 +52,8 @@ impl Mul<i32> for CursorPosition {
     }
 }
 
-impl Into<CursorPosition> for (i32, i32) {
-    fn into(self) -> CursorPosition {
-        CursorPosition {
-            x: self.0,
-            y: self.1,
-        }
+impl From<(i32, i32)> for CursorPosition {
+    fn from(val: (i32, i32)) -> Self {
+        CursorPosition { x: val.0, y: val.1 }
     }
 }

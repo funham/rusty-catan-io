@@ -13,6 +13,9 @@ use crate::{
 // (better than v -> {v}, cause edge's invariant enforces correctness of a graph)
 
 type Edges = SmallSet<Path, { capacities::PLAYER_ROADS_INLINE }>;
+type IndexedEdge = (usize, usize);
+type VertexAdjacency = SmallVec<[IndexedEdge; 3]>;
+type IndexedAdjacency = SmallVec<[VertexAdjacency; 30]>;
 
 /// Not oriented graph
 #[derive(Debug, Default, Clone)]
@@ -50,7 +53,7 @@ impl RoadGraph {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = Road> {
-        self.edges.iter().map(|p| Road { path: p.clone() })
+        self.edges.iter().map(|p| Road { path: *p })
     }
 
     pub fn edges(&self) -> &Edges {
@@ -76,20 +79,14 @@ impl RoadGraph {
     fn insert_edge_unchecked(&mut self, edge: &Path) {
         let [v1, v2] = edge.intersections();
         let _ = match self.out.get_mut(&v1) {
-            Some(edges) => edges.insert(edge.clone()),
-            None => self
-                .out
-                .insert(v1, SmallSet::from([edge.clone()]))
-                .is_none(),
+            Some(edges) => edges.insert(*edge),
+            None => self.out.insert(v1, SmallSet::from([*edge])).is_none(),
         };
         let _ = match self.out.get_mut(&v2) {
-            Some(edges) => edges.insert(edge.clone()),
-            None => self
-                .out
-                .insert(v2, SmallSet::from([edge.clone()]))
-                .is_none(),
+            Some(edges) => edges.insert(*edge),
+            None => self.out.insert(v2, SmallSet::from([*edge])).is_none(),
         };
-        self.edges.insert(edge.clone());
+        self.edges.insert(*edge);
     }
 
     /// Find the longest sequence of non-repeating roads (edges can't repeat, vertices can).
@@ -211,7 +208,7 @@ impl RoadGraph {
             let mut current_path = Vec::new();
 
             self.dfs_find_longest_trail(
-                start_edge.clone(),
+                *start_edge,
                 &mut visited_edges,
                 &mut current_path,
                 &mut best_path,
@@ -231,8 +228,8 @@ impl RoadGraph {
         best_path: &mut Vec<Path>,
         max_length: &mut usize,
     ) {
-        visited_edges.insert(current_edge.clone());
-        current_path.push(current_edge.clone());
+        visited_edges.insert(current_edge);
+        current_path.push(current_edge);
 
         // Check if this is the longest path so far
         if current_path.len() > *max_length {
@@ -299,7 +296,7 @@ impl RoadGraph {
 
             // Add all unvisited neighbors to the stack
             if let Some(edges) = self.out.get(&current) {
-                for edge in edges.iter().cloned() {
+                for edge in edges {
                     let neighbor = edge.opposite_or_panic(current);
                     if !visited.contains(&neighbor) {
                         stack.push(neighbor);
@@ -314,7 +311,7 @@ impl RoadGraph {
 
 fn intern_vertex(
     vertices: &mut SmallVec<[Intersection; 30]>,
-    adjacency: &mut SmallVec<[SmallVec<[(usize, usize); 3]>; 30]>,
+    adjacency: &mut IndexedAdjacency,
     vertex: Intersection,
 ) -> usize {
     if let Some(index) = vertices.iter().position(|existing| *existing == vertex) {
@@ -384,7 +381,7 @@ mod tests {
 
         assert_eq!(graph.find_longest_trail_length(), 2);
         let longest = graph.find_longest_trail();
-        assert!(longest == vec![p1.clone(), p2.clone()] || longest == vec![p2, p1]);
+        assert!(longest == vec![p1, p2] || longest == vec![p2, p1]);
     }
 
     #[test]
@@ -474,8 +471,8 @@ mod tests {
             path(h(2, 0), h(3, 0)),
         ];
 
-        for road in roads.iter().cloned() {
-            graph.insert_validated_edge(&road);
+        for road in &roads {
+            graph.insert_validated_edge(road);
         }
 
         let iter_roads: Vec<Path> = graph.iter().map(|r| r.path).collect();
@@ -556,14 +553,14 @@ mod tests {
         let mut graph = RoadGraph::default();
 
         // Add several roads
-        let roads = vec![
+        let roads = [
             path(h(0, 0), h(1, 0)),
             path(h(1, 0), h(1, -1)),
             path(h(1, -1), h(2, -1)),
         ];
 
-        for road in roads.iter().cloned() {
-            graph.insert_validated_edge(&road);
+        for road in &roads {
+            graph.insert_validated_edge(road);
         }
 
         // Verify internal structure

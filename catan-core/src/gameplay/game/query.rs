@@ -51,15 +51,19 @@ impl<'a> GameQuery<'a> {
     }
 
     pub fn longest_road_vp(&self, player_id: PlayerId) -> u16 {
-        self.has_longest_road(player_id)
-            .then_some(constants::vp::LONGEST_ROAD_VP)
-            .unwrap_or(0)
+        if self.has_longest_road(player_id) {
+            constants::vp::LONGEST_ROAD_VP
+        } else {
+            0
+        }
     }
 
     pub fn largest_army_vp(&self, player_id: PlayerId) -> u16 {
-        self.has_largest_army(player_id)
-            .then_some(constants::vp::LARGEST_ARMY_VP)
-            .unwrap_or(0)
+        if self.has_largest_army(player_id) {
+            constants::vp::LARGEST_ARMY_VP
+        } else {
+            0
+        }
     }
 
     pub fn award_vp(&self, player_id: PlayerId) -> u16 {

@@ -83,7 +83,7 @@ pub enum HostToCli {
     DecisionRequest(DecisionRequestFrame),
     Output {
         output: GameOutput,
-        view: UiModel,
+        view: Box<UiModel>,
         legal: LegalDecisionOptions,
     },
     Event {

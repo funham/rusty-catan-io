@@ -98,16 +98,11 @@ impl Default for PublicPlayerResources {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum PublicVpKnowledge {
+    #[default]
     Hidden,
     Exact(u16),
-}
-
-impl Default for PublicVpKnowledge {
-    fn default() -> Self {
-        Self::Hidden
-    }
 }
 
 #[derive(Debug, Clone, Default)]

@@ -5,7 +5,7 @@ use crate::gameplay::game::{
 };
 
 pub fn project_event(event: GameEvent) -> GameOutput {
-    GameOutput::Event(GameEventRecord {
+    GameOutput::event(GameEventRecord {
         visibility: EventVisibility::for_event(&event),
         event,
     })

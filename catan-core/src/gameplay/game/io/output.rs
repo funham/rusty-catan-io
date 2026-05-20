@@ -28,7 +28,7 @@ impl GameEventRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GameOutput {
-    Event(GameEventRecord),
+    Event(Box<GameEventRecord>),
     DecisionOpened(DecisionRequest),
     DecisionClosed {
         decision_id: DecisionId,
@@ -46,6 +46,12 @@ pub enum CommandRejectionReason {
     WrongPhase,
     GameEnded,
     IllegalCommand(String),
+}
+
+impl GameOutput {
+    pub fn event(record: GameEventRecord) -> Self {
+        Self::Event(Box::new(record))
+    }
 }
 
 #[cfg(test)]

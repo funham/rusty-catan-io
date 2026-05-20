@@ -217,7 +217,6 @@ pub fn rand_choose_player_to_rob(
     let id = context
         .public
         .players_on_hex(robber_pos)
-        .into_iter()
         .filter(|id| *id != context.actor)
         .choose(rng)
         .expect("controller must forbid this case");
@@ -396,7 +395,7 @@ fn rand_dev_card_usage_of_kind(
                         let requested = [first, second].into_iter().fold(
                             ResourceSet::default(),
                             |mut acc, resource| {
-                                acc += &resource.into();
+                                acc += resource.into();
                                 acc
                             },
                         );
@@ -448,12 +447,7 @@ pub fn rand_drop_half(context: PlayerDecisionContext<'_>, rng: &mut impl Rng) ->
         Some(search) => {
             let mut to_drop = ResourceSet::default();
             let search = search.make_owned();
-            let mut res = search
-                .state
-                .players
-                .get(search.root_player)
-                .resources()
-                .clone();
+            let mut res = *search.state.players.get(search.root_player).resources();
 
             for _ in 0..number_to_drop {
                 let card = pop_random_resource(&mut res, rng)

@@ -20,15 +20,15 @@ impl From<(i32, i32)> for Hex {
     }
 }
 
-impl Into<(i32, i32)> for Hex {
-    fn into(self) -> (i32, i32) {
-        (self.q, self.r)
+impl From<Hex> for (i32, i32) {
+    fn from(val: Hex) -> Self {
+        (val.q, val.r)
     }
 }
 
-impl Into<(i32, i32, i32)> for Hex {
-    fn into(self) -> (i32, i32, i32) {
-        (self.q, self.r, self.get_s())
+impl From<Hex> for (i32, i32, i32) {
+    fn from(val: Hex) -> Self {
+        (val.q, val.r, val.get_s())
     }
 }
 
@@ -128,12 +128,12 @@ impl Hex {
     pub const fn neighbors(&self) -> [Hex; 6] {
         let (q, r) = (self.q, self.r);
         [
-            Self::new(q + 1, r + 0),
+            Self::new(q + 1, r),
             Self::new(q + 1, r - 1),
-            Self::new(q + 0, r - 1),
-            Self::new(q - 1, r + 0),
+            Self::new(q, r - 1),
+            Self::new(q - 1, r),
             Self::new(q - 1, r + 1),
-            Self::new(q + 0, r + 1),
+            Self::new(q, r + 1),
         ]
     }
 
@@ -199,7 +199,7 @@ impl Hex {
 
     pub fn direction(index: usize) -> Hex {
         static CACHE: OnceLock<[Hex; 6]> = OnceLock::new();
-        CACHE.get_or_init(|| Self::directions())[index]
+        CACHE.get_or_init(Self::directions)[index]
     }
 
     pub const fn index(&self) -> HexIndex {
@@ -334,7 +334,7 @@ impl HexIndex {
     }
 
     pub fn spiral() -> impl Iterator<Item = Hex> {
-        (0..).map(|i| Self::spiral_to_hex(i))
+        (0..).map(Self::spiral_to_hex)
     }
 
     pub fn spiral_to_hex(index: usize) -> Hex {
@@ -369,15 +369,11 @@ impl HexIndex {
         let radius = radius as i32;
         let q = hex.q;
         let r = hex.r;
-        let offset = if r == radius {
-            q + radius
-        } else if q + r == radius {
+        let offset = if r == radius || q + r == radius {
             radius + q
         } else if q == radius {
             2 * radius - r
-        } else if r == -radius {
-            4 * radius - q
-        } else if q + r == -radius {
+        } else if r == -radius || q + r == -radius {
             4 * radius - q
         } else if q == -radius {
             5 * radius + r

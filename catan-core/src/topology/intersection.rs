@@ -34,8 +34,8 @@ impl fmt::Debug for Intersection {
 
         let mut dbg = f.debug_struct("Intersection");
 
-        for i in 0..3 {
-            dbg.field(&format!("{}", i), &Into::<(i32, i32)>::into(hs[i]));
+        for (i, h) in hs.iter().enumerate() {
+            dbg.field(&format!("{}", i), &Into::<(i32, i32)>::into(*h));
         }
 
         dbg.finish()
@@ -86,9 +86,7 @@ impl TryFrom<[Hex; 3]> for Intersection {
 impl Intersection {
     pub(crate) fn from_adjacent_hexes(value: [Hex; 3]) -> Self {
         debug_assert!(Self::are_adjacent_hexes(value));
-        Self {
-            0: FixedSet::try_from(value).expect("adjacent intersection hexes should be unique"),
-        }
+        Self(FixedSet::try_from(value).expect("adjacent intersection hexes should be unique"))
     }
 
     fn are_adjacent_hexes(value: [Hex; 3]) -> bool {

@@ -340,8 +340,10 @@ fn build_initial_state(
 ) -> Result<SetupGameState, String> {
     match config {
         FieldConfig::Default => {
-            let mut field = catan_core::gameplay::field::state::FieldBuildParam::default();
-            field.n_players = player_count;
+            let field = catan_core::gameplay::field::state::FieldBuildParam {
+                n_players: player_count,
+                ..Default::default()
+            };
             Ok(SetupGameState::new_with_seed(field, seed))
         }
         FieldConfig::LayoutRef { path } => {

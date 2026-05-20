@@ -87,9 +87,9 @@ fn game_started(lifecycle: &mut EngineState) -> Result<(), EngineApplyError> {
     let EngineState::Unstarted(unstarted) = lifecycle else {
         return Err(EngineApplyError::WrongState);
     };
-    let mut setup = unstarted.clone().into_setup();
+    let mut setup = unstarted.as_ref().clone().into_setup();
     setup.stats.game_started += 1;
-    *lifecycle = EngineState::Setup(setup);
+    *lifecycle = EngineState::Setup(Box::new(setup));
     Ok(())
 }
 
@@ -102,9 +102,9 @@ fn apply_setup_or_playing(
         EngineState::Setup(setup) => {
             apply_setup(setup, event)?;
             if let GameEvent::TurnStarted { player_id, .. } = event {
-                let mut active = setup.clone().into_playing();
+                let mut active = setup.as_ref().clone().into_playing();
                 turn_started(&mut active, *player_id);
-                *lifecycle = EngineState::Playing(active);
+                *lifecycle = EngineState::Playing(Box::new(active));
             }
             Ok(())
         }
@@ -595,8 +595,8 @@ fn robber_moved(active: &mut PlayingEngine, hex: Hex) {
 
 fn finish(lifecycle: &mut EngineState, result: &GameResult) -> Result<(), EngineApplyError> {
     let mut active = match lifecycle {
-        EngineState::Playing(active) => active.clone(),
-        EngineState::Setup(setup) => setup.clone().into_playing(),
+        EngineState::Playing(active) => active.as_ref().clone(),
+        EngineState::Setup(setup) => setup.as_ref().clone().into_playing(),
         _ => return Err(EngineApplyError::WrongState),
     };
     match result {
@@ -605,11 +605,11 @@ fn finish(lifecycle: &mut EngineState, result: &GameResult) -> Result<(), Engine
             active.stats.games_interrupted += 1;
         }
     }
-    *lifecycle = EngineState::Finished(FinishedEngine {
+    *lifecycle = EngineState::Finished(Box::new(FinishedEngine {
         game: active.game,
         index: active.index,
         result: result.clone(),
         stats: active.stats,
-    });
+    }));
     Ok(())
 }

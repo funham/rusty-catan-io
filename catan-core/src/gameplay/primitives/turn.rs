@@ -24,7 +24,7 @@ impl<CycleType> GameTurn<CycleType> {
             n_players,
             rounds_played: 0,
             turn_index: 0,
-            _p: PhantomData::default(),
+            _p: PhantomData,
         }
     }
 
@@ -37,7 +37,7 @@ impl<CycleType> GameTurn<CycleType> {
             n_players,
             rounds_played: 0,
             turn_index: initial_index,
-            _p: PhantomData::default(),
+            _p: PhantomData,
         })
     }
 
@@ -123,13 +123,13 @@ impl GameTurn<BackAndForthCycle> {
             n_players: self.n_players,
             rounds_played: 0,
             turn_index: 0,
-            _p: PhantomData::default(),
+            _p: PhantomData,
         }
     }
 }
 
-impl<T> Into<PlayerId> for GameTurn<T> {
-    fn into(self) -> PlayerId {
-        self.get_turn_index()
+impl<T> From<GameTurn<T>> for PlayerId {
+    fn from(val: GameTurn<T>) -> Self {
+        val.get_turn_index()
     }
 }

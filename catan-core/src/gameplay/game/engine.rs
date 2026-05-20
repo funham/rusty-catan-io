@@ -74,7 +74,7 @@ pub struct GameStateSnapshot {
 impl GameStateSnapshot {
     pub fn from_state(state: &GameState) -> Self {
         Self {
-            board_state: state.board_state.clone(),
+            board_state: state.board_state,
             turn: state.turn.clone(),
             bank: state.bank.clone(),
             players: state.players.clone(),
@@ -328,12 +328,12 @@ impl GameEngine {
         if let EngineState::Playing(active) = &self.core {
             use crate::gameplay::game::engine::lifecycle::FinishedEngine;
 
-            self.core = EngineState::Finished(FinishedEngine {
+            self.core = EngineState::Finished(Box::new(FinishedEngine {
                 game: active.game.clone(),
                 index: active.index.clone(),
                 result,
                 stats: active.stats,
-            });
+            }));
         }
     }
 
@@ -361,10 +361,12 @@ use primitives::{bank::BankResourceExchangeError, resource::ResourceSet, trade::
 impl GameEngine {
     fn force_playing_for_tests(&mut self) {
         let next = match &self.core {
-            EngineState::Unstarted(unstarted) => Some(EngineState::Playing(
-                unstarted.clone().into_setup().into_playing(),
-            )),
-            EngineState::Setup(setup) => Some(EngineState::Playing(setup.clone().into_playing())),
+            EngineState::Unstarted(unstarted) => Some(EngineState::Playing(Box::new(
+                unstarted.as_ref().clone().into_setup().into_playing(),
+            ))),
+            EngineState::Setup(setup) => Some(EngineState::Playing(Box::new(
+                setup.as_ref().clone().into_playing(),
+            ))),
             _ => None,
         };
         if let Some(next) = next {

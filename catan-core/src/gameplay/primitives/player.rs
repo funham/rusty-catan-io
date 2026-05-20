@@ -189,7 +189,7 @@ impl PlayerData {
     }
 
     pub fn receive(&mut self, resources: ResourceSet) {
-        self.resources += &resources;
+        self.resources += resources;
     }
 
     pub fn pay<E>(&mut self, resources: ResourceSet, err: E) -> Result<(), E> {
@@ -216,10 +216,7 @@ impl<'a> PlayerDataProxy<'a> {
     }
 
     pub fn has_largest_army(&self) -> bool {
-        match self.container.best_army {
-            Some(id) if id == self.player_id => true,
-            _ => false,
-        }
+        matches!(self.container.best_army, Some(id) if id == self.player_id)
     }
 }
 

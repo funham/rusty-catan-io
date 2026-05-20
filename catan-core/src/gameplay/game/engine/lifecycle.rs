@@ -20,10 +20,10 @@ pub type PendingDiscards = SmallVec<[PlayerId; 8]>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EngineState {
-    Unstarted(UnstartedEngine),
-    Setup(SetupEngine),
-    Playing(PlayingEngine),
-    Finished(FinishedEngine),
+    Unstarted(Box<UnstartedEngine>),
+    Setup(Box<SetupEngine>),
+    Playing(Box<PlayingEngine>),
+    Finished(Box<FinishedEngine>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -126,18 +126,18 @@ impl EngineState {
     pub fn unstarted(init: SetupGameState) -> Self {
         let (table, setup_turn) = init.into_setup_parts();
         let index = GameIndex::rebuild_table(&table);
-        Self::Unstarted(UnstartedEngine {
+        Self::Unstarted(Box::new(UnstartedEngine {
             table,
             setup_turn,
             index,
             next_decision_id: 0,
             stats: GameRunStats::default(),
-        })
+        }))
     }
 
     pub fn playing(game: GameState) -> Self {
         let index = GameIndex::rebuild(&game);
-        Self::Playing(PlayingEngine {
+        Self::Playing(Box::new(PlayingEngine {
             game,
             index,
             pending: PendingDecisions::default(),
@@ -146,7 +146,7 @@ impl EngineState {
             stats: GameRunStats::default(),
             invalid_actions: 0,
             pending_discards: SmallVec::new(),
-        })
+        }))
     }
 
     pub fn table(&self) -> &TableState {

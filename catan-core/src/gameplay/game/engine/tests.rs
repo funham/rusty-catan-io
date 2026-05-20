@@ -725,7 +725,7 @@ fn decider_use_dev_card_emits_usage_and_post_dev_card_decision() {
             P0,
             decision.id(),
             PlayerCommand::InitCommand(crate::gameplay::game::command::InitCommand::UseDevCard(
-                usage.clone(),
+                usage,
             )),
         ),
     );

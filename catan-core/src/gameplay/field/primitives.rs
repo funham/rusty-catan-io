@@ -68,11 +68,11 @@ impl BoardArrangement {
     }
 
     pub fn hex_iter(&self) -> impl Iterator<Item = Hex> {
-        (0..self.tiles.len()).map(|index| HexIndex::spiral_to_hex(index))
+        (0..self.tiles.len()).map(HexIndex::spiral_to_hex)
     }
 
     pub fn hex_iter_with_ocean(&self) -> impl Iterator<Item = Hex> {
-        (0..HexIndex::spiral_start_of_ring(4)).map(|index| HexIndex::spiral_to_hex(index))
+        (0..HexIndex::spiral_start_of_ring(4)).map(HexIndex::spiral_to_hex)
     }
 
     pub fn hex_enum_iter(&self) -> impl Iterator<Item = (Hex, Tile)> {
@@ -105,6 +105,10 @@ impl BoardArrangement {
 
     pub fn len(&self) -> usize {
         self.tiles.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.tiles.is_empty()
     }
 }
 

@@ -278,13 +278,10 @@ fn best_settlement_build(
 
 fn best_road_build(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> Option<Build> {
     let roads = legal::legal_road_spots(context, player_id);
-    let Some(resources_after_road) = context
+    let resources_after_road = context
         .private
         .resources
-        .checked_sub(&constants::costs::ROAD)
-    else {
-        return None;
-    };
+        .checked_sub(&constants::costs::ROAD)?;
 
     roads.into_iter().max_by_key(|build| {
         let Build::Road(road) = build else {
@@ -321,20 +318,13 @@ fn bank_trade_objective_score(
         return (0, 0);
     }
 
-    let Some(resources_after_trade) = resources_after_bank_trade(context.private.resources, trade)
+    let Some(resources_after_trade) =
+        legal::resources_after_bank_trade(context.private.resources, trade)
     else {
         return (0, 0);
     };
 
     next_objective_score_for_resources(context, player_id, &resources_after_trade)
-}
-
-// TODO: move to legal
-fn resources_after_bank_trade(resources: &ResourceSet, trade: BankTrade) -> Option<ResourceSet> {
-    let mut resources = *resources;
-    resources.subtract_in_place(&trade.to_bank()).ok()?;
-    resources += &trade.from_bank();
-    Some(resources)
 }
 
 fn next_objective_score_for_resources(

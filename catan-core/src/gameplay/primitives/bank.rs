@@ -21,7 +21,7 @@ impl Bank {
     }
 
     pub fn deposit(&mut self, resources: ResourceSet) {
-        self.resources += &resources;
+        self.resources += resources;
     }
 
     pub fn withdraw(&mut self, resources: ResourceSet) -> Result<(), BankResourceExchangeError> {
@@ -59,7 +59,7 @@ impl Default for Bank {
 
         let dev_cards = constants::bank::DEFAULT_DEV_CARDS
             .unroll()
-            .flat_map(|(card, count)| std::iter::repeat(card).take(count as usize))
+            .flat_map(|(card, count)| std::iter::repeat_n(card, count as usize))
             .collect();
 
         Self {

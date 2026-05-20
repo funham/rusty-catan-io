@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap};
+use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -77,7 +77,6 @@ impl BoardIndex {
             })
             .next()
             .unwrap()
-            .clone()
     }
 }
 
@@ -180,7 +179,8 @@ pub struct BoardLayout {
 
 impl BoardLayout {
     pub const fn field_size_by_radius(radius: usize) -> usize {
-        1 + 3 * radius * (radius + 1) // TODO: use `HexIndex`` instead
+        // TODO: use `HexIndex`` instead
+        1 + 3 * radius * (radius + 1)
     }
 
     pub fn new(param: FieldBuildParam) -> Self {

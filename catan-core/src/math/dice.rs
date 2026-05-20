@@ -51,11 +51,9 @@ impl DiceRoll {
         Self(12),
     ];
 
+    /// # Safety
+    /// val should be in [2;12]
     pub const unsafe fn new_unchecked(val: u8) -> Self {
-        Self(val)
-    }
-
-    pub const unsafe fn new_uncheked(val: u8) -> Self {
         Self(val)
     }
 

@@ -94,15 +94,15 @@ impl<T: Ord, const N: usize> TryFrom<Vec<T>> for FixedSet<T, N> {
     }
 }
 
-impl<T: Ord, const N: usize> Into<[T; N]> for FixedSet<T, N> {
-    fn into(self) -> [T; N] {
-        self.data_
+impl<T: Ord, const N: usize> From<FixedSet<T, N>> for [T; N] {
+    fn from(val: FixedSet<T, N>) -> Self {
+        val.data_
     }
 }
 
-impl<T: Ord, const N: usize> Into<BTreeSet<T>> for FixedSet<T, N> {
-    fn into(self) -> BTreeSet<T> {
-        self.data_.into_iter().collect()
+impl<T: Ord, const N: usize> From<FixedSet<T, N>> for BTreeSet<T> {
+    fn from(val: FixedSet<T, N>) -> Self {
+        val.data_.into_iter().collect()
     }
 }
 

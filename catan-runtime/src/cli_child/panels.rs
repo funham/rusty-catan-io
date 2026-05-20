@@ -271,7 +271,7 @@ fn bank_resources_line(model: &UiModel) -> Line<'static> {
             push_resource_values(&mut spans, resources, |count| count.to_string());
         }
         UiPublicBankResources::Approx(resources) => {
-            for (idx, resource) in Resource::iter().into_iter().enumerate() {
+            for (idx, resource) in Resource::iter().enumerate() {
                 if idx > 0 {
                     spans.push(Span::raw(" "));
                 }
@@ -562,7 +562,7 @@ pub(crate) fn resource_card_lines(
     let mut bottom = Vec::new();
     let mut selected = Vec::new();
 
-    for (idx, resource) in Resource::iter().into_iter().enumerate() {
+    for (idx, resource) in Resource::iter().enumerate() {
         if idx > 0 {
             for spans in [&mut top, &mut middle, &mut bottom, &mut selected] {
                 spans.push(Span::raw(" "));
@@ -680,7 +680,7 @@ fn drop_resource_card_lines(
     let mut lines = resource_card_lines(resources, None);
     let mut selector = Vec::new();
     let mut selected_counts = Vec::new();
-    for (idx, resource) in Resource::iter().into_iter().enumerate() {
+    for (idx, resource) in Resource::iter().enumerate() {
         if idx > 0 {
             selector.push(Span::raw(" "));
             selected_counts.push(Span::raw(" "));
@@ -750,7 +750,7 @@ pub(crate) fn resource_picker_lines(selected_resource: usize) -> Vec<Line<'stati
 
 fn resource_selector_line(selected_resource: usize) -> Line<'static> {
     let mut selector = Vec::new();
-    for (idx, resource) in Resource::iter().into_iter().enumerate() {
+    for (idx, resource) in Resource::iter().enumerate() {
         if idx > 0 {
             selector.push(Span::raw(" "));
         }
@@ -842,7 +842,7 @@ fn push_resource_values(
     resources: &ResourceSet,
     format_count: impl Fn(u16) -> String,
 ) {
-    for (idx, resource) in Resource::iter().into_iter().enumerate() {
+    for (idx, resource) in Resource::iter().enumerate() {
         if idx > 0 {
             spans.push(Span::raw(" "));
         }

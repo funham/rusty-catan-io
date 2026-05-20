@@ -15,7 +15,7 @@ use crate::{
     topology::{Intersection, Path},
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct GameIndex {
     pub all_builds: Vec<BuildCollection>,
     pub longest_road_lengths: Vec<u16>,
@@ -239,18 +239,6 @@ impl GameIndex {
             Some(best)
         } else {
             None
-        }
-    }
-}
-
-impl Default for GameIndex {
-    fn default() -> Self {
-        Self {
-            all_builds: Vec::new(),
-            longest_road_lengths: Vec::new(),
-            longest_road_owner: None,
-            largest_army_owner: None,
-            ports_acquired: Vec::new(),
         }
     }
 }

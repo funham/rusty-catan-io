@@ -35,10 +35,11 @@ pub(crate) fn move_hex_by_key(current: Hex, key: KeyCode, board_hexes: &BTreeSet
         _ => current,
     };
 
-    board_hexes
-        .contains(&next)
-        .then_some(next)
-        .unwrap_or(current)
+    if board_hexes.contains(&next) {
+        next
+    } else {
+        current
+    }
 }
 
 fn board_hexes(model: &UiModel) -> Vec<Hex> {
@@ -215,29 +216,31 @@ mod tests {
 
     #[test]
     fn bank_trade_menu_orders_ports_before_bank_trades() {
-        let mut legal = catan_agents::remote_agent::LegalDecisionOptions::default();
-        legal.bank_trades = vec![
-            BankTrade {
-                give: Resource::Brick,
-                take: Resource::Wood,
-                kind: BankTradeKind::BankGeneric,
-            },
-            BankTrade {
-                give: Resource::Ore,
-                take: Resource::Wheat,
-                kind: BankTradeKind::PortGeneric,
-            },
-            BankTrade {
-                give: Resource::Wood,
-                take: Resource::Ore,
-                kind: BankTradeKind::PortSpecific,
-            },
-            BankTrade {
-                give: Resource::Brick,
-                take: Resource::Ore,
-                kind: BankTradeKind::PortSpecific,
-            },
-        ];
+        let legal = catan_agents::remote_agent::LegalDecisionOptions {
+            bank_trades: vec![
+                BankTrade {
+                    give: Resource::Brick,
+                    take: Resource::Wood,
+                    kind: BankTradeKind::BankGeneric,
+                },
+                BankTrade {
+                    give: Resource::Ore,
+                    take: Resource::Wheat,
+                    kind: BankTradeKind::PortGeneric,
+                },
+                BankTrade {
+                    give: Resource::Wood,
+                    take: Resource::Ore,
+                    kind: BankTradeKind::PortSpecific,
+                },
+                BankTrade {
+                    give: Resource::Brick,
+                    take: Resource::Ore,
+                    kind: BankTradeKind::PortSpecific,
+                },
+            ],
+            ..Default::default()
+        };
 
         let ordered = ordered_bank_trades_for_menu(&legal)
             .into_iter()

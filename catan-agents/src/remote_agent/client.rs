@@ -73,6 +73,16 @@ impl RemoteCliAgent {
                     );
                     return response;
                 }
+                CliToHost::Log {
+                    level,
+                    target,
+                    message,
+                } => {
+                    let level = log::Level::from(level);
+                    for line in message.lines().filter(|line| !line.trim().is_empty()) {
+                        log::log!(target: &target, level, "{line}");
+                    }
+                }
                 CliToHost::Error { message } => panic!("remote CLI error: {message}"),
                 other => panic!("unexpected CLI frame on game socket: {other:?}"),
             }

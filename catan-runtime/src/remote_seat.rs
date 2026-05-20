@@ -55,7 +55,7 @@ impl Seat for RemoteCliSeat {
             &mut self.stream,
             &HostToCli::Output {
                 output: output.clone(),
-                view,
+                view: Box::new(view),
                 legal,
             },
         )
@@ -146,12 +146,12 @@ impl RemoteCliOutputObserver {
 
 impl OutputObserver for RemoteCliOutputObserver {
     fn on_output(&mut self, frame: ObserverFrame<'_>) {
-        let view = observer_model(&self.role, &frame.factory);
+        let view = observer_model(&self.role, frame.factory);
         let _ = write_frame(
             &mut self.stream,
             &HostToCli::Output {
                 output: frame.output.clone(),
-                view,
+                view: Box::new(view),
                 legal: LegalDecisionOptions::default(),
             },
         );

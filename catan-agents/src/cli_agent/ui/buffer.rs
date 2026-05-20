@@ -140,7 +140,7 @@ impl Buffer<u8> {
         for x in 0..self.width {
             print!("{}", x % 10);
         }
-        print!("\n");
+        println!();
         for y in 0..self.height {
             let start = y * self.width;
             let end = (y + 1) * self.width;
@@ -150,13 +150,13 @@ impl Buffer<u8> {
                 std::str::from_utf8(&self.buf[start..end]).unwrap(),
                 y % 10,
             );
-            print!("\n");
+            println!();
         }
         print!(" ");
         for x in 0..self.width {
             print!("{}", x % 10);
         }
-        print!("\n");
+        println!();
     }
 
     /// format non-blank symbols

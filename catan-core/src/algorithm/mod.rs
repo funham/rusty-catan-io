@@ -41,10 +41,10 @@ pub fn players_on_hex<'a>(
     hex: Hex,
     builds: impl Iterator<Item = &'a PlayerBuildData>,
 ) -> impl Iterator<Item = PlayerId> {
-    builds.enumerate().filter_map(move |(id, builds)| {
-        is_player_on_hex(hex, builds)
-            .then(|| PlayerId::try_from(id).expect("player count should fit in u8"))
-    })
+    builds
+        .enumerate()
+        .filter(move |&(_, builds)| is_player_on_hex(hex, builds))
+        .map(|(id, _)| PlayerId::try_from(id).expect("player count should fit in u8"))
 }
 
 pub fn robbery_candidates<'a>(
@@ -104,7 +104,7 @@ fn add_distribution(
         .iter_mut()
         .find(|(existing_id, _)| *existing_id == player_id)
     {
-        *existing += &resources;
+        *existing += resources;
     } else {
         by_player.push((player_id, resources));
     }

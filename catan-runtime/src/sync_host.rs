@@ -85,10 +85,10 @@ impl Seat for BotSeat {
         if decision.player_id() != self.player_id() {
             return;
         }
-        if let Some(command) = self.policy.command_for(decision, frame.view) {
-            if let Some(response) = decision.respond_command(command) {
-                commands.push(SeatCommand { response });
-            }
+        if let Some(command) = self.policy.command_for(decision, frame.view)
+            && let Some(response) = decision.respond_command(command)
+        {
+            commands.push(SeatCommand { response });
         }
     }
 }
@@ -163,14 +163,10 @@ impl SyncGameHost {
     }
 
     pub fn run_to_result(&mut self) -> GameResult {
-        loop {
-            if let Some(result) = self.run_until_waiting() {
-                return result;
-            }
-            return GameResult::Interrupted {
+        self.run_until_waiting()
+            .unwrap_or_else(|| GameResult::Interrupted {
                 reason: "host is waiting for external input".to_owned(),
-            };
-        }
+            })
     }
 
     fn deliver_output(&mut self, output: &GameOutput) {

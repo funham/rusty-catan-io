@@ -29,6 +29,7 @@ impl Default for RunOptions {
     }
 }
 
+// TODO: remove out of core completely, it belongs to it's domain in runtime or catan_bench
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GameRunStats {
     pub game_started: u64,

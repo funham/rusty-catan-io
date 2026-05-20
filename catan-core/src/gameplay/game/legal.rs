@@ -455,7 +455,7 @@ pub fn legal_dev_card_usages_iter<'a>(
                     let requested = [first, second].into_iter().fold(
                         ResourceSet::default(),
                         |mut acc, resource| {
-                            acc += &resource.into();
+                            acc += resource.into();
                             acc
                         },
                     );
@@ -524,7 +524,7 @@ pub fn first_legal_dev_card_usage(context: &PlayerDecisionContext<'_>) -> Option
                 let requested = [first, second].into_iter().fold(
                     ResourceSet::default(),
                     |mut acc, resource| {
-                        acc += &resource.into();
+                        acc += resource.into();
                         acc
                     },
                 );
@@ -536,7 +536,7 @@ pub fn first_legal_dev_card_usage(context: &PlayerDecisionContext<'_>) -> Option
     }
 
     if active.contains(UsableDevCard::Monopoly)
-        && let Some(resource) = Resource::iter().into_iter().next()
+        && let Some(resource) = Resource::iter().next()
     {
         return Some(DevCardUsage::Monopoly(resource));
     }
@@ -658,7 +658,6 @@ pub fn legal_rob_targets(context: &PlayerDecisionContext<'_>, robber_pos: Hex) -
     context
         .public
         .players_on_hex(robber_pos)
-        .into_iter()
         .filter(|id| *id != context.actor)
         .filter(|id| public_resource_total(context, *id) > 0)
         .collect()
@@ -685,6 +684,12 @@ pub fn legal_bank_trades(context: &PlayerDecisionContext<'_>) -> Vec<BankTrade> 
     legal_bank_trades_iter(context).collect()
 }
 
+pub fn resources_after_bank_trade(resources: &ResourceSet, trade: BankTrade) -> Option<ResourceSet> {
+    let mut resources = resources.checked_sub(&trade.to_bank())?;
+    resources += trade.from_bank();
+    Some(resources)
+}
+
 pub fn legal_bank_trades_iter<'a>(
     context: &'a PlayerDecisionContext<'_>,
 ) -> Box<dyn Iterator<Item = BankTrade> + 'a> {
@@ -694,7 +699,7 @@ pub fn legal_bank_trades_iter<'a>(
         .public
         .ports_acquired_for(context.actor)
         .iter()
-        .map(move |port| -> Box<dyn Iterator<Item = BankTrade> + 'a> {
+        .flat_map(move |port| -> Box<dyn Iterator<Item = BankTrade> + 'a> {
             match port {
                 PortKind::Special(resource) => resource_trades_at_rate_iter(
                     context,
@@ -709,8 +714,7 @@ pub fn legal_bank_trades_iter<'a>(
                     3,
                 ),
             }
-        })
-        .flatten();
+        });
 
     Box::new(generic.chain(port_trades))
 }
@@ -1456,6 +1460,42 @@ mod tests {
 
             assert_eq!(lazy, eager);
         });
+    }
+
+    #[test]
+    fn resources_after_bank_trade_applies_trade_when_player_can_pay() {
+        let resources = ResourceSet {
+            brick: 4,
+            ..ResourceSet::EMPTY
+        };
+        let trade = BankTrade {
+            give: Resource::Brick,
+            take: Resource::Wheat,
+            kind: BankTradeKind::BankGeneric,
+        };
+
+        assert_eq!(
+            resources_after_bank_trade(&resources, trade),
+            Some(ResourceSet {
+                wheat: 1,
+                ..ResourceSet::EMPTY
+            })
+        );
+    }
+
+    #[test]
+    fn resources_after_bank_trade_rejects_trade_when_player_cannot_pay() {
+        let resources = ResourceSet {
+            brick: 3,
+            ..ResourceSet::EMPTY
+        };
+        let trade = BankTrade {
+            give: Resource::Brick,
+            take: Resource::Wheat,
+            kind: BankTradeKind::BankGeneric,
+        };
+
+        assert_eq!(resources_after_bank_trade(&resources, trade), None);
     }
 
     #[test]

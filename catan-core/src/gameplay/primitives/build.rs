@@ -103,7 +103,7 @@ pub mod builds {
 
     impl<T: OccupyIntersection> OccupyIntersection for &T {
         fn occupancy(&self) -> IntersectionOccupancy {
-            <T as OccupyIntersection>::occupancy(&self)
+            <T as OccupyIntersection>::occupancy(self)
         }
     }
 
@@ -181,19 +181,19 @@ pub mod occupancy {
     /// Allows retrieving correct occupancy type depending on build type.
     pub trait OccupancyGetter: OccupyIntersection {
         type OccupancyType;
-        fn get<'a>(x: &'a AggregateOccupancy) -> &'a Self::OccupancyType;
+        fn get(x: &AggregateOccupancy) -> &Self::OccupancyType;
     }
 
     impl OccupancyGetter for Road {
         type OccupancyType = PathOccupancy;
-        fn get<'a>(x: &'a AggregateOccupancy) -> &'a Self::OccupancyType {
+        fn get(x: &AggregateOccupancy) -> &Self::OccupancyType {
             &x.roads_occupancy
         }
     }
 
     impl<T: OccupyIntersection + HasPos<Pos = Intersection>> OccupancyGetter for T {
         type OccupancyType = IntersectionOccupancy;
-        fn get<'a>(x: &'a AggregateOccupancy) -> &'a Self::OccupancyType {
+        fn get(x: &AggregateOccupancy) -> &Self::OccupancyType {
             &x.builds_occupancy
         }
     }
@@ -276,7 +276,7 @@ pub mod data {
             Builds: Iterator<Item = BuildItem>,
             BuildItem: OccupyIntersection,
         {
-            builds.map(|b| b.occupancy()).flatten().collect()
+            builds.flat_map(|b| b.occupancy()).collect()
         }
 
         pub fn roads_count(&self) -> usize {
@@ -554,12 +554,7 @@ pub mod data {
             let extra_roads_set = extra_roads.clone().into_iter().collect::<PathSet>();
             let mut frontier = SmallSet::<Intersection, 64>::new();
 
-            for road in self.players[player_id.index()]
-                .roads
-                .edges()
-                .iter()
-                .copied()
-            {
+            for road in self.players[player_id.index()].roads.edges() {
                 for intersection in road.intersections() {
                     if !self.opponent_has_establishment_at(player_id, intersection) {
                         frontier.insert(intersection);
@@ -567,7 +562,7 @@ pub mod data {
                 }
             }
 
-            for road in extra_roads_set.iter().copied() {
+            for road in extra_roads_set.iter() {
                 for intersection in road.intersections() {
                     if !self.opponent_has_establishment_at(player_id, intersection) {
                         frontier.insert(intersection);

@@ -11,17 +11,17 @@ pub struct Probability(f32);
 impl TryFrom<f32> for Probability {
     type Error = ();
     fn try_from(value: f32) -> Result<Self, Self::Error> {
-        if 0.0 <= value && value <= 1.0 {
-            Ok(Self { 0: value })
+        if (0.0..=1.0).contains(&value) {
+            Ok(Self(value))
         } else {
             Err(())
         }
     }
 }
 
-impl Into<f32> for Probability {
-    fn into(self) -> f32 {
-        self.0
+impl From<Probability> for f32 {
+    fn from(val: Probability) -> Self {
+        val.0
     }
 }
 
@@ -29,7 +29,7 @@ impl std::ops::Mul for Probability {
     type Output = Probability;
 
     fn mul(self, rhs: Self) -> Self::Output {
-        Self { 0: self.0 * rhs.0 }
+        Self(self.0 * rhs.0)
     }
 }
 
@@ -42,16 +42,20 @@ impl std::ops::Add for Probability {
 }
 
 impl Probability {
+    /// # Safety
+    /// only if `val` is in [0; 1]
     pub unsafe fn new_unchecked(val: f32) -> Self {
-        Self { 0: val }
+        Self(val)
     }
 
     pub fn new(val: f32) -> Option<Self> {
         TryFrom::<f32>::try_from(val).ok()
     }
 
+    /// # Safety
+    /// use only when independency is proven
     pub unsafe fn add_unchecked(&self, rhs: &Probability) -> Probability {
-        Self { 0: self.0 + rhs.0 }
+        Self(self.0 + rhs.0)
     }
 
     pub fn add(&self, rhs: &Probability) -> Option<Probability> {
@@ -64,15 +68,15 @@ impl Probability {
 
     // do I need it..?
     pub fn zero() -> &'static Self {
-        &&Self { 0: 0.0 }
+        &Self(0.0)
     }
 
     pub fn one() -> &'static Self {
-        &&Self { 0: 1.0 }
+        &Self(1.0)
     }
 
     pub fn half() -> &'static Self {
-        &&Self { 0: 0.5 }
+        &Self(0.5)
     }
 }
 
@@ -176,7 +180,7 @@ impl<T: Probable + PartialEq + Clone> BitOr for &Sequence<T> {
             }
         }
 
-        let smallest_len = std::cmp::min(&self.values.len(), &rhs.values.len()).clone();
+        let smallest_len = *std::cmp::min(&self.values.len(), &rhs.values.len());
         let largest = max_by(&self.values, &rhs.values, |v1, v2| v1.len().cmp(&v2.len()));
 
         if smallest_len < largest.len() {

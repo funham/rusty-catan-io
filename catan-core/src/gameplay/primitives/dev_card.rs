@@ -200,16 +200,8 @@ impl Add for DevCardSet {
     type Output = DevCardSet;
 
     fn add(self, rhs: DevCardSet) -> Self::Output {
-        self + &rhs
-    }
-}
-
-impl Add<&DevCardSet> for DevCardSet {
-    type Output = DevCardSet;
-
-    fn add(self, rhs: &DevCardSet) -> Self::Output {
         DevCardSet {
-            usable: self.usable + &rhs.usable,
+            usable: self.usable + rhs.usable,
             victory_points: self.victory_points + rhs.victory_points,
         }
     }
@@ -217,12 +209,6 @@ impl Add<&DevCardSet> for DevCardSet {
 
 impl AddAssign for DevCardSet {
     fn add_assign(&mut self, rhs: DevCardSet) {
-        *self += &rhs;
-    }
-}
-
-impl AddAssign<&DevCardSet> for DevCardSet {
-    fn add_assign(&mut self, rhs: &DevCardSet) {
         *self = *self + rhs;
     }
 }
@@ -254,14 +240,6 @@ impl Add for UsableDevCardSet {
     type Output = UsableDevCardSet;
 
     fn add(self, rhs: UsableDevCardSet) -> Self::Output {
-        self + &rhs
-    }
-}
-
-impl Add<&UsableDevCardSet> for UsableDevCardSet {
-    type Output = UsableDevCardSet;
-
-    fn add(self, rhs: &UsableDevCardSet) -> Self::Output {
         UsableDevCardSet {
             knight: self.knight + rhs.knight,
             year_of_plenty: self.year_of_plenty + rhs.year_of_plenty,
@@ -273,12 +251,6 @@ impl Add<&UsableDevCardSet> for UsableDevCardSet {
 
 impl AddAssign for UsableDevCardSet {
     fn add_assign(&mut self, rhs: UsableDevCardSet) {
-        *self += &rhs;
-    }
-}
-
-impl AddAssign<&UsableDevCardSet> for UsableDevCardSet {
-    fn add_assign(&mut self, rhs: &UsableDevCardSet) {
         *self = *self + rhs;
     }
 }
@@ -363,10 +335,11 @@ impl DevCardData {
 
     pub fn move_to_used(&mut self, card: UsableDevCard) -> Result<(), DevCardDataPlayingError> {
         match self.active.contains(card) {
-            true => Ok({
+            true => {
                 self.active[card].dec();
                 self.used[card].inc();
-            }),
+                Ok(())
+            }
             false => Err(DevCardDataPlayingError),
         }
     }

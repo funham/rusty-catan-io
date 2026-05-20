@@ -136,7 +136,8 @@ fn run_player_session(
                         .map_err(|err| format!("failed to draw TUI: {err}"))?;
                         continue;
                     }
-                    let Some(request) = decision_request_from_output(&decision, view, legal) else {
+                    let Some(request) = decision_request_from_output(&decision, *view, legal)
+                    else {
                         let message =
                             format!("unsupported event protocol decision: {:?}", decision.kind());
                         ui.set_message(message)
@@ -338,7 +339,7 @@ fn run_observer_session(mut stream: UnixStream, mut ui: CliUi) -> Result<(), Str
                             return Ok(());
                         }
                         state.latest =
-                            SessionViewState::view(view, format!("event: {:?}", record.event));
+                            SessionViewState::view(*view, format!("event: {:?}", record.event));
                     }
                     other => {
                         state.latest.message = format!("engine output: {other:?}");

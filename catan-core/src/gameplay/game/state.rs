@@ -44,17 +44,9 @@ pub struct TurnedTableState<Cycle = RegularCycle> {
 pub type GameState = TurnedTableState<RegularCycle>;
 pub type SetupGameState = TurnedTableState<BackAndForthCycle>;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct SetupGameOptions {
     pub random: GameRandom,
-}
-
-impl Default for SetupGameOptions {
-    fn default() -> Self {
-        Self {
-            random: GameRandom::default(),
-        }
-    }
 }
 
 impl<Cycle> std::ops::Deref for TurnedTableState<Cycle> {
@@ -198,7 +190,7 @@ impl TableState {
             })?;
         self.bank.deposit(to_bank);
         self.bank.withdraw(from_bank)?;
-        *self.players.get_mut(player_id).resources() += &from_bank;
+        *self.players.get_mut(player_id).resources() += from_bank;
 
         Ok(())
     }
@@ -551,7 +543,7 @@ impl TableState {
         let requested = list
             .into_iter()
             .fold(ResourceSet::default(), |mut acc, resource| {
-                acc += &resource.into();
+                acc += resource.into();
                 acc
             });
 
