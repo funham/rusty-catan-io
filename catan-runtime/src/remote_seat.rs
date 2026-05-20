@@ -129,7 +129,6 @@ impl RemoteCliOutputObserver {
         }
         write_frame(&mut stream, &HostToCli::Hello { role: role.clone() })?;
         expect_ready(&mut stream)?;
-        stream.set_nonblocking(true)?;
         let snapshot_store = if role.includes_exact_snapshot_state() {
             Some(SnapshotStore::new()?)
         } else {
@@ -161,15 +160,26 @@ impl OutputObserver for RemoteCliOutputObserver {
 
 impl RemoteCliOutputObserver {
     fn handle_control_messages(&mut self, frame: ObserverFrame<'_>) {
+        if let Err(err) = self.stream.set_nonblocking(true) {
+            log::warn!(target: "catan_runtime::remote_seat", "failed to poll observer control frames: {err}");
+            return;
+        }
+        let mut messages = Vec::new();
         loop {
-            let message = match self.reader.poll(&mut self.stream) {
-                Ok(Some(message)) => message,
-                Ok(None) => return,
+            match self.reader.poll(&mut self.stream) {
+                Ok(Some(message)) => messages.push(message),
+                Ok(None) => break,
                 Err(err) => {
                     log::warn!(target: "catan_runtime::remote_seat", "failed to read observer control frame: {err}");
-                    return;
+                    break;
                 }
             };
+        }
+        if let Err(err) = self.stream.set_nonblocking(false) {
+            log::warn!(target: "catan_runtime::remote_seat", "failed to restore observer stream blocking mode: {err}");
+            return;
+        }
+        for message in messages {
             match message {
                 CliToHost::SaveSnapshot => self.save_snapshot(frame.engine),
                 CliToHost::Log {
@@ -288,8 +298,11 @@ mod tests {
 
     use catan_agents::remote_agent::{CliToHost, HostToCli, read_frame, write_frame};
     use catan_core::gameplay::game::{
-        decision::{DecisionKind, DecisionLifetime, OpenDecision},
-        output::GameOutput,
+        decision::{DecisionId, DecisionKind, DecisionLifetime, OpenDecision},
+        input::DecisionToken,
+        output::{CommandRejectionReason, GameOutput},
+        run::RunOptions,
+        state::SetupGameState,
     };
 
     use super::*;
@@ -416,5 +429,56 @@ mod tests {
             Err(err) if err.kind() == std::io::ErrorKind::WouldBlock
                 || err.kind() == std::io::ErrorKind::TimedOut
         ));
+    }
+
+    #[test]
+    fn remote_output_observer_streams_large_frames_when_reader_lags() {
+        let (host_stream, mut child_stream) = UnixStream::pair().unwrap();
+        let child = std::thread::spawn(move || -> std::io::Result<()> {
+            assert!(matches!(
+                read_frame::<HostToCli>(&mut child_stream)?,
+                HostToCli::Hello {
+                    role: CliRole::SnapshotObserver
+                }
+            ));
+            write_frame(&mut child_stream, &CliToHost::Ready)?;
+            std::thread::sleep(std::time::Duration::from_millis(50));
+
+            for _ in 0..2 {
+                let frame = read_frame::<HostToCli>(&mut child_stream)?;
+                assert!(matches!(frame, HostToCli::Output { .. }));
+            }
+            Ok(())
+        });
+        let mut observer =
+            RemoteCliOutputObserver::new(CliRole::SnapshotObserver, host_stream).unwrap();
+        let engine = catan_core::gameplay::game::engine::GameEngine::from_init(
+            SetupGameState::default(),
+            RunOptions::default(),
+        );
+        let visibility = catan_core::gameplay::game::view::VisibilityConfig::default();
+        let factory = ContextFactory {
+            state: engine.table(),
+            index: engine.index(),
+            visibility: &visibility,
+        };
+        let output = GameOutput::CommandRejected {
+            token: DecisionToken {
+                id: DecisionId(0),
+                player_id: P0,
+            },
+            reason: CommandRejectionReason::IllegalCommand("x".repeat(2 * 1024 * 1024)),
+        };
+
+        for _ in 0..2 {
+            observer.on_output(ObserverFrame {
+                output: &output,
+                factory: &factory,
+                engine: &engine,
+            });
+        }
+
+        drop(observer);
+        child.join().unwrap().unwrap();
     }
 }

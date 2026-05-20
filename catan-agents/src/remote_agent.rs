@@ -417,4 +417,67 @@ mod tests {
         }
         writer.join().unwrap();
     }
+
+    #[test]
+    fn nonblocking_reader_decodes_consecutive_output_frames() {
+        let state = SetupGameState::default().finish();
+        let index = GameIndex::rebuild(&state);
+        let visibility = VisibilityConfig::default();
+        let factory = ContextFactory {
+            state: &state,
+            index: &index,
+            visibility: &visibility,
+        };
+        let model = UiModel::from_observer(
+            ObserverNotificationContext::Omniscient {
+                public: factory.spectator_public_view(),
+                full: factory.omniscient_view(),
+            },
+            true,
+        );
+        let first = HostToCli::Output {
+            output: catan_core::gameplay::game::output::GameOutput::event(
+                catan_core::gameplay::game::output::GameEventRecord {
+                    event: GameEvent::GameStarted,
+                    visibility: catan_core::gameplay::game::event::EventVisibility::Public,
+                },
+            ),
+            view: Box::new(model.clone()),
+            legal: Default::default(),
+        };
+        let second = HostToCli::Output {
+            output: catan_core::gameplay::game::output::GameOutput::event(
+                catan_core::gameplay::game::output::GameEventRecord {
+                    event: GameEvent::DecisionOpened(
+                        catan_core::gameplay::game::decision::OpenDecision {
+                            id: catan_core::gameplay::game::decision::DecisionId(0),
+                            player_id: P0,
+                            kind:
+                                catan_core::gameplay::game::decision::DecisionKind::InitialPlacement,
+                            lifetime:
+                                catan_core::gameplay::game::decision::DecisionLifetime::OneShot,
+                        },
+                    ),
+                    visibility: catan_core::gameplay::game::event::EventVisibility::Public,
+                },
+            ),
+            view: Box::new(model),
+            legal: Default::default(),
+        };
+
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, &first).unwrap();
+        write_frame(&mut bytes, &second).unwrap();
+        let mut reader = NonblockingFrameReader::<HostToCli>::default();
+        let mut cursor = std::io::Cursor::new(bytes);
+
+        assert!(matches!(
+            reader.poll(&mut cursor).unwrap(),
+            Some(HostToCli::Output { .. })
+        ));
+        assert!(matches!(
+            reader.poll(&mut cursor).unwrap(),
+            Some(HostToCli::Output { .. })
+        ));
+    }
 }
