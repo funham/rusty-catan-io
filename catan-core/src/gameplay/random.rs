@@ -220,7 +220,6 @@ pub struct FixedOrderShuffler {
 impl DevCardShuffler for FixedOrderShuffler {
     fn shuffle(&mut self, deck: &mut [DevCardKind], _rng: &mut dyn Rng) {
         /* validation(comment out if not needed) */
-        // TODO: make configurable with #[cfg]
         {
             let reference = deck
                 .iter()

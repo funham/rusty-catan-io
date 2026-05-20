@@ -2,83 +2,14 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::{BoardArrangement, HexesByNum};
+use super::{BoardArrangement, index::FieldIndex};
 use crate::common::SmallSet;
 use crate::gameplay::primitives::{
-    PortKind, Tile,
+    PortKind,
     build::{Establishment, Road},
 };
 use crate::math::dice::TileNum;
 use crate::topology::*;
-
-// TODO: move to FieldIndex maybe?
-#[derive(Debug, Clone)]
-pub struct BoardIndex {
-    pub desert_pos: Hex,
-    pub hex_by_num: HexesByNum,
-    pub ports_intersection: BTreeMap<Intersection, PortKind>,
-    intersections: Vec<Intersection>,
-    paths: Vec<Path>,
-}
-
-impl BoardIndex {
-    fn new(board: &BoardArrangement) -> Self {
-        let desert_pos = Self::find_desert_pos(board);
-        let hex_by_num = Self::get_hex_by_num(board);
-        let intersections = board.intersections().into_iter().collect();
-        let paths = board.path_set().into_iter().collect();
-        let ports_intersection = board
-            .ports()
-            .iter()
-            .flat_map(|(pos, port)| {
-                pos.intersections()
-                    .into_iter()
-                    .zip(std::iter::repeat(port).cloned())
-            })
-            .collect::<BTreeMap<_, _>>();
-
-        Self {
-            desert_pos,
-            hex_by_num,
-            ports_intersection,
-            intersections,
-            paths,
-        }
-    }
-
-    fn get_hex_by_num(arrangement: &BoardArrangement) -> HexesByNum {
-        let mut hex_by_num = HexesByNum::default();
-        for num in TileNum::iter() {
-            hex_by_num[num] = arrangement
-                .hex_enum_iter()
-                .filter_map(|(pos, hex)| {
-                    let x = match hex {
-                        Tile::Resource {
-                            resource: _,
-                            number,
-                        } => Some(number),
-                        Tile::River { number } => Some(number),
-                        Tile::Desert => None,
-                    };
-                    (x? == num).then_some(pos)
-                })
-                .collect()
-        }
-
-        hex_by_num
-    }
-
-    fn find_desert_pos(hexes: &BoardArrangement) -> Hex {
-        hexes
-            .hex_enum_iter()
-            .filter_map(|(k, v)| match v {
-                Tile::Desert => Some(k),
-                _ => None,
-            })
-            .next()
-            .unwrap()
-    }
-}
 
 #[derive(Serialize, Deserialize)]
 struct BoardLayoutSerde {
@@ -105,12 +36,12 @@ impl<'de> Deserialize<'de> for BoardLayout {
         D: serde::Deserializer<'de>,
     {
         let raw = BoardLayoutSerde::deserialize(deserializer)?;
-        let cache_ = BoardIndex::new(&raw.arrangement);
+        let index = FieldIndex::new(&raw.arrangement);
 
         Ok(Self {
             n_players: raw.n_players,
             arrangement: raw.arrangement,
-            index: cache_,
+            index,
         })
     }
 }
@@ -174,22 +105,21 @@ pub struct BuildCollection {
 pub struct BoardLayout {
     pub n_players: usize,
     pub arrangement: BoardArrangement,
-    index: BoardIndex,
+    index: FieldIndex,
 }
 
 impl BoardLayout {
     pub const fn field_size_by_radius(radius: usize) -> usize {
-        // TODO: use `HexIndex`` instead
-        1 + 3 * radius * (radius + 1)
+        HexIndex::spiral_start_of_ring(radius + 1)
     }
 
     pub fn new(param: FieldBuildParam) -> Self {
-        let cache = BoardIndex::new(&param.arrangement);
+        let index = FieldIndex::new(&param.arrangement);
 
         Self {
             n_players: param.n_players,
             arrangement: param.arrangement,
-            index: cache,
+            index,
         }
     }
 
@@ -201,8 +131,8 @@ impl BoardLayout {
         &self.index.hex_by_num[num]
     }
 
-    pub fn index(&self) -> BoardIndex {
-        self.index.clone()
+    pub fn index(&self) -> &FieldIndex {
+        &self.index
     }
 
     pub fn ports_intersection(&self) -> &BTreeMap<Intersection, PortKind> {
@@ -210,11 +140,11 @@ impl BoardLayout {
     }
 
     pub fn intersections(&self) -> &[Intersection] {
-        &self.index.intersections
+        self.index.intersections()
     }
 
     pub fn paths(&self) -> &[Path] {
-        &self.index.paths
+        self.index.paths()
     }
 }
 
@@ -252,5 +182,15 @@ mod tests {
             layout.paths().iter().copied().collect::<BTreeSet<_>>(),
             layout.arrangement.path_set().into_iter().collect()
         );
+    }
+
+    #[test]
+    fn board_layout_field_size_uses_hex_spiral_index() {
+        for radius in 0..=5 {
+            assert_eq!(
+                BoardLayout::field_size_by_radius(radius),
+                HexIndex::spiral_start_of_ring(radius + 1)
+            );
+        }
     }
 }

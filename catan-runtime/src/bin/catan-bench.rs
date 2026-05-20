@@ -9,7 +9,7 @@ use catan_agents::bot::BotPolicy;
 use catan_agents::{greedy::GreedyAgent, lazy::LazyAgent, random::RandomAgent};
 use catan_core::{
     gameplay::game::{
-        run::{GameResult, GameRunStats, RunOptions},
+        run::{GameResult, RunOptions},
         state::{SetupGameOptions, SetupGameState},
     },
     gameplay::primitives::player::PlayerId,
@@ -17,6 +17,7 @@ use catan_core::{
 };
 use catan_runtime::{
     config::{self, FieldConfig, MatchConfig, PlayerConfig},
+    run_stats::GameRunStats,
     simulation::SimulationHost,
 };
 use serde::Serialize;

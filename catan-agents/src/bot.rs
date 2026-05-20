@@ -1,5 +1,6 @@
 use catan_core::gameplay::{
     game::{
+        decision::DecisionKind,
         input::{DecisionRequest, PlayerCommand, TradeCommand, TradeResponseCommand},
         view::PlayerDecisionContext,
     },
@@ -24,9 +25,9 @@ pub fn cancel_trade_command() -> PlayerCommand {
 }
 
 pub fn unsupported_decision_command(request: &DecisionRequest) -> Option<PlayerCommand> {
-    match request {
-        DecisionRequest::TradeResponse { .. } => Some(decline_trade_command()),
-        DecisionRequest::TradeOwner { .. } => Some(cancel_trade_command()),
+    match request.kind() {
+        DecisionKind::TradeResponse { .. } => Some(decline_trade_command()),
+        DecisionKind::TradeOwnerAction { .. } => Some(cancel_trade_command()),
         _ => None,
     }
 }

@@ -5,7 +5,7 @@ use crate::gameplay::{
     game::{
         decision::{DecisionAllocator, PendingDecisions},
         index::GameIndex,
-        run::{GameResult, GameRunStats},
+        run::GameResult,
         state::{GameState, SetupGameState, TableState},
         trade::TradeSession,
     },
@@ -33,7 +33,6 @@ pub struct UnstartedEngine {
     #[serde(skip)]
     pub index: GameIndex,
     pub next_decision_id: u64,
-    pub stats: GameRunStats,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,7 +43,6 @@ pub struct SetupEngine {
     pub index: GameIndex,
     pub pending: PendingDecisions,
     pub next_decision_id: u64,
-    pub stats: GameRunStats,
     pub invalid_actions: u64,
 }
 
@@ -56,7 +54,6 @@ pub struct PlayingEngine {
     pub pending: PendingDecisions,
     pub next_decision_id: u64,
     pub trade_sessions: TradeSessions,
-    pub stats: GameRunStats,
     pub invalid_actions: u64,
     pub pending_discards: PendingDiscards,
 }
@@ -67,7 +64,6 @@ pub struct FinishedEngine {
     #[serde(skip)]
     pub index: GameIndex,
     pub result: GameResult,
-    pub stats: GameRunStats,
 }
 
 impl UnstartedEngine {
@@ -82,7 +78,6 @@ impl UnstartedEngine {
             index: self.index,
             pending: PendingDecisions::default(),
             next_decision_id: self.next_decision_id,
-            stats: self.stats,
             invalid_actions: 0,
         }
     }
@@ -105,7 +100,6 @@ impl SetupEngine {
             pending: self.pending,
             next_decision_id: self.next_decision_id,
             trade_sessions: SmallVec::new(),
-            stats: self.stats,
             invalid_actions: self.invalid_actions,
             pending_discards: SmallVec::new(),
         }
@@ -131,7 +125,6 @@ impl EngineState {
             setup_turn,
             index,
             next_decision_id: 0,
-            stats: GameRunStats::default(),
         }))
     }
 
@@ -143,7 +136,6 @@ impl EngineState {
             pending: PendingDecisions::default(),
             next_decision_id: 0,
             trade_sessions: SmallVec::new(),
-            stats: GameRunStats::default(),
             invalid_actions: 0,
             pending_discards: SmallVec::new(),
         }))
@@ -172,15 +164,6 @@ impl EngineState {
             Self::Setup(setup) => &setup.index,
             Self::Playing(playing) => &playing.index,
             Self::Finished(finished) => &finished.index,
-        }
-    }
-
-    pub fn stats(&self) -> GameRunStats {
-        match self {
-            Self::Unstarted(unstarted) => unstarted.stats,
-            Self::Setup(setup) => setup.stats,
-            Self::Playing(playing) => playing.stats,
-            Self::Finished(finished) => finished.stats,
         }
     }
 

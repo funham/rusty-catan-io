@@ -7,17 +7,20 @@ use catan_core::gameplay::{
         input::PlayerCommand,
         output::GameOutput,
         projector,
-        run::{GameResult, GameRunStats, RunOptions},
+        run::{GameResult, RunOptions},
         state::SetupGameState,
         view::{ContextFactory, SearchFactory, VisibilityConfig},
     },
     primitives::player::PlayerId,
 };
 
+use crate::run_stats::{GameRunStats, RunStatsCollector};
+
 pub struct SimulationHost {
     engine: GameEngine,
     bots: Vec<Box<dyn BotPolicy>>,
     visibility: VisibilityConfig,
+    stats: RunStatsCollector,
 }
 
 impl SimulationHost {
@@ -26,6 +29,7 @@ impl SimulationHost {
             engine: GameEngine::from_init(init, options),
             bots,
             visibility: VisibilityConfig::default(),
+            stats: RunStatsCollector::default(),
         }
     }
 
@@ -39,6 +43,7 @@ impl SimulationHost {
                 };
             }
         };
+        self.stats.record_transaction(&transaction);
         queue.extend(projector::project_transaction(&transaction));
 
         let mut steps = 0_u64;
@@ -80,6 +85,7 @@ impl SimulationHost {
                     };
                 }
             };
+            self.stats.record_transaction(&transaction);
             queue.extend(projector::project_transaction(&transaction));
         }
 
@@ -90,7 +96,7 @@ impl SimulationHost {
     }
 
     pub fn run_stats(&self) -> GameRunStats {
-        self.engine.run_stats()
+        self.stats.stats()
     }
 
     fn command_for(
@@ -136,5 +142,9 @@ mod tests {
         );
 
         assert!(matches!(host.run(), GameResult::LimitReached { turns: 3 }));
+        let stats = host.run_stats();
+        assert_eq!(stats.game_started, 1);
+        assert_eq!(stats.turns_started, 3);
+        assert_eq!(stats.games_interrupted, 1);
     }
 }

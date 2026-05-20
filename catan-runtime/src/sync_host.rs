@@ -14,6 +14,8 @@ use catan_core::gameplay::{
     primitives::player::PlayerId,
 };
 
+use crate::run_stats::{GameRunStats, RunStatsCollector};
+
 pub struct SeatFrame<'a> {
     pub player_id: PlayerId,
     pub output: &'a GameOutput,
@@ -100,6 +102,7 @@ pub struct SyncGameHost {
     visibility: VisibilityConfig,
     outputs: VecDeque<GameOutput>,
     inputs: VecDeque<SeatCommand>,
+    stats: RunStatsCollector,
 }
 
 impl SyncGameHost {
@@ -115,6 +118,7 @@ impl SyncGameHost {
             visibility: VisibilityConfig::default(),
             outputs: VecDeque::new(),
             inputs: VecDeque::new(),
+            stats: RunStatsCollector::default(),
         }
     }
 
@@ -131,6 +135,7 @@ impl SyncGameHost {
             }
         } else {
             let transaction = self.engine.start().expect("engine start should reduce");
+            self.stats.record_transaction(&transaction);
             self.outputs
                 .extend(projector::project_transaction(&transaction));
         }
@@ -154,6 +159,7 @@ impl SyncGameHost {
                     .engine
                     .submit(input.response)
                     .expect("engine submit should reduce");
+                self.stats.record_transaction(&transaction);
                 self.outputs
                     .extend(projector::project_transaction(&transaction));
                 continue;
@@ -198,8 +204,8 @@ impl SyncGameHost {
         }
     }
 
-    pub fn run_stats(&self) -> catan_core::gameplay::game::run::GameRunStats {
-        self.engine.run_stats()
+    pub fn run_stats(&self) -> GameRunStats {
+        self.stats.stats()
     }
 }
 
@@ -244,6 +250,9 @@ mod tests {
             host.run_to_result(),
             GameResult::LimitReached { turns: 1 }
         ));
+        let stats = host.run_stats();
+        assert_eq!(stats.game_started, 1);
+        assert_eq!(stats.games_interrupted, 1);
     }
 
     struct RecordingSeat {

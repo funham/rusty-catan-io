@@ -1,7 +1,7 @@
 use crate::gameplay::{
     constants::costs,
     game::{
-        decision::{DecisionId, DecisionKind, OpenDecision},
+        decision::{DecisionId, OpenDecision},
         engine::lifecycle::{EngineState, FinishedEngine, PlayingEngine, SetupEngine},
         event::GameEvent,
         index::GameIndex,
@@ -58,11 +58,9 @@ fn command_rejected(
         match lifecycle {
             EngineState::Setup(active) => {
                 active.invalid_actions += 1;
-                active.stats.action_rejections += 1;
             }
             EngineState::Playing(active) => {
                 active.invalid_actions += 1;
-                active.stats.action_rejections += 1;
             }
             _ => {}
         }
@@ -87,8 +85,7 @@ fn game_started(lifecycle: &mut EngineState) -> Result<(), EngineApplyError> {
     let EngineState::Unstarted(unstarted) = lifecycle else {
         return Err(EngineApplyError::WrongState);
     };
-    let mut setup = unstarted.as_ref().clone().into_setup();
-    setup.stats.game_started += 1;
+    let setup = unstarted.as_ref().clone().into_setup();
     *lifecycle = EngineState::Setup(Box::new(setup));
     Ok(())
 }
@@ -184,10 +181,6 @@ fn apply_playing(active: &mut PlayingEngine, event: &GameEvent) -> Result<(), En
 fn decision_opened(active: &mut PlayingEngine, decision: &OpenDecision) {
     active.next_decision_id = active.next_decision_id.max(decision.id.0 + 1);
     active.pending.push(decision.clone());
-
-    if !matches!(decision.kind, DecisionKind::InitialPlacement) {
-        active.stats.decision_requests += 1;
-    }
 }
 
 #[inline]
@@ -299,7 +292,6 @@ fn resources_distributed(active: &mut PlayingEngine, by_player: &[(PlayerId, Res
     for (player_id, resources) in by_player {
         let _ = active.game.transfer_from_bank(*resources, *player_id);
     }
-    active.stats.resources_distributed += 1;
 }
 
 #[inline]
@@ -310,7 +302,6 @@ fn dice_rolled(active: &mut PlayingEngine, player_id: PlayerId, value: DiceRoll)
                 .filter(|pid| active.game.players.get(*pid).resources().total() > 7)
                 .collect();
     }
-    active.stats.dice_rolls += 1;
 }
 
 #[inline]
@@ -333,14 +324,11 @@ fn turn_started(active: &mut PlayingEngine, player_id: PlayerId) {
         .players
         .get_mut(player_id)
         .dev_cards_reset_queue();
-    active.stats.turns_started += 1;
 }
 
 #[inline]
 fn turn_ended(active: &mut PlayingEngine) {
     active.game.turn.next();
-    active.stats.turns_ended += 1;
-    active.stats.regular_actions += 1;
 }
 
 #[inline]
@@ -356,8 +344,6 @@ fn built(
     active
         .index
         .refresh_after_build(&active.game, player_id, build);
-    active.stats.regular_actions += 1;
-    active.stats.builds += 1;
     Ok(())
 }
 
@@ -370,8 +356,6 @@ fn dev_card_bought(
         .game
         .transfer_to_bank(costs::DEV_CARD, player_id)
         .map_err(|_| EngineApplyError::InvalidResourceTransfer)?;
-    active.stats.regular_actions += 1;
-    active.stats.dev_cards_bought += 1;
     Ok(())
 }
 
@@ -409,7 +393,6 @@ fn dev_card_used(
     active
         .index
         .refresh_after_dev_card(&active.game, player_id, usage);
-    active.stats.dev_cards_used += 1;
     Ok(())
 }
 
@@ -470,8 +453,6 @@ fn bank_trade_completed(
         .game
         .trade_with_bank(player_id, trade)
         .map_err(|_| EngineApplyError::InvalidResourceTransfer)?;
-    active.stats.regular_actions += 1;
-    active.stats.bank_trades += 1;
     Ok(())
 }
 
@@ -583,33 +564,24 @@ fn player_discarded(
     if active.pending_discards.first() == Some(&player_id) {
         active.pending_discards.remove(0);
     }
-    active.stats.player_discards += 1;
     Ok(())
 }
 
 #[inline]
 fn robber_moved(active: &mut PlayingEngine, hex: Hex) {
     active.game.board_state.robber_pos = hex;
-    active.stats.robber_moves += 1;
 }
 
 fn finish(lifecycle: &mut EngineState, result: &GameResult) -> Result<(), EngineApplyError> {
-    let mut active = match lifecycle {
+    let active = match lifecycle {
         EngineState::Playing(active) => active.as_ref().clone(),
         EngineState::Setup(setup) => setup.as_ref().clone().into_playing(),
         _ => return Err(EngineApplyError::WrongState),
     };
-    match result {
-        GameResult::Win(_) => active.stats.games_ended += 1,
-        GameResult::Interrupted { .. } | GameResult::LimitReached { .. } => {
-            active.stats.games_interrupted += 1;
-        }
-    }
     *lifecycle = EngineState::Finished(Box::new(FinishedEngine {
         game: active.game,
         index: active.index,
         result: result.clone(),
-        stats: active.stats,
     }));
     Ok(())
 }

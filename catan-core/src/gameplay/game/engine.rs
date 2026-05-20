@@ -21,7 +21,7 @@ use crate::{
             engine::{lifecycle::EngineState, reducer::EngineApplyError},
             event::{EventCause, EventTransaction, GameEvent},
             index::GameIndex,
-            run::{GameResult, GameRunStats, RunOptions},
+            run::{GameResult, RunOptions},
             state::{GameState, SetupGameState, TableState},
         },
         primitives::{self, player::PlayerId, turn},
@@ -272,10 +272,6 @@ impl GameEngine {
         self.runtime.random.pick_resource(&resources)
     }
 
-    pub fn run_stats(&self) -> GameRunStats {
-        self.core.stats()
-    }
-
     pub fn result(&self) -> Option<&GameResult> {
         self.core.result()
     }
@@ -332,7 +328,6 @@ impl GameEngine {
                 game: active.game.clone(),
                 index: active.index.clone(),
                 result,
-                stats: active.stats,
             }));
         }
     }

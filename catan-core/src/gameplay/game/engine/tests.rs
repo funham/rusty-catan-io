@@ -249,7 +249,6 @@ fn reducer_applies_initial_resource_grant_event() {
     };
     assert_eq!(active.game.players.get(0).resources().brick, 1);
     assert_eq!(active.game.bank.resources.brick, 18);
-    assert_eq!(active.stats.resources_distributed, 0);
 }
 
 #[test]
@@ -322,7 +321,6 @@ fn reducer_applies_discard_robber_and_turn_events() {
     assert_eq!(active.game.bank.resources.brick, 19);
     assert_eq!(active.game.board_state.robber_pos, target_hex);
     assert_eq!(active.game.turn.get_turn_index(), 1);
-    assert_eq!(active.stats.regular_actions, 1);
 }
 
 #[test]

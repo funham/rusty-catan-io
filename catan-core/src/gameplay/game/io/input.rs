@@ -1,21 +1,18 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    gameplay::{
-        game::{
-            command::{
-                ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, InitialPlacementCommand,
-                MoveRobberCommand, PostDevCardCommand, PostDiceCommand, RegularCommand,
-            },
-            decision::{DecisionId, DecisionKind, OpenDecision},
-            trade::{TradeOfferId, TradeScope, TradeSessionId},
+use crate::gameplay::{
+    game::{
+        command::{
+            ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, InitialPlacementCommand,
+            MoveRobberCommand, PostDevCardCommand, PostDiceCommand, RegularCommand,
         },
-        primitives::{
-            player::PlayerId,
-            trade::{PlayerTrade, PublicTradeOffer},
-        },
+        decision::{DecisionId, DecisionKind, OpenDecision},
+        trade::{TradeOfferId, TradeScope},
     },
-    topology::Hex,
+    primitives::{
+        player::PlayerId,
+        trade::{PlayerTrade, PublicTradeOffer},
+    },
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,29 +34,10 @@ pub enum PlayerCommand {
     Trade(TradeCommand),
 }
 
-// TODO: move decision token outside of enum variants, and provide it parallel instead
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum DecisionRequest {
-    InitialPlacement(DecisionToken),
-    InitCommand(DecisionToken),
-    PostDice(DecisionToken),
-    PostDevCard(DecisionToken),
-    Regular(DecisionToken),
-    MoveRobber(DecisionToken),
-    ChooseRobbedPlayer {
-        token: DecisionToken,
-        robber_pos: Hex,
-    },
-    DropHalf {
-        token: DecisionToken,
-        required: u16,
-    },
-    TradeResponse {
-        token: DecisionToken,
-    },
-    TradeOwner {
-        token: DecisionToken,
-    },
+pub struct DecisionRequest {
+    pub token: DecisionToken,
+    pub kind: DecisionKind,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -76,97 +54,58 @@ pub struct DecisionResponse {
 
 impl DecisionRequest {
     pub fn from_open_decision(decision: &OpenDecision) -> Self {
-        let token = DecisionToken::from(decision);
-        match decision.kind {
-            DecisionKind::InitialPlacement => Self::InitialPlacement(token),
-            DecisionKind::InitCommand => Self::InitCommand(token),
-            DecisionKind::PostDiceCommand => Self::PostDice(token),
-            DecisionKind::PostDevCardCommand => Self::PostDevCard(token),
-            DecisionKind::RegularCommand => Self::Regular(token),
-            DecisionKind::MoveRobber => Self::MoveRobber(token),
-            DecisionKind::ChooseRobbedPlayer { robber_pos } => {
-                Self::ChooseRobbedPlayer { token, robber_pos }
-            }
-            DecisionKind::DropHalf { required } => Self::DropHalf { token, required },
-            DecisionKind::TradeResponse { .. } => Self::TradeResponse { token },
-            DecisionKind::TradeOwnerAction { .. } => Self::TradeOwner { token },
+        Self {
+            token: DecisionToken::from(decision),
+            kind: decision.kind,
         }
     }
 
     pub fn player_id(&self) -> PlayerId {
-        self.token().player_id
+        self.token.player_id
     }
 
     pub fn id(&self) -> DecisionId {
-        self.token().id
+        self.token.id
     }
 
     pub fn kind(&self) -> DecisionKind {
-        match self {
-            Self::InitialPlacement(_) => DecisionKind::InitialPlacement,
-            Self::InitCommand(_) => DecisionKind::InitCommand,
-            Self::PostDice(_) => DecisionKind::PostDiceCommand,
-            Self::PostDevCard(_) => DecisionKind::PostDevCardCommand,
-            Self::Regular(_) => DecisionKind::RegularCommand,
-            Self::MoveRobber(_) => DecisionKind::MoveRobber,
-            Self::ChooseRobbedPlayer { robber_pos, .. } => DecisionKind::ChooseRobbedPlayer {
-                robber_pos: *robber_pos,
-            },
-            Self::DropHalf { required, .. } => DecisionKind::DropHalf {
-                required: *required,
-            },
-            Self::TradeResponse { .. } => DecisionKind::TradeResponse {
-                session: TradeSessionId(0),
-            },
-            Self::TradeOwner { .. } => DecisionKind::TradeOwnerAction {
-                session: TradeSessionId(0),
-            },
-        }
+        self.kind
     }
 
     pub fn token(&self) -> DecisionToken {
-        match self {
-            Self::InitialPlacement(token)
-            | Self::InitCommand(token)
-            | Self::PostDice(token)
-            | Self::PostDevCard(token)
-            | Self::Regular(token)
-            | Self::MoveRobber(token) => *token,
-            Self::ChooseRobbedPlayer { token, .. }
-            | Self::DropHalf { token, .. }
-            | Self::TradeResponse { token }
-            | Self::TradeOwner { token } => *token,
-        }
+        self.token
     }
 
     pub fn respond_initial_placement(
         &self,
         command: InitialPlacementCommand,
     ) -> Option<DecisionResponse> {
-        matches!(self, Self::InitialPlacement(_))
+        matches!(self.kind, DecisionKind::InitialPlacement)
             .then(|| self.respond(PlayerCommand::InitialPlacement(command)))
     }
 
     pub fn respond_init(&self, command: InitCommand) -> Option<DecisionResponse> {
-        matches!(self, Self::InitCommand(_))
+        matches!(self.kind, DecisionKind::InitCommand)
             .then(|| self.respond(PlayerCommand::InitCommand(command)))
     }
 
     pub fn respond_post_dice(&self, command: PostDiceCommand) -> Option<DecisionResponse> {
-        matches!(self, Self::PostDice(_)).then(|| self.respond(PlayerCommand::PostDice(command)))
+        matches!(self.kind, DecisionKind::PostDiceCommand)
+            .then(|| self.respond(PlayerCommand::PostDice(command)))
     }
 
     pub fn respond_post_dev_card(&self, command: PostDevCardCommand) -> Option<DecisionResponse> {
-        matches!(self, Self::PostDevCard(_))
+        matches!(self.kind, DecisionKind::PostDevCardCommand)
             .then(|| self.respond(PlayerCommand::PostDevCard(command)))
     }
 
     pub fn respond_regular(&self, command: RegularCommand) -> Option<DecisionResponse> {
-        matches!(self, Self::Regular(_)).then(|| self.respond(PlayerCommand::Regular(command)))
+        matches!(self.kind, DecisionKind::RegularCommand)
+            .then(|| self.respond(PlayerCommand::Regular(command)))
     }
 
     pub fn respond_move_robber(&self, command: MoveRobberCommand) -> Option<DecisionResponse> {
-        matches!(self, Self::MoveRobber(_))
+        matches!(self.kind, DecisionKind::MoveRobber)
             .then(|| self.respond(PlayerCommand::MoveRobber(command)))
     }
 
@@ -174,53 +113,59 @@ impl DecisionRequest {
         &self,
         command: ChooseRobbedPlayerCommand,
     ) -> Option<DecisionResponse> {
-        matches!(self, Self::ChooseRobbedPlayer { .. })
+        matches!(self.kind, DecisionKind::ChooseRobbedPlayer { .. })
             .then(|| self.respond(PlayerCommand::ChooseRobbedPlayer(command)))
     }
 
     pub fn respond_drop_half(&self, command: DropHalfCommand) -> Option<DecisionResponse> {
-        matches!(self, Self::DropHalf { .. })
+        matches!(self.kind, DecisionKind::DropHalf { .. })
             .then(|| self.respond(PlayerCommand::DropHalf(command)))
     }
 
     pub fn respond_trade(&self, command: TradeCommand) -> Option<DecisionResponse> {
-        matches!(self, Self::TradeResponse { .. } | Self::TradeOwner { .. })
-            .then(|| self.respond(PlayerCommand::Trade(command)))
+        matches!(
+            self.kind,
+            DecisionKind::TradeResponse { .. } | DecisionKind::TradeOwnerAction { .. }
+        )
+        .then(|| self.respond(PlayerCommand::Trade(command)))
     }
 
     fn respond(&self, command: PlayerCommand) -> DecisionResponse {
         DecisionResponse {
-            token: self.token(),
+            token: self.token,
             command,
         }
     }
 
     pub fn respond_command(&self, command: PlayerCommand) -> Option<DecisionResponse> {
-        match (self, command) {
-            (Self::InitialPlacement(_), PlayerCommand::InitialPlacement(command)) => {
+        match (self.kind, command) {
+            (DecisionKind::InitialPlacement, PlayerCommand::InitialPlacement(command)) => {
                 self.respond_initial_placement(command)
             }
-            (Self::InitCommand(_), PlayerCommand::InitCommand(command)) => {
+            (DecisionKind::InitCommand, PlayerCommand::InitCommand(command)) => {
                 self.respond_init(command)
             }
-            (Self::PostDice(_), PlayerCommand::PostDice(command)) => {
+            (DecisionKind::PostDiceCommand, PlayerCommand::PostDice(command)) => {
                 self.respond_post_dice(command)
             }
-            (Self::PostDevCard(_), PlayerCommand::PostDevCard(command)) => {
+            (DecisionKind::PostDevCardCommand, PlayerCommand::PostDevCard(command)) => {
                 self.respond_post_dev_card(command)
             }
-            (Self::Regular(_), PlayerCommand::Regular(command)) => self.respond_regular(command),
-            (Self::MoveRobber(_), PlayerCommand::MoveRobber(command)) => {
+            (DecisionKind::RegularCommand, PlayerCommand::Regular(command)) => {
+                self.respond_regular(command)
+            }
+            (DecisionKind::MoveRobber, PlayerCommand::MoveRobber(command)) => {
                 self.respond_move_robber(command)
             }
-            (Self::ChooseRobbedPlayer { .. }, PlayerCommand::ChooseRobbedPlayer(command)) => {
-                self.respond_choose_robbed_player(command)
-            }
-            (Self::DropHalf { .. }, PlayerCommand::DropHalf(command)) => {
+            (
+                DecisionKind::ChooseRobbedPlayer { .. },
+                PlayerCommand::ChooseRobbedPlayer(command),
+            ) => self.respond_choose_robbed_player(command),
+            (DecisionKind::DropHalf { .. }, PlayerCommand::DropHalf(command)) => {
                 self.respond_drop_half(command)
             }
             (
-                Self::TradeResponse { .. } | Self::TradeOwner { .. },
+                DecisionKind::TradeResponse { .. } | DecisionKind::TradeOwnerAction { .. },
                 PlayerCommand::Trade(command),
             ) => self.respond_trade(command),
             _ => None,
@@ -255,4 +200,65 @@ pub enum TradeResponseCommand {
     Accept { offer_id: TradeOfferId },
     Reject,
     Counter { offer: PlayerTrade },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gameplay::game::{
+        command::InitCommand,
+        decision::{DecisionLifetime, OpenDecision},
+        trade::TradeSessionId,
+    };
+
+    const P0: PlayerId = PlayerId::new(0);
+
+    #[test]
+    fn decision_request_preserves_trade_session_kind() {
+        let response = DecisionRequest::from_open_decision(&OpenDecision {
+            id: DecisionId(7),
+            player_id: P0,
+            kind: DecisionKind::TradeResponse {
+                session: TradeSessionId(42),
+            },
+            lifetime: DecisionLifetime::UntilSessionClosed(TradeSessionId(42)),
+        });
+        assert_eq!(
+            response.kind(),
+            DecisionKind::TradeResponse {
+                session: TradeSessionId(42)
+            }
+        );
+
+        let owner = DecisionRequest::from_open_decision(&OpenDecision {
+            id: DecisionId(8),
+            player_id: P0,
+            kind: DecisionKind::TradeOwnerAction {
+                session: TradeSessionId(43),
+            },
+            lifetime: DecisionLifetime::UntilSessionClosed(TradeSessionId(43)),
+        });
+        assert_eq!(
+            owner.kind(),
+            DecisionKind::TradeOwnerAction {
+                session: TradeSessionId(43)
+            }
+        );
+    }
+
+    #[test]
+    fn respond_command_rejects_wrong_decision_kind() {
+        let request = DecisionRequest::from_open_decision(&OpenDecision {
+            id: DecisionId(9),
+            player_id: P0,
+            kind: DecisionKind::InitialPlacement,
+            lifetime: DecisionLifetime::OneShot,
+        });
+
+        assert!(
+            request
+                .respond_command(PlayerCommand::InitCommand(InitCommand::RollDice))
+                .is_none()
+        );
+    }
 }
