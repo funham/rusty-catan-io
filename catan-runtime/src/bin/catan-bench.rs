@@ -583,18 +583,18 @@ mod tests {
         assert_eq!(result_counts.wins, 5);
         assert_eq!(result_counts.limits, 0);
         assert_eq!(result_counts.interruptions, 0);
-        assert_eq!(totals.turns_started, 453);
-        assert_eq!(totals.turns_ended, 448);
-        assert_eq!(totals.decision_requests, 1590);
-        assert_eq!(totals.regular_actions, 909);
-        assert_eq!(totals.builds, 200);
-        assert_eq!(totals.bank_trades, 165);
-        assert_eq!(totals.dev_cards_bought, 96);
-        assert_eq!(totals.dev_cards_used, 74);
-        assert_eq!(totals.dice_rolls, 452);
-        assert_eq!(totals.resources_distributed, 386);
-        assert_eq!(totals.player_discards, 26);
-        assert_eq!(totals.robber_moves, 122);
+        assert_eq!(totals.turns_started, 533);
+        assert_eq!(totals.turns_ended, 528);
+        assert_eq!(totals.decision_requests, 1879);
+        assert_eq!(totals.regular_actions, 1081);
+        assert_eq!(totals.builds, 232);
+        assert_eq!(totals.bank_trades, 215);
+        assert_eq!(totals.dev_cards_bought, 106);
+        assert_eq!(totals.dev_cards_used, 82);
+        assert_eq!(totals.dice_rolls, 532);
+        assert_eq!(totals.resources_distributed, 458);
+        assert_eq!(totals.player_discards, 39);
+        assert_eq!(totals.robber_moves, 133);
         assert_eq!(totals.action_rejections, 0);
     }
 
@@ -618,18 +618,18 @@ mod tests {
         assert_eq!(result_counts.wins, 100);
         assert_eq!(result_counts.limits, 0);
         assert_eq!(result_counts.interruptions, 0);
-        assert_eq!(totals.turns_started, 9597);
-        assert_eq!(totals.turns_ended, 9497);
-        assert_eq!(totals.decision_requests, 32798);
-        assert_eq!(totals.regular_actions, 18335);
-        assert_eq!(totals.builds, 4005);
-        assert_eq!(totals.bank_trades, 3046);
-        assert_eq!(totals.dev_cards_bought, 1787);
-        assert_eq!(totals.dev_cards_used, 1335);
-        assert_eq!(totals.dice_rolls, 9573);
-        assert_eq!(totals.resources_distributed, 7987);
-        assert_eq!(totals.player_discards, 472);
-        assert_eq!(totals.robber_moves, 2542);
+        assert_eq!(totals.turns_started, 10327);
+        assert_eq!(totals.turns_ended, 10227);
+        assert_eq!(totals.decision_requests, 35579);
+        assert_eq!(totals.regular_actions, 19974);
+        assert_eq!(totals.builds, 4269);
+        assert_eq!(totals.bank_trades, 3499);
+        assert_eq!(totals.dev_cards_bought, 1979);
+        assert_eq!(totals.dev_cards_used, 1485);
+        assert_eq!(totals.dice_rolls, 10317);
+        assert_eq!(totals.resources_distributed, 8625);
+        assert_eq!(totals.player_discards, 535);
+        assert_eq!(totals.robber_moves, 2754);
         assert_eq!(totals.action_rejections, 0);
     }
 }
