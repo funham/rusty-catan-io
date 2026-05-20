@@ -75,7 +75,7 @@ This framework implements the complete logic of Settlers of Catan, exposing a cl
 ### Basic Usage (TODO: check correctness)
 
 ```rust
-let init = GameInitializationState::default();
+let init = SetupGameState::default();
 let mut engine = GameEngine::from_init(init, RunOptions::default());
 let transaction = engine.start()?;
 let outputs = projector::project_transaction(&transaction);

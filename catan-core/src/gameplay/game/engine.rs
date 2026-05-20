@@ -1,3 +1,7 @@
+pub mod decider;
+pub mod lifecycle;
+pub mod reducer;
+
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -6,20 +10,19 @@ use super::{
     decision::{DecisionKind, OpenDecision},
     input::{DecisionResponse, GameInput, PlayerCommand},
 };
+#[cfg(test)]
+use crate::gameplay::game::engine::lifecycle::PlayingEngine;
 use crate::{
     algorithm,
     gameplay::{
         field::state::{BoardLayout, BoardState},
         game::{
             command::{self, InitialPlacementCommand},
-            decider,
+            engine::{lifecycle::EngineState, reducer::EngineApplyError},
             event::{EventCause, EventTransaction, GameEvent},
             index::GameIndex,
-            init::GameInitializationState,
-            lifecycle::EngineState,
-            reducer::{self, EngineApplyError},
             run::{GameResult, GameRunStats, RunOptions},
-            state::{GameState, TableState},
+            state::{GameState, SetupGameState, TableState},
         },
         primitives::{self, player::PlayerId, turn},
         random::GameRandom,
@@ -116,7 +119,7 @@ impl GameEngine {
         }
     }
 
-    pub fn from_init(init: GameInitializationState, options: RunOptions) -> Self {
+    pub fn from_init(init: SetupGameState, options: RunOptions) -> Self {
         Self {
             core: EngineState::unstarted(init),
             runtime: EngineRuntime::new(options),
@@ -323,6 +326,8 @@ impl GameEngine {
     #[cfg(test)]
     fn finish_core(&mut self, result: GameResult) {
         if let EngineState::Playing(active) = &self.core {
+            use crate::gameplay::game::engine::lifecycle::FinishedEngine;
+
             self.core = EngineState::Finished(FinishedEngine {
                 game: active.game.clone(),
                 index: active.index.clone(),
@@ -348,8 +353,7 @@ use super::{
     decision::{DecisionId, DecisionLifetime, PendingDecisions},
     trade::{TradeOfferId, TradeResponseState, TradeScope, TradeSession, TradeSessionId},
 };
-#[cfg(test)]
-use crate::gameplay::game::lifecycle::{FinishedEngine, PlayingEngine};
+
 #[cfg(test)]
 use primitives::{bank::BankResourceExchangeError, resource::ResourceSet, trade::PlayerTrade};
 

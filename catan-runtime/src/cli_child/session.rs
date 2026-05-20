@@ -637,7 +637,7 @@ mod tests {
     const P0: PlayerId = PlayerId::new(0);
 
     fn test_model() -> UiModel {
-        let init = catan_core::gameplay::game::init::GameInitializationState::default();
+        let init = catan_core::gameplay::game::state::SetupGameState::default();
         let state = init.finish();
         let index = catan_core::gameplay::game::index::GameIndex::rebuild(&state);
         let visibility = VisibilityConfig::default();

@@ -2,9 +2,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     gameplay::{
-        game::command::{
-            ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, InitialPlacementCommand,
-            MoveRobberCommand, PostDevCardCommand, PostDiceCommand, RegularCommand,
+        game::{
+            command::{
+                ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, InitialPlacementCommand,
+                MoveRobberCommand, PostDevCardCommand, PostDiceCommand, RegularCommand,
+            },
+            decision::{DecisionId, DecisionKind, OpenDecision},
+            trade::{TradeOfferId, TradeScope, TradeSessionId},
         },
         primitives::{
             player::PlayerId,
@@ -12,11 +16,6 @@ use crate::{
         },
     },
     topology::Hex,
-};
-
-use super::{
-    decision::{DecisionId, DecisionKind, OpenDecision},
-    trade::{TradeOfferId, TradeScope},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -117,10 +116,10 @@ impl DecisionRequest {
                 required: *required,
             },
             Self::TradeResponse { .. } => DecisionKind::TradeResponse {
-                session: super::trade::TradeSessionId(0),
+                session: TradeSessionId(0),
             },
             Self::TradeOwner { .. } => DecisionKind::TradeOwnerAction {
-                session: super::trade::TradeSessionId(0),
+                session: TradeSessionId(0),
             },
         }
     }

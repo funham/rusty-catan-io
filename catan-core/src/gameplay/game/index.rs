@@ -261,7 +261,7 @@ mod tests {
     use crate::{
         gameplay::{
             field::state::BuildCollection,
-            game::init::GameInitializationState,
+            game::state::SetupGameState,
             primitives::{
                 build::{BoardBuildData, Establishment, EstablishmentType, Road},
                 dev_card::{DevCardKind, DevCardUsage, UsableDevCard},
@@ -291,7 +291,7 @@ mod tests {
 
     #[test]
     fn indexed_longest_road_respects_opponent_settlement_blockers() {
-        let mut state = GameInitializationState::default().finish();
+        let mut state = SetupGameState::default().finish();
         let blocker = path(h(0, 0), h(1, 0)).intersections()[0];
         let player_roads = h(0, 0)
             .neighbors()
@@ -331,7 +331,7 @@ mod tests {
 
     #[test]
     fn incremental_settlement_refresh_matches_full_rebuild_for_longest_road_blocker() {
-        let mut state = GameInitializationState::default().finish();
+        let mut state = SetupGameState::default().finish();
         let blocker = path(h(0, 0), h(1, 0)).intersections()[0];
         let player_roads = h(0, 0)
             .neighbors()
@@ -397,7 +397,7 @@ mod tests {
 
     #[test]
     fn incremental_road_refresh_matches_full_rebuild() {
-        let mut state = GameInitializationState::default().finish();
+        let mut state = SetupGameState::default().finish();
         let mut incremental = GameIndex::rebuild(&state);
         let road = Road {
             path: path(h(0, 0), h(1, 0)),
@@ -413,7 +413,7 @@ mod tests {
 
     #[test]
     fn incremental_settlement_refresh_updates_ports_and_matches_full_rebuild() {
-        let mut state = GameInitializationState::default().finish();
+        let mut state = SetupGameState::default().finish();
         let mut incremental = GameIndex::rebuild(&state);
         let pos = *state
             .board
@@ -437,7 +437,7 @@ mod tests {
 
     #[test]
     fn incremental_city_refresh_matches_full_rebuild() {
-        let mut state = GameInitializationState::default().finish();
+        let mut state = SetupGameState::default().finish();
         let pos = path(h(0, 0), h(1, 0)).intersections()[0];
         let settlement = Establishment {
             vtx: pos,
@@ -463,7 +463,7 @@ mod tests {
 
     #[test]
     fn incremental_roadbuild_refresh_matches_full_rebuild() {
-        let mut state = GameInitializationState::default().finish();
+        let mut state = SetupGameState::default().finish();
         let mut incremental = GameIndex::rebuild(&state);
         let roads = [path(h(0, 0), h(1, 0)), path(h(1, 0), h(1, -1))];
         let mut builds = empty_build_collections();
@@ -477,7 +477,7 @@ mod tests {
 
     #[test]
     fn roadbuild_refresh_uses_build_state_owner_seed_like_full_rebuild() {
-        let mut state = GameInitializationState::default().finish();
+        let mut state = SetupGameState::default().finish();
         let roads = [
             path(h(0, 0), h(1, 0)),
             path(h(0, 0), h(1, -1)),
@@ -498,7 +498,7 @@ mod tests {
 
     #[test]
     fn knight_refresh_updates_largest_army_only() {
-        let mut state = GameInitializationState::default().finish();
+        let mut state = SetupGameState::default().finish();
         let mut incremental = GameIndex::rebuild(&state);
         let before_builds = incremental.all_builds.clone();
         let before_roads = incremental.longest_road_lengths.clone();
@@ -537,7 +537,7 @@ mod tests {
 
     #[test]
     fn dev_card_refresh_resyncs_longest_road_owner_like_full_rebuild() {
-        let mut state = GameInitializationState::default().finish();
+        let mut state = SetupGameState::default().finish();
         let player_zero_roads = h(0, 0)
             .neighbors()
             .into_iter()
@@ -577,7 +577,7 @@ mod tests {
 
     #[test]
     fn resource_dev_card_refreshes_leave_index_unchanged() {
-        let state = GameInitializationState::default().finish();
+        let state = SetupGameState::default().finish();
         let mut plenty = GameIndex::rebuild(&state);
         let mut monopoly = plenty.clone();
 

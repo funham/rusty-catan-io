@@ -6,16 +6,18 @@ use crate::{
     algorithm,
     constants::costs,
     gameplay::{
-        field::state::{BoardLayout, BoardState},
+        field::state::{BoardLayout, BoardState, FieldBuildParam},
         primitives::{
+            BackAndForthCycle,
             bank::{Bank, BankResourceExchangeError, PlayerResourceExchangeError},
             build::{BoardBuildData, Build, BuildingError, EstablishmentType, Road},
             dev_card::DevCardUsage,
             player::{PlayerDataContainer, PlayerId},
             resource::{Resource, ResourceCollectionError, ResourceSet},
             trade::BankTrade,
-            turn::GameTurn,
+            turn::{GameTurn, RegularCycle},
         },
+        random::GameRandom,
     },
     topology::Hex,
 };
@@ -33,13 +35,29 @@ pub struct TableState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GameState {
+pub struct TurnedTableState<Cycle = RegularCycle> {
     #[serde(flatten)]
     pub table: TableState,
-    pub turn: GameTurn,
+    pub turn: GameTurn<Cycle>,
 }
 
-impl std::ops::Deref for GameState {
+pub type GameState = TurnedTableState<RegularCycle>;
+pub type SetupGameState = TurnedTableState<BackAndForthCycle>;
+
+#[derive(Debug)]
+pub struct SetupGameOptions {
+    pub random: GameRandom,
+}
+
+impl Default for SetupGameOptions {
+    fn default() -> Self {
+        Self {
+            random: GameRandom::default(),
+        }
+    }
+}
+
+impl<Cycle> std::ops::Deref for TurnedTableState<Cycle> {
     type Target = TableState;
 
     fn deref(&self) -> &Self::Target {
@@ -47,7 +65,7 @@ impl std::ops::Deref for GameState {
     }
 }
 
-impl std::ops::DerefMut for GameState {
+impl<Cycle> std::ops::DerefMut for TurnedTableState<Cycle> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.table
     }
@@ -97,9 +115,54 @@ pub enum BuyDevCardError {
     BankIsShort,
 }
 
-impl GameState {
+impl TurnedTableState<RegularCycle> {
     pub fn into_parts(self) -> (TableState, GameTurn) {
         (self.table, self.turn)
+    }
+}
+
+impl Default for TurnedTableState<BackAndForthCycle> {
+    fn default() -> Self {
+        Self::new(FieldBuildParam::default())
+    }
+}
+
+impl TurnedTableState<BackAndForthCycle> {
+    pub fn new(field_build_param: FieldBuildParam) -> Self {
+        Self::new_with_options(field_build_param, SetupGameOptions::default())
+    }
+
+    pub fn new_with_options(
+        field_build_param: FieldBuildParam,
+        mut options: SetupGameOptions,
+    ) -> Self {
+        let board = Arc::new(BoardLayout::new(field_build_param));
+        let mut bank = Bank::default();
+        options.random.shuffle_dev_cards(&mut bank.dev_cards);
+        Self::from_board_and_bank(board, bank)
+    }
+
+    pub fn new_with_seed(field_build_param: FieldBuildParam, seed: u64) -> Self {
+        Self::new_with_options(
+            field_build_param,
+            SetupGameOptions {
+                random: GameRandom::seeded(seed),
+            },
+        )
+    }
+
+    fn from_board_and_bank(board: Arc<BoardLayout>, bank: Bank) -> Self {
+        let n_players = board.n_players;
+        Self {
+            table: TableState {
+                players: PlayerDataContainer::new(n_players),
+                builds: BoardBuildData::new(n_players),
+                board_state: BoardState::new(&board),
+                bank,
+                board,
+            },
+            turn: GameTurn::new(n_players as u8),
+        }
     }
 }
 
@@ -558,26 +621,38 @@ impl TableState {
     }
 }
 
+impl SetupGameState {
+    pub fn finish(self) -> GameState {
+        GameState {
+            table: self.table,
+            turn: self.turn.into_regular(),
+        }
+    }
+
+    pub fn into_setup_parts(self) -> (TableState, GameTurn<BackAndForthCycle>) {
+        (self.table, self.turn)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{DevCardUsageError, GameState};
+    use crate::gameplay::field::state::FieldBuildParam;
+    use crate::gameplay::game::state::SetupGameState;
     use crate::topology::Hex;
     use crate::{
         gameplay::game::command::InitialPlacementCommand,
-        gameplay::{
-            game::init::GameInitializationState,
-            primitives::{
-                dev_card::{DevCardKind, DevCardUsage, UsableDevCard},
-                player::PlayerId,
-                resource::{Resource, ResourceSet},
-            },
+        gameplay::primitives::{
+            dev_card::{DevCardKind, DevCardUsage, UsableDevCard},
+            player::PlayerId,
+            resource::{Resource, ResourceSet},
         },
     };
     const P0: PlayerId = PlayerId::new(0);
     const P1: PlayerId = PlayerId::new(1);
 
     fn state_with_two_initial_settlements() -> (GameState, Hex) {
-        let mut init = GameInitializationState::default();
+        let mut init = SetupGameState::default();
         let mut victim_hex = None;
 
         for player_id in 0..2 {
@@ -620,7 +695,7 @@ mod tests {
 
     #[test]
     fn game_state_serializes_exact_state_for_snapshots() {
-        let mut state = GameInitializationState::default().finish();
+        let mut state = SetupGameState::default().finish();
         state.bank.dev_cards = vec![
             DevCardKind::VictoryPoint,
             DevCardKind::Usable(UsableDevCard::Knight),
@@ -748,5 +823,28 @@ mod tests {
             state.players.get(0).dev_cards().used[UsableDevCard::Knight],
             0
         );
+    }
+
+    #[test]
+    fn seeded_initialization_shuffles_dev_cards_deterministically() {
+        let first = SetupGameState::new_with_seed(FieldBuildParam::default(), 42);
+        let second = SetupGameState::new_with_seed(FieldBuildParam::default(), 42);
+        let different = SetupGameState::new_with_seed(FieldBuildParam::default(), 43);
+
+        assert_eq!(first.bank.dev_cards, second.bank.dev_cards);
+        assert_ne!(first.bank.dev_cards, different.bank.dev_cards);
+    }
+
+    #[test]
+    fn initialization_and_game_state_share_table_turn_shape() {
+        let init = SetupGameState::default();
+        let n_players = init.table.players.count();
+
+        assert_eq!(init.turn.get_turn_index(), PlayerId::new(0));
+
+        let game = init.finish();
+
+        assert_eq!(game.table.players.count(), n_players);
+        assert_eq!(game.turn.get_turn_index(), PlayerId::new(0));
     }
 }

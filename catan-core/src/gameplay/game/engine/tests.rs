@@ -3,18 +3,17 @@ use crate::{
     gameplay::{
         game::{
             command::{InitCommand, RegularCommand},
-            decider,
             decision::{DecisionId, DecisionKind, DecisionLifetime, OpenDecision},
+            engine::{decider, lifecycle::EngineState, reducer},
             event::{EventBatch, GameEvent},
-            init::GameInitializationState,
             input::{
                 DecisionRequest, DecisionResponse, DecisionToken, GameInput, PlayerCommand,
                 TradeCommand, TradeResponseCommand,
             },
-            lifecycle::EngineState,
             output::{CommandRejectionReason, GameOutput},
-            projector, reducer,
+            projector,
             run::{GameResult, RunOptions},
+            state::SetupGameState,
             trade::TradeScope,
         },
         primitives::{
@@ -49,7 +48,7 @@ fn one_wood() -> ResourceSet {
 }
 
 fn started_engine() -> (GameEngine, Vec<GameOutput>) {
-    let init = GameInitializationState::default();
+    let init = SetupGameState::default();
     let mut engine = GameEngine::from_init(init, RunOptions::default());
     let outputs = start_outputs(&mut engine);
     (engine, outputs)
@@ -163,7 +162,7 @@ fn event_batch_has_extra_inline_capacity() {
 
 #[test]
 fn reducer_moves_active_lifecycle_to_finished_result() {
-    let mut lifecycle = EngineState::playing(GameInitializationState::default().finish());
+    let mut lifecycle = EngineState::playing(SetupGameState::default().finish());
 
     reducer::apply_event(
         &mut lifecycle,
@@ -185,7 +184,7 @@ fn reducer_moves_active_lifecycle_to_finished_result() {
 
 #[test]
 fn reducer_replays_initial_placement_event() {
-    let init = GameInitializationState::default();
+    let init = SetupGameState::default();
     let placement = init
         .builds
         .query()
@@ -215,7 +214,7 @@ fn reducer_replays_initial_placement_event() {
 
 #[test]
 fn reducer_applies_explicit_resource_distribution_event() {
-    let mut lifecycle = EngineState::playing(GameInitializationState::default().finish());
+    let mut lifecycle = EngineState::playing(SetupGameState::default().finish());
     let mut by_player = smallvec::SmallVec::new();
     by_player.push((P0, one_brick()));
 
@@ -234,7 +233,7 @@ fn reducer_applies_explicit_resource_distribution_event() {
 
 #[test]
 fn reducer_applies_initial_resource_grant_event() {
-    let mut lifecycle = EngineState::playing(GameInitializationState::default().finish());
+    let mut lifecycle = EngineState::playing(SetupGameState::default().finish());
 
     reducer::apply_event(
         &mut lifecycle,
@@ -255,7 +254,7 @@ fn reducer_applies_initial_resource_grant_event() {
 
 #[test]
 fn reducer_applies_explicit_resource_stolen_event() {
-    let mut lifecycle = EngineState::playing(GameInitializationState::default().finish());
+    let mut lifecycle = EngineState::playing(SetupGameState::default().finish());
     let EngineState::Playing(active) = &mut lifecycle else {
         panic!("lifecycle should be active");
     };
@@ -283,7 +282,7 @@ fn reducer_applies_explicit_resource_stolen_event() {
 
 #[test]
 fn reducer_applies_discard_robber_and_turn_events() {
-    let mut lifecycle = EngineState::playing(GameInitializationState::default().finish());
+    let mut lifecycle = EngineState::playing(SetupGameState::default().finish());
     let EngineState::Playing(active) = &mut lifecycle else {
         panic!("lifecycle should be active");
     };
@@ -328,7 +327,7 @@ fn reducer_applies_discard_robber_and_turn_events() {
 
 #[test]
 fn reducer_applies_bank_trade_event_with_exact_exchange() {
-    let mut lifecycle = EngineState::playing(GameInitializationState::default().finish());
+    let mut lifecycle = EngineState::playing(SetupGameState::default().finish());
     let EngineState::Playing(active) = &mut lifecycle else {
         panic!("lifecycle should be active");
     };
@@ -365,7 +364,7 @@ fn reducer_applies_bank_trade_event_with_exact_exchange() {
 
 #[test]
 fn decider_start_emits_game_started_and_initial_decision() {
-    let lifecycle = EngineState::unstarted(GameInitializationState::default());
+    let lifecycle = EngineState::unstarted(SetupGameState::default());
 
     let events = decider::decide(&lifecycle, GameInput::Start);
 
@@ -378,7 +377,7 @@ fn decider_start_emits_game_started_and_initial_decision() {
 
 #[test]
 fn decider_end_move_emits_turn_transition_events() {
-    let mut lifecycle = EngineState::playing(GameInitializationState::default().finish());
+    let mut lifecycle = EngineState::playing(SetupGameState::default().finish());
     let decision = OpenDecision {
         id: crate::gameplay::game::decision::DecisionId(7),
         player_id: P0,
@@ -424,7 +423,7 @@ fn decider_end_move_emits_turn_transition_events() {
 
 #[test]
 fn decider_valid_bank_trade_emits_trade_and_reopens_regular_decision() {
-    let mut lifecycle = EngineState::playing(GameInitializationState::default().finish());
+    let mut lifecycle = EngineState::playing(SetupGameState::default().finish());
     let decision = OpenDecision {
         id: crate::gameplay::game::decision::DecisionId(7),
         player_id: P0,
@@ -485,7 +484,7 @@ fn decider_valid_bank_trade_emits_trade_and_reopens_regular_decision() {
 
 #[test]
 fn decider_valid_build_emits_build_and_reopens_regular_decision() {
-    let init = GameInitializationState::default();
+    let init = SetupGameState::default();
     let mut game = init.finish();
     let first_placement = game
         .builds
@@ -555,7 +554,7 @@ fn decider_valid_build_emits_build_and_reopens_regular_decision() {
 
 #[test]
 fn decider_roll_dice_harvest_emits_complete_facts() {
-    let mut lifecycle = EngineState::playing(GameInitializationState::default().finish());
+    let mut lifecycle = EngineState::playing(SetupGameState::default().finish());
     let decision = OpenDecision {
         id: crate::gameplay::game::decision::DecisionId(7),
         player_id: P0,
@@ -604,7 +603,7 @@ fn decider_roll_dice_harvest_emits_complete_facts() {
 
 #[test]
 fn decider_roll_dice_seven_opens_discard_or_robber_decision() {
-    let mut lifecycle = EngineState::playing(GameInitializationState::default().finish());
+    let mut lifecycle = EngineState::playing(SetupGameState::default().finish());
     let decision = OpenDecision {
         id: crate::gameplay::game::decision::DecisionId(7),
         player_id: P0,
@@ -652,7 +651,7 @@ fn decider_roll_dice_seven_opens_discard_or_robber_decision() {
 
 #[test]
 fn decider_buy_dev_card_emits_private_draw_fact_and_reopens_regular_decision() {
-    let mut lifecycle = EngineState::playing(GameInitializationState::default().finish());
+    let mut lifecycle = EngineState::playing(SetupGameState::default().finish());
     let decision = OpenDecision {
         id: crate::gameplay::game::decision::DecisionId(7),
         player_id: P0,
@@ -700,7 +699,7 @@ fn decider_buy_dev_card_emits_private_draw_fact_and_reopens_regular_decision() {
 
 #[test]
 fn decider_use_dev_card_emits_usage_and_post_dev_card_decision() {
-    let mut lifecycle = EngineState::playing(GameInitializationState::default().finish());
+    let mut lifecycle = EngineState::playing(SetupGameState::default().finish());
     let decision = OpenDecision {
         id: crate::gameplay::game::decision::DecisionId(7),
         player_id: P0,

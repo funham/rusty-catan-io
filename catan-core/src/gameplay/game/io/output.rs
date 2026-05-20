@@ -1,11 +1,10 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    decision::DecisionId,
     event::{EventTransaction, EventVisibility, GameEvent},
     input::{DecisionRequest, DecisionToken},
 };
-use crate::gameplay::primitives::player::PlayerId;
+use crate::gameplay::{game::decision::DecisionId, primitives::player::PlayerId};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameEventRecord {

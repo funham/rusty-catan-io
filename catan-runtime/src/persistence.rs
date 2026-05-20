@@ -146,9 +146,9 @@ mod tests {
         engine::GameEngine,
         event::GameEvent,
         index::GameIndex,
-        init::GameInitializationState,
         output::{GameEventRecord, GameOutput},
         run::RunOptions,
+        state::SetupGameState,
         view::{ContextFactory, VisibilityConfig},
     };
 
@@ -173,7 +173,7 @@ mod tests {
             })
             .unwrap()
             .unwrap();
-        let init = GameInitializationState::default();
+        let init = SetupGameState::default();
         let engine = GameEngine::from_init(init.clone(), RunOptions::default());
         let state = engine.table();
         let index = GameIndex::rebuild_table(state);
@@ -212,7 +212,7 @@ mod tests {
             PersistenceObserver::from_config(&PersistenceConfig::JournalOnly { dir: dir.clone() })
                 .unwrap()
                 .unwrap();
-        let init = GameInitializationState::default();
+        let init = SetupGameState::default();
         let engine = GameEngine::from_init(init.clone(), RunOptions::default());
         let state = engine.table();
         let index = GameIndex::rebuild_table(state);

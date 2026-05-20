@@ -202,17 +202,14 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
 mod tests {
     use std::fs;
 
-    use catan_core::gameplay::game::{
-        engine::GameEngine, init::GameInitializationState, run::RunOptions,
-    };
+    use catan_core::gameplay::game::{engine::GameEngine, run::RunOptions, state::SetupGameState};
 
     use super::{SnapshotStore, load_checkpoint};
 
     #[test]
     fn checkpoint_store_writes_directory_snapshot() {
         let dir = unique_test_dir();
-        let engine =
-            GameEngine::from_init(GameInitializationState::default(), RunOptions::default());
+        let engine = GameEngine::from_init(SetupGameState::default(), RunOptions::default());
         let mut store = SnapshotStore::new_in(dir.clone()).unwrap();
 
         let snapshot_dir = store.write_checkpoint(&engine).unwrap();
@@ -249,8 +246,7 @@ mod tests {
     #[test]
     fn checkpoint_store_finds_latest_checkpoint_at_or_before_sequence() {
         let dir = unique_test_dir();
-        let engine =
-            GameEngine::from_init(GameInitializationState::default(), RunOptions::default());
+        let engine = GameEngine::from_init(SetupGameState::default(), RunOptions::default());
         let mut store = SnapshotStore::new_in(dir.clone()).unwrap();
         store.write_checkpoint_at(&engine, 5).unwrap();
         let second = store.write_checkpoint_at(&engine, 10).unwrap();

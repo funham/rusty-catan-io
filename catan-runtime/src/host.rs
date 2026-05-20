@@ -14,7 +14,7 @@ use catan_agents::{
     remote_agent::{CliRole, CliToHost, read_frame},
 };
 use catan_core::gameplay::{
-    game::{init::GameInitializationState, run::RunOptions},
+    game::{run::RunOptions, state::SetupGameState},
     primitives::player::PlayerId,
 };
 
@@ -149,17 +149,17 @@ fn build_observers(
 fn build_initial_state(
     config: &FieldConfig,
     player_count: usize,
-) -> Result<GameInitializationState, String> {
+) -> Result<SetupGameState, String> {
     match config {
         FieldConfig::Default => {
             let mut field = catan_core::gameplay::field::state::FieldBuildParam::default();
             field.n_players = player_count;
-            Ok(GameInitializationState::new(field))
+            Ok(SetupGameState::new(field))
         }
         FieldConfig::LayoutRef { path } => {
             let arrangement = catan_core::gameplay::field::ser::arrangement_from_json(path)
                 .ok_or_else(|| format!("failed to read field layout {}", path.display()))?;
-            Ok(GameInitializationState::new(
+            Ok(SetupGameState::new(
                 catan_core::gameplay::field::state::FieldBuildParam {
                     n_players: player_count,
                     arrangement,
@@ -400,9 +400,7 @@ fn apple_quote(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use catan_agents::remote_agent::CliRole;
-    use catan_core::gameplay::game::{
-        engine::GameEngine, init::GameInitializationState, run::RunOptions,
-    };
+    use catan_core::gameplay::game::{engine::GameEngine, run::RunOptions, state::SetupGameState};
 
     use crate::{
         config::{
@@ -451,8 +449,7 @@ mod tests {
     #[test]
     fn snapshot_initial_engine_preserves_pending_decisions() {
         let dir = unique_test_dir();
-        let mut engine =
-            GameEngine::from_init(GameInitializationState::default(), RunOptions::default());
+        let mut engine = GameEngine::from_init(SetupGameState::default(), RunOptions::default());
         engine.start().expect("engine should start");
         let mut store = SnapshotStore::new_in(dir.clone()).unwrap();
         let snapshot_dir = store.write_checkpoint(&engine).unwrap();

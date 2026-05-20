@@ -515,8 +515,8 @@ impl From<Road> for FieldSelection {
 #[cfg(test)]
 mod tests {
     use catan_core::{
-        gameplay::game::command::InitialPlacementCommand,
-        gameplay::game::init::GameInitializationState, gameplay::primitives::player::PlayerId,
+        gameplay::game::command::InitialPlacementCommand, gameplay::game::state::SetupGameState,
+        gameplay::primitives::player::PlayerId,
     };
 
     use super::*;
@@ -527,7 +527,7 @@ mod tests {
 
     #[test]
     fn renders_default_game_field() {
-        let init = GameInitializationState::default();
+        let init = SetupGameState::default();
         let view = RenderGameView {
             board: RenderBoard::from_board(&init.board),
             board_state: init.board_state,
@@ -564,7 +564,7 @@ mod tests {
 
     #[test]
     fn establishments_render_above_roads_from_later_players() {
-        let init = GameInitializationState::default();
+        let init = SetupGameState::default();
         let (settlement, road) = init
             .builds
             .query()

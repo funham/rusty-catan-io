@@ -2,9 +2,9 @@ use crate::gameplay::{
     constants::costs,
     game::{
         decision::{DecisionId, DecisionKind, OpenDecision},
+        engine::lifecycle::{EngineState, FinishedEngine, PlayingEngine, SetupEngine},
         event::GameEvent,
         index::GameIndex,
-        lifecycle::{EngineState, FinishedEngine, PlayingEngine, SetupEngine},
         run::GameResult,
         trade::{TradeOfferId, TradeResponseState, TradeScope, TradeSession, TradeSessionId},
     },

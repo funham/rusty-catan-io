@@ -3,9 +3,9 @@ use num::Integer;
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegularCycle;
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackAndForthCycle;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

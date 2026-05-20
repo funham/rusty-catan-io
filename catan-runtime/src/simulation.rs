@@ -4,11 +4,11 @@ use catan_agents::bot::BotPolicy;
 use catan_core::gameplay::{
     game::{
         engine::GameEngine,
-        init::GameInitializationState,
         input::PlayerCommand,
         output::GameOutput,
         projector,
         run::{GameResult, GameRunStats, RunOptions},
+        state::SetupGameState,
         view::{ContextFactory, SearchFactory, VisibilityConfig},
     },
     primitives::player::PlayerId,
@@ -21,11 +21,7 @@ pub struct SimulationHost {
 }
 
 impl SimulationHost {
-    pub fn new(
-        init: GameInitializationState,
-        bots: Vec<Box<dyn BotPolicy>>,
-        options: RunOptions,
-    ) -> Self {
+    pub fn new(init: SetupGameState, bots: Vec<Box<dyn BotPolicy>>, options: RunOptions) -> Self {
         Self {
             engine: GameEngine::from_init(init, options),
             bots,
@@ -121,7 +117,7 @@ mod tests {
 
     #[test]
     fn lazy_bots_reach_turn_limit() {
-        let init = GameInitializationState::default();
+        let init = SetupGameState::default();
         let bots = (0..init.board.n_players)
             .map(|id| {
                 Box::new(LazyAgent::new(

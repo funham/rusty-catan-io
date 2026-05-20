@@ -331,7 +331,7 @@ mod tests {
 
         let mut seat = RemoteCliSeat::new(0, host_stream).unwrap();
         let mut commands = SeatCommandBuffer::default();
-        let init = catan_core::gameplay::game::init::GameInitializationState::default();
+        let init = catan_core::gameplay::game::state::SetupGameState::default();
         let state = init.finish();
         let index = catan_core::gameplay::game::index::GameIndex::rebuild(&state);
         let visibility = catan_core::gameplay::game::view::VisibilityConfig::default();
@@ -382,7 +382,7 @@ mod tests {
 
         let mut seat = RemoteCliSeat::new(0, host_stream).unwrap();
         let mut commands = SeatCommandBuffer::default();
-        let init = catan_core::gameplay::game::init::GameInitializationState::default();
+        let init = catan_core::gameplay::game::state::SetupGameState::default();
         let state = init.finish();
         let index = catan_core::gameplay::game::index::GameIndex::rebuild(&state);
         let visibility = catan_core::gameplay::game::view::VisibilityConfig::default();

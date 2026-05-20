@@ -4,11 +4,11 @@ use catan_agents::bot::BotPolicy;
 use catan_core::gameplay::{
     game::{
         engine::GameEngine,
-        init::GameInitializationState,
         input::{DecisionRequest, DecisionResponse},
         output::GameOutput,
         projector,
         run::{GameResult, RunOptions},
+        state::SetupGameState,
         view::{ContextFactory, PlayerDecisionContext, SearchFactory, VisibilityConfig},
     },
     primitives::player::PlayerId,
@@ -103,11 +103,7 @@ pub struct SyncGameHost {
 }
 
 impl SyncGameHost {
-    pub fn new(
-        init: GameInitializationState,
-        seats: Vec<Box<dyn Seat>>,
-        options: RunOptions,
-    ) -> Self {
+    pub fn new(init: SetupGameState, seats: Vec<Box<dyn Seat>>, options: RunOptions) -> Self {
         Self::from_engine(GameEngine::from_init(init, options), seats)
     }
 
@@ -228,7 +224,7 @@ mod tests {
 
     #[test]
     fn bot_seat_responds_immediately() {
-        let init = GameInitializationState::default();
+        let init = SetupGameState::default();
         let seats = (0..init.board.n_players)
             .map(|id| {
                 bot_seat(Box::new(LazyAgent::new(
@@ -275,7 +271,7 @@ mod tests {
 
     #[test]
     fn human_like_seat_can_submit_later() {
-        let init = GameInitializationState::default();
+        let init = SetupGameState::default();
         let seats: Vec<Box<dyn Seat>> = vec![Box::new(RecordingSeat {
             id: P0,
             decision: None,
@@ -306,7 +302,7 @@ mod tests {
 
     #[test]
     fn output_observer_receives_engine_outputs() {
-        let init = GameInitializationState::default();
+        let init = SetupGameState::default();
         let seats = (0..init.board.n_players)
             .map(|id| {
                 bot_seat(Box::new(LazyAgent::new(
@@ -349,7 +345,7 @@ mod tests {
 
     #[test]
     fn terminal_outputs_are_delivered_before_host_returns_result() {
-        let init = GameInitializationState::default();
+        let init = SetupGameState::default();
         let seats = (0..init.board.n_players)
             .map(|id| {
                 bot_seat(Box::new(LazyAgent::new(

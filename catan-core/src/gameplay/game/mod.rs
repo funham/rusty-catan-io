@@ -1,18 +1,13 @@
 pub mod command;
-pub mod decider;
 pub mod decision;
 pub mod engine;
-pub mod event;
 pub mod index;
-pub mod init;
-pub mod input;
+pub mod io;
 pub mod legal;
-pub mod lifecycle;
-pub mod output;
-pub mod projector;
 pub mod query;
-pub mod reducer;
 pub mod run;
 pub mod state;
 pub mod trade;
 pub mod view;
+
+pub use io::*;

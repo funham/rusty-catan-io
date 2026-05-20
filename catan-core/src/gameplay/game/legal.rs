@@ -1045,8 +1045,7 @@ mod tests {
     use crate::gameplay::{
         game::{
             index::GameIndex,
-            init::GameInitializationState,
-            state::GameState,
+            state::{GameState, SetupGameState},
             view::{ContextFactory, PlayerDecisionContext, SearchFactory, VisibilityConfig},
         },
         primitives::{
@@ -1064,7 +1063,7 @@ mod tests {
     const P0: PlayerId = PlayerId::new(0);
 
     fn initialized_state() -> GameState {
-        let mut init = GameInitializationState::default();
+        let mut init = SetupGameState::default();
         let (settlement, road) = init
             .builds
             .query()
@@ -1082,7 +1081,7 @@ mod tests {
     }
 
     fn find_builds_with_legal_settlement(
-        init: &GameInitializationState,
+        init: &SetupGameState,
         builds: BoardBuildData,
         depth: u8,
     ) -> Option<BoardBuildData> {
@@ -1109,7 +1108,7 @@ mod tests {
         None
     }
 
-    fn has_legal_settlement(init: &GameInitializationState, builds: &BoardBuildData) -> bool {
+    fn has_legal_settlement(init: &SetupGameState, builds: &BoardBuildData) -> bool {
         init.board
             .arrangement
             .intersections()
@@ -1581,7 +1580,7 @@ mod tests {
 
     #[test]
     fn initial_placements_exclude_existing_deadzone() {
-        let mut init = GameInitializationState::default();
+        let mut init = SetupGameState::default();
         let (settlement, road) = init
             .builds
             .query()
@@ -1616,7 +1615,7 @@ mod tests {
 
     #[test]
     fn initial_placements_have_adjacent_unoccupied_roads() {
-        let state = GameInitializationState::default().finish();
+        let state = SetupGameState::default().finish();
         let index = GameIndex::rebuild(&state);
         let visibility = VisibilityConfig::default();
         let factory = ContextFactory {
@@ -1641,7 +1640,7 @@ mod tests {
     }
 
     fn state_with_port_and_resources(port_kind: PortKind, resources: ResourceSet) -> GameState {
-        let mut init = GameInitializationState::default();
+        let mut init = SetupGameState::default();
         let (port_pos, _) = init
             .board
             .arrangement
@@ -1681,7 +1680,7 @@ mod tests {
 
     #[test]
     fn bank_trades_include_generic_trade_without_ports() {
-        let mut state = GameInitializationState::default().finish();
+        let mut state = SetupGameState::default().finish();
         state
             .transfer_from_bank(
                 ResourceSet {
@@ -1701,7 +1700,7 @@ mod tests {
 
     #[test]
     fn bank_trades_exclude_unaffordable_generic_trades() {
-        let state = GameInitializationState::default().finish();
+        let state = SetupGameState::default().finish();
         let options = context_bank_trades(&state, P0);
 
         assert!(

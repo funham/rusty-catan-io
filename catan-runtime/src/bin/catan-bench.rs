@@ -9,8 +9,8 @@ use catan_agents::bot::BotPolicy;
 use catan_agents::{greedy::GreedyAgent, lazy::LazyAgent, random::RandomAgent};
 use catan_core::{
     gameplay::game::{
-        init::GameInitializationState,
         run::{GameResult, GameRunStats, RunOptions},
+        state::{SetupGameOptions, SetupGameState},
     },
     gameplay::primitives::player::PlayerId,
     gameplay::random::GameRandom,
@@ -337,22 +337,22 @@ fn build_initial_state(
     config: &FieldConfig,
     player_count: usize,
     seed: u64,
-) -> Result<GameInitializationState, String> {
+) -> Result<SetupGameState, String> {
     match config {
         FieldConfig::Default => {
             let mut field = catan_core::gameplay::field::state::FieldBuildParam::default();
             field.n_players = player_count;
-            Ok(GameInitializationState::new_with_seed(field, seed))
+            Ok(SetupGameState::new_with_seed(field, seed))
         }
         FieldConfig::LayoutRef { path } => {
             let arrangement = catan_core::gameplay::field::ser::arrangement_from_json(path)
                 .ok_or_else(|| format!("failed to read field layout {}", path.display()))?;
-            Ok(GameInitializationState::new_with_options(
+            Ok(SetupGameState::new_with_options(
                 catan_core::gameplay::field::state::FieldBuildParam {
                     n_players: player_count,
                     arrangement,
                 },
-                catan_core::gameplay::game::init::GameInitializationOptions {
+                SetupGameOptions {
                     random: GameRandom::seeded(seed),
                 },
             ))

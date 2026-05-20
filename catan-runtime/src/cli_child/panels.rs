@@ -895,7 +895,7 @@ mod tests {
         game::{
             event::ObserverNotificationContext,
             index::GameIndex,
-            init::GameInitializationState,
+            state::SetupGameState,
             view::{ContextFactory, VisibilityConfig},
         },
         primitives::{dev_card::DevCardKind, dev_card::UsableDevCard},
@@ -1003,7 +1003,7 @@ mod tests {
 
     #[test]
     fn snapshot_state_lines_render_dashboard_and_player_boxes() {
-        let mut state = GameInitializationState::default().finish();
+        let mut state = SetupGameState::default().finish();
         state.bank.dev_cards = vec![
             DevCardKind::Usable(UsableDevCard::Knight),
             DevCardKind::Usable(UsableDevCard::YearOfPlenty),

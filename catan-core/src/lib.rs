@@ -7,8 +7,8 @@ pub mod topology;
 pub use gameplay::constants;
 pub use gameplay::game::{
     engine::GameEngine,
-    init::GameInitializationState,
     input::{DecisionRequest, DecisionResponse, PlayerCommand},
     output::GameOutput,
     run::{GameResult, RunOptions},
+    state::{SetupGameOptions, SetupGameState},
 };

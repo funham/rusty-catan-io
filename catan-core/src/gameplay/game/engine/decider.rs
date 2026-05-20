@@ -1,6 +1,10 @@
 use crate::gameplay::{
     field::state::BoardLayout,
-    game::{index::GameIndex, query::GameQuery},
+    game::{
+        engine::lifecycle::{PlayingEngine, SetupEngine},
+        index::GameIndex,
+        query::GameQuery,
+    },
     primitives::{
         PlayerId, PortKind, Tile,
         build::{Build, Establishment},
@@ -22,7 +26,6 @@ use crate::{
         },
         event::{EventBatch, GameEndPlayerStats, GameEndStats, GameEvent},
         input::{DecisionToken, GameInput, PlayerCommand, TradeCommand, TradeResponseCommand},
-        lifecycle::{EngineState, PlayingEngine, SetupEngine},
         output::CommandRejectionReason,
         run::GameResult,
     },
@@ -31,6 +34,8 @@ use crate::{
     algorithm,
     math::dice::{DiceOutcome, DiceRoll},
 };
+
+use super::lifecycle::EngineState;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DecisionContext {

@@ -25,7 +25,7 @@ mod tests {
             game::{
                 event::{GameEvent, GameObserver, ObserverKind, ObserverNotificationContext},
                 index::GameIndex,
-                init::GameInitializationState,
+                state::SetupGameState,
                 view::{ContextFactory, SearchFactory, VisibilityConfig},
             },
             primitives::{
@@ -115,7 +115,7 @@ mod tests {
 
     #[test]
     fn ui_board_serializes_to_json() {
-        let state = GameInitializationState::default().finish();
+        let state = SetupGameState::default().finish();
         let board = UiBoard::from_board(&state.board);
         let index = GameIndex::rebuild(&state);
         let visibility = VisibilityConfig::default();
@@ -136,7 +136,7 @@ mod tests {
 
     #[test]
     fn legal_options_attach_regular_trades_and_dev_card_usages() {
-        let mut state = GameInitializationState::default().finish();
+        let mut state = SetupGameState::default().finish();
         state
             .transfer_from_bank(
                 ResourceSet {
@@ -184,7 +184,7 @@ mod tests {
 
     #[test]
     fn legal_options_attach_explicit_robber_context() {
-        let mut init = GameInitializationState::default();
+        let mut init = SetupGameState::default();
         let mut victim_hex = None;
         for player_id in 0..2 {
             let (settlement, road) = init
@@ -230,7 +230,7 @@ mod tests {
 
     #[test]
     fn snapshot_observer_model_includes_exact_state_only_when_requested() {
-        let state = GameInitializationState::default().finish();
+        let state = SetupGameState::default().finish();
         let index = GameIndex::rebuild(&state);
         let visibility = VisibilityConfig::default();
         let factory = ContextFactory {
@@ -265,7 +265,7 @@ mod tests {
 
     #[test]
     fn snapshot_observer_event_frame_writes_with_exact_state() {
-        let state = GameInitializationState::default().finish();
+        let state = SetupGameState::default().finish();
         let index = GameIndex::rebuild(&state);
         let visibility = VisibilityConfig::default();
         let factory = ContextFactory {
@@ -296,7 +296,7 @@ mod tests {
 
     #[test]
     fn snapshot_observer_event_frame_writes_with_built_exact_state() {
-        let mut init = GameInitializationState::default();
+        let mut init = SetupGameState::default();
         let (settlement, road) = init
             .builds
             .query()
@@ -352,7 +352,7 @@ mod tests {
             let mut observer =
                 RemoteCliObserver::from_connected_role(CliRole::SnapshotObserver, host);
 
-            let mut state = GameInitializationState::default().finish();
+            let mut state = SetupGameState::default().finish();
             let first_index = GameIndex::rebuild(&state);
             let visibility = VisibilityConfig::default();
             let first_factory = ContextFactory {

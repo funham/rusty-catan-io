@@ -5,9 +5,8 @@ use crate::gameplay::{
     game::{
         decision::{DecisionAllocator, PendingDecisions},
         index::GameIndex,
-        init::GameInitializationState,
         run::{GameResult, GameRunStats},
-        state::{GameState, TableState},
+        state::{GameState, SetupGameState, TableState},
         trade::TradeSession,
     },
     primitives::{
@@ -124,7 +123,7 @@ impl PlayingEngine {
 }
 
 impl EngineState {
-    pub fn unstarted(init: GameInitializationState) -> Self {
+    pub fn unstarted(init: SetupGameState) -> Self {
         let (table, setup_turn) = init.into_setup_parts();
         let index = GameIndex::rebuild_table(&table);
         Self::Unstarted(UnstartedEngine {
