@@ -1,25 +1,30 @@
-use crate::gameplay::game::{
-    command::{
-        self, ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, MoveRobberCommand,
-        PostDevCardCommand, PostDiceCommand, RegularCommand,
-    },
-    decision::{DecisionAllocator, DecisionId, DecisionKind, DecisionLifetime, OpenDecision},
-    event::{EventBatch, GameEndPlayerStats, GameEndStats, GameEvent},
-    input::{GameInput, PlayerCommand, TradeCommand, TradeResponseCommand},
-    lifecycle::{EngineState, PlayingEngine, SetupEngine},
-    output::CommandRejectionReason,
-    run::GameResult,
-};
 use crate::gameplay::{
     field::state::BoardLayout,
     game::{index::GameIndex, query::GameQuery},
     primitives::{
-        PortKind, Tile,
+        PlayerId, PortKind, Tile,
         build::{Build, Establishment},
         dev_card::{DevCardUsage, UsableDevCard},
         player::player_ids,
         resource::ResourceSet,
         trade::{BankTrade, BankTradeKind, PersonalTradeOffer, PlayerTrade, PublicTradeOffer},
+    },
+};
+use crate::{
+    DecisionResponse,
+    gameplay::game::{
+        command::{
+            self, ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, MoveRobberCommand,
+            PostDevCardCommand, PostDiceCommand, RegularCommand,
+        },
+        decision::{
+            DecisionAllocator, DecisionKind, DecisionLifetime, OpenDecision, PendingDecisions,
+        },
+        event::{EventBatch, GameEndPlayerStats, GameEndStats, GameEvent},
+        input::{DecisionToken, GameInput, PlayerCommand, TradeCommand, TradeResponseCommand},
+        lifecycle::{EngineState, PlayingEngine, SetupEngine},
+        output::CommandRejectionReason,
+        run::GameResult,
     },
 };
 use crate::{
@@ -46,11 +51,7 @@ pub fn decide_with_context(
 ) -> EventBatch {
     match input {
         GameInput::Start => decide_start(lifecycle),
-        GameInput::Submit {
-            player_id,
-            decision_id,
-            command,
-        } => decide_submit(lifecycle, player_id, decision_id, command, context),
+        GameInput::Submit(response) => decide_submit(lifecycle, response, context),
     }
 }
 
@@ -74,96 +75,101 @@ fn decide_start(lifecycle: &EngineState) -> EventBatch {
 
 fn decide_submit(
     lifecycle: &EngineState,
-    player_id: crate::gameplay::primitives::player::PlayerId,
-    decision_id: DecisionId,
-    command: PlayerCommand,
+    response: DecisionResponse,
+    context: DecisionContext,
+) -> EventBatch {
+    match lifecycle {
+        EngineState::Setup(setup) => decide_setup_submit(setup, response, context),
+        EngineState::Playing(active) => decide_playing_submit(active, response, context),
+        EngineState::Finished(_) => {
+            reject_submit(response.token, CommandRejectionReason::GameEnded, false)
+        }
+        EngineState::Unstarted(_) => {
+            reject_submit(response.token, CommandRejectionReason::StaleDecision, false)
+        }
+    }
+}
+
+fn decide_setup_submit(
+    active: &SetupEngine,
+    response: DecisionResponse,
     context: DecisionContext,
 ) -> EventBatch {
     let mut events = EventBatch::new();
-    if matches!(lifecycle, EngineState::Finished(_)) {
-        events.push(GameEvent::CommandRejected {
-            player_id,
-            decision_id: Some(decision_id),
-            reason: CommandRejectionReason::GameEnded,
-            counts_toward_limit: false,
-        });
-        return events;
-    }
-    let Some((decision, submit_state)) = submitted_decision(lifecycle, decision_id) else {
-        events.push(GameEvent::CommandRejected {
-            player_id,
-            decision_id: Some(decision_id),
-            reason: CommandRejectionReason::StaleDecision,
-            counts_toward_limit: false,
-        });
-        return events;
+    let DecisionResponse { token, command } = response;
+    let decision = match resolve_submission(&active.pending, token) {
+        Ok(decision) => decision,
+        Err(reason) => {
+            reject(&mut events, token, reason, false);
+            return events;
+        }
     };
 
-    if decision.player_id != player_id {
-        events.push(GameEvent::CommandRejected {
-            player_id,
-            decision_id: Some(decision_id),
-            reason: CommandRejectionReason::WrongPlayer {
-                expected: decision.player_id,
-            },
-            counts_toward_limit: false,
-        });
-        return events;
-    }
-
-    match (submit_state, command_for_decision(decision.kind, command)) {
-        (SubmitState::Setup(active), Some(DecisionCommand::InitialPlacement(command))) => {
+    match command_for_decision(decision.kind, command) {
+        Some(DecisionCommand::InitialPlacement(command)) => {
             decide_initial_placement(active, decision, command, context, &mut events);
         }
-        (SubmitState::Setup(_), _) => {
+        _ => {
             reject(
                 &mut events,
-                decision.player_id,
-                Some(decision.id),
+                DecisionToken::from(&decision),
                 CommandRejectionReason::WrongPhase,
                 false,
             );
         }
-        (SubmitState::Playing(_), Some(DecisionCommand::InitialPlacement(_))) => {
+    }
+    events
+}
+
+fn decide_playing_submit(
+    active: &PlayingEngine,
+    response: DecisionResponse,
+    context: DecisionContext,
+) -> EventBatch {
+    let mut events = EventBatch::new();
+    let DecisionResponse { token, command } = response;
+    let decision = match resolve_submission(&active.pending, token) {
+        Ok(decision) => decision,
+        Err(reason) => {
+            reject(&mut events, token, reason, false);
+            return events;
+        }
+    };
+
+    match command_for_decision(decision.kind, command) {
+        Some(DecisionCommand::InitialPlacement(_)) => {
             reject(
                 &mut events,
-                decision.player_id,
-                Some(decision.id),
+                DecisionToken::from(&decision),
                 CommandRejectionReason::WrongPhase,
                 false,
             );
         }
-        (SubmitState::Playing(active), Some(DecisionCommand::Regular(command))) => {
+        Some(DecisionCommand::Regular(command)) => {
             decide_regular_command(active, decision, command, context, &mut events);
         }
-        (SubmitState::Playing(active), Some(DecisionCommand::OpenTrade { scope, trade })) => {
+        Some(DecisionCommand::OpenTrade { scope, trade }) => {
             decide_open_trade(active, decision, scope, trade, &mut events);
         }
-        (SubmitState::Playing(active), Some(DecisionCommand::RollDice { next_kind })) => {
+        Some(DecisionCommand::RollDice { next_kind }) => {
             decide_roll_dice(active, decision, next_kind, context, &mut events);
         }
-        (SubmitState::Playing(active), Some(DecisionCommand::UseDevCard { usage, next_kind })) => {
+        Some(DecisionCommand::UseDevCard { usage, next_kind }) => {
             decide_use_dev_card(active, decision, usage, next_kind, context, &mut events);
         }
-        (
-            SubmitState::Playing(active),
-            Some(DecisionCommand::DropHalf {
-                required,
-                resources,
-            }),
-        ) => {
+        Some(DecisionCommand::DropHalf {
+            required,
+            resources,
+        }) => {
             decide_drop_half(active, decision, required, resources, &mut events);
         }
-        (SubmitState::Playing(active), Some(DecisionCommand::MoveRobber(hex))) => {
+        Some(DecisionCommand::MoveRobber(hex)) => {
             decide_move_robber(active, decision, hex, context, &mut events);
         }
-        (
-            SubmitState::Playing(active),
-            Some(DecisionCommand::ChooseRobbedPlayer {
-                robber_pos,
-                robbed_id,
-            }),
-        ) => {
+        Some(DecisionCommand::ChooseRobbedPlayer {
+            robber_pos,
+            robbed_id,
+        }) => {
             decide_choose_robbed_player(
                 active,
                 decision,
@@ -173,55 +179,49 @@ fn decide_submit(
                 &mut events,
             );
         }
-        (
-            SubmitState::Playing(active),
-            Some(DecisionCommand::TradeResponse { session, command }),
-        ) => {
+        Some(DecisionCommand::TradeResponse { session, command }) => {
             decide_trade_response(active, decision, session, command, &mut events);
         }
-        (SubmitState::Playing(active), Some(DecisionCommand::TradeOwner { session, command })) => {
+        Some(DecisionCommand::TradeOwner { session, command }) => {
             decide_trade_owner(active, decision, session, command, &mut events);
         }
-        (_, None) => {
+        None => {
             reject(
                 &mut events,
-                decision.player_id,
-                Some(decision.id),
+                DecisionToken::from(&decision),
                 CommandRejectionReason::WrongPhase,
                 false,
             );
         }
     }
 
-    if let SubmitState::Playing(active) = submit_state {
-        finish_after_invalid_action_limit(active, context, &mut events);
-    }
+    finish_after_invalid_action_limit(active, context, &mut events);
     events
 }
 
-#[derive(Clone, Copy)]
-enum SubmitState<'a> {
-    Setup(&'a SetupEngine),
-    Playing(&'a PlayingEngine),
+fn reject_submit(
+    token: DecisionToken,
+    reason: CommandRejectionReason,
+    counts_toward_limit: bool,
+) -> EventBatch {
+    let mut events = EventBatch::new();
+    reject(&mut events, token, reason, counts_toward_limit);
+    events
 }
 
-fn submitted_decision(
-    lifecycle: &EngineState,
-    decision_id: DecisionId,
-) -> Option<(OpenDecision, SubmitState<'_>)> {
-    match lifecycle {
-        EngineState::Setup(setup) => setup
-            .pending
-            .get(decision_id)
-            .cloned()
-            .map(|decision| (decision, SubmitState::Setup(setup))),
-        EngineState::Playing(active) => active
-            .pending
-            .get(decision_id)
-            .cloned()
-            .map(|decision| (decision, SubmitState::Playing(active))),
-        EngineState::Finished(_) | EngineState::Unstarted(_) => None,
+fn resolve_submission(
+    pending: &PendingDecisions,
+    token: DecisionToken,
+) -> Result<OpenDecision, CommandRejectionReason> {
+    let Some(decision) = pending.get(token.id).cloned() else {
+        return Err(CommandRejectionReason::StaleDecision);
+    };
+    if decision.player_id != token.player_id {
+        return Err(CommandRejectionReason::WrongPlayer {
+            expected: decision.player_id,
+        });
     }
+    Ok(decision)
 }
 
 enum DecisionCommand {
@@ -245,7 +245,7 @@ enum DecisionCommand {
     MoveRobber(crate::topology::Hex),
     ChooseRobbedPlayer {
         robber_pos: crate::topology::Hex,
-        robbed_id: crate::gameplay::primitives::player::PlayerId,
+        robbed_id: PlayerId,
     },
     TradeResponse {
         session: crate::gameplay::game::trade::TradeSessionId,
@@ -389,14 +389,12 @@ fn finish_after_invalid_action_limit(
 
 fn reject(
     events: &mut EventBatch,
-    player_id: crate::gameplay::primitives::player::PlayerId,
-    decision_id: Option<DecisionId>,
+    token: DecisionToken,
     reason: CommandRejectionReason,
     counts_toward_limit: bool,
 ) {
     events.push(GameEvent::CommandRejected {
-        player_id,
-        decision_id,
+        token,
         reason,
         counts_toward_limit,
     });
@@ -405,8 +403,7 @@ fn reject(
 fn reject_illegal(events: &mut EventBatch, decision: &OpenDecision, reason: impl Into<String>) {
     reject(
         events,
-        decision.player_id,
-        Some(decision.id),
+        DecisionToken::from(decision),
         CommandRejectionReason::IllegalCommand(reason.into()),
         true,
     );
@@ -415,7 +412,7 @@ fn reject_illegal(events: &mut EventBatch, decision: &OpenDecision, reason: impl
 fn open_decision(
     events: &mut EventBatch,
     decisions: &mut DecisionAllocator,
-    player_id: crate::gameplay::primitives::player::PlayerId,
+    player_id: PlayerId,
     kind: DecisionKind,
     lifetime: DecisionLifetime,
 ) {
@@ -502,7 +499,7 @@ fn trade_from_personal_offer(
 
 fn invalid_trade_scope_reason(
     scope: crate::gameplay::game::trade::TradeScope,
-    proposer: crate::gameplay::primitives::player::PlayerId,
+    proposer: PlayerId,
     player_count: usize,
 ) -> Option<()> {
     match scope {
@@ -526,8 +523,7 @@ fn decide_trade_response(
     let Some(session) = active.trade_sessions.get(session_id.0 as usize) else {
         reject(
             events,
-            decision.player_id,
-            Some(decision.id),
+            DecisionToken::from(&decision),
             CommandRejectionReason::StaleDecision,
             false,
         );
@@ -536,8 +532,7 @@ fn decide_trade_response(
     if !session.open || !session.scope.includes(decision.player_id) {
         reject(
             events,
-            decision.player_id,
-            Some(decision.id),
+            DecisionToken::from(&decision),
             CommandRejectionReason::WrongPhase,
             false,
         );
@@ -592,8 +587,7 @@ fn decide_trade_response(
         }
         _ => reject(
             events,
-            decision.player_id,
-            Some(decision.id),
+            DecisionToken::from(&decision),
             CommandRejectionReason::WrongPhase,
             false,
         ),
@@ -621,8 +615,7 @@ fn decide_trade_owner(
         }
         _ => reject(
             events,
-            decision.player_id,
-            Some(decision.id),
+            DecisionToken::from(&decision),
             CommandRejectionReason::WrongPhase,
             false,
         ),
@@ -639,8 +632,7 @@ fn decide_commit_trade(
     let Some(session) = active.trade_sessions.get(session_id.0 as usize) else {
         reject(
             events,
-            decision.player_id,
-            Some(decision.id),
+            DecisionToken::from(&decision),
             CommandRejectionReason::StaleDecision,
             false,
         );
@@ -829,7 +821,7 @@ fn decide_choose_robbed_player(
     active: &PlayingEngine,
     decision: OpenDecision,
     robber_pos: crate::topology::Hex,
-    robbed_id: crate::gameplay::primitives::player::PlayerId,
+    robbed_id: PlayerId,
     context: DecisionContext,
     events: &mut EventBatch,
 ) {
@@ -867,11 +859,7 @@ fn decide_choose_robbed_player(
     reopen_regular(active, player_id, events);
 }
 
-fn reopen_regular(
-    active: &PlayingEngine,
-    player_id: crate::gameplay::primitives::player::PlayerId,
-    events: &mut EventBatch,
-) {
+fn reopen_regular(active: &PlayingEngine, player_id: PlayerId, events: &mut EventBatch) {
     let mut decisions = active.decisions();
     open_decision(
         events,
@@ -1030,7 +1018,7 @@ fn decide_roll_dice(
 
 fn open_next_discard_or_robber(
     active: &PlayingEngine,
-    robber_player: crate::gameplay::primitives::player::PlayerId,
+    robber_player: PlayerId,
     events: &mut EventBatch,
 ) {
     let first_discard = active.pending_discards.first().copied().or_else(|| {
@@ -1151,11 +1139,7 @@ fn decide_bank_trade(
     );
 }
 
-fn can_trade_with_bank(
-    active: &PlayingEngine,
-    player_id: crate::gameplay::primitives::player::PlayerId,
-    trade: BankTrade,
-) -> bool {
+fn can_trade_with_bank(active: &PlayingEngine, player_id: PlayerId, trade: BankTrade) -> bool {
     let required_port = match trade.kind {
         BankTradeKind::BankGeneric => None,
         BankTradeKind::PortGeneric => Some(PortKind::Universal),
@@ -1229,8 +1213,7 @@ fn decide_initial_placement(
     let mut candidate_builds = active.table.builds.clone();
     if let Err(err) = candidate_builds.try_init_place(decision.player_id, road, settlement) {
         events.push(GameEvent::CommandRejected {
-            player_id: decision.player_id,
-            decision_id: Some(decision.id),
+            token: DecisionToken::from(&decision),
             reason: CommandRejectionReason::IllegalCommand(format!(
                 "invalid initial placement: {err:?}"
             )),

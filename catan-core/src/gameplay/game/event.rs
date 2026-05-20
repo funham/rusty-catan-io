@@ -9,6 +9,7 @@ use crate::{
     gameplay::{
         game::{
             decision::{DecisionId, OpenDecision},
+            input::DecisionToken,
             output::CommandRejectionReason,
             run::GameResult,
             trade::{TradeOfferId, TradeResponseState, TradeScope, TradeSessionId},
@@ -36,10 +37,7 @@ pub type GameEndStats = SmallVec<[GameEndPlayerStats; GAME_END_STATS_INLINE]>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EventCause {
     Start,
-    PlayerCommand {
-        player_id: PlayerId,
-        decision_id: DecisionId,
-    },
+    PlayerCommand(DecisionToken),
     System,
 }
 
@@ -144,8 +142,7 @@ pub enum GameEvent {
         decision_id: DecisionId,
     },
     CommandRejected {
-        player_id: PlayerId,
-        decision_id: Option<DecisionId>,
+        token: DecisionToken,
         reason: CommandRejectionReason,
         counts_toward_limit: bool,
     },

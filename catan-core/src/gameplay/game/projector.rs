@@ -26,15 +26,9 @@ pub fn project_transaction(transaction: &EventTransaction) -> Vec<GameOutput> {
                     decision_id: *decision_id,
                 });
             }
-            GameEvent::CommandRejected {
-                player_id,
-                decision_id,
-                reason,
-                ..
-            } => {
+            GameEvent::CommandRejected { token, reason, .. } => {
                 outputs.push(GameOutput::CommandRejected {
-                    player_id: *player_id,
-                    decision_id: *decision_id,
+                    token: *token,
                     reason: reason.clone(),
                 });
             }

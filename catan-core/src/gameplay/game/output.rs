@@ -1,12 +1,11 @@
 use serde::{Deserialize, Serialize};
 
-use crate::gameplay::primitives::player::PlayerId;
-
 use super::{
     decision::DecisionId,
     event::{EventTransaction, EventVisibility, GameEvent},
-    input::DecisionRequest,
+    input::{DecisionRequest, DecisionToken},
 };
+use crate::gameplay::primitives::player::PlayerId;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameEventRecord {
@@ -36,8 +35,7 @@ pub enum GameOutput {
         decision_id: DecisionId,
     },
     CommandRejected {
-        player_id: PlayerId,
-        decision_id: Option<DecisionId>,
+        token: DecisionToken,
         reason: CommandRejectionReason,
     },
 }

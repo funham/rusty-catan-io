@@ -1,14 +1,17 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    gameplay::game::command::{
-        ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, InitialPlacementCommand,
-        MoveRobberCommand, PostDevCardCommand, PostDiceCommand, RegularCommand,
+    gameplay::{
+        game::command::{
+            ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, InitialPlacementCommand,
+            MoveRobberCommand, PostDevCardCommand, PostDiceCommand, RegularCommand,
+        },
+        primitives::{
+            player::PlayerId,
+            trade::{PlayerTrade, PublicTradeOffer},
+        },
     },
-    gameplay::primitives::{
-        player::PlayerId,
-        trade::{PlayerTrade, PublicTradeOffer},
-    },
+    topology::Hex,
 };
 
 use super::{
@@ -19,11 +22,7 @@ use super::{
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GameInput {
     Start,
-    Submit {
-        player_id: PlayerId,
-        decision_id: DecisionId,
-        command: PlayerCommand,
-    },
+    Submit(DecisionResponse),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,6 +38,7 @@ pub enum PlayerCommand {
     Trade(TradeCommand),
 }
 
+// TODO: move decision token outside of enum variants, and provide it parallel instead
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DecisionRequest {
     InitialPlacement(DecisionToken),
@@ -49,7 +49,7 @@ pub enum DecisionRequest {
     MoveRobber(DecisionToken),
     ChooseRobbedPlayer {
         token: DecisionToken,
-        robber_pos: crate::topology::Hex,
+        robber_pos: Hex,
     },
     DropHalf {
         token: DecisionToken,
@@ -63,30 +63,21 @@ pub enum DecisionRequest {
     },
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DecisionToken {
-    id: DecisionId,
-    player_id: PlayerId,
+    pub id: DecisionId,
+    pub player_id: PlayerId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DecisionResponse {
-    token: DecisionToken,
-    command: PlayerCommand,
-}
-
-impl DecisionToken {
-    pub fn player_id(self) -> PlayerId {
-        self.player_id
-    }
+    pub token: DecisionToken,
+    pub command: PlayerCommand,
 }
 
 impl DecisionRequest {
     pub fn from_open_decision(decision: &OpenDecision) -> Self {
-        let token = DecisionToken {
-            id: decision.id,
-            player_id: decision.player_id,
-        };
+        let token = DecisionToken::from(decision);
         match decision.kind {
             DecisionKind::InitialPlacement => Self::InitialPlacement(token),
             DecisionKind::InitCommand => Self::InitCommand(token),
@@ -238,9 +229,12 @@ impl DecisionRequest {
     }
 }
 
-impl DecisionResponse {
-    pub(crate) fn into_parts(self) -> (PlayerId, DecisionId, PlayerCommand) {
-        (self.token.player_id, self.token.id, self.command)
+impl From<&OpenDecision> for DecisionToken {
+    fn from(decision: &OpenDecision) -> Self {
+        Self {
+            id: decision.id,
+            player_id: decision.player_id,
+        }
     }
 }
 

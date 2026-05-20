@@ -27,27 +27,8 @@ use crate::{
     math::dice::DiceRoll,
 };
 
-#[cfg(test)]
-use super::{
-    decision::{DecisionId, DecisionLifetime, PendingDecisions},
-    trade::{TradeOfferId, TradeResponseState, TradeScope, TradeSession, TradeSessionId},
-};
-#[cfg(test)]
-use crate::gameplay::game::lifecycle::FinishedEngine;
-#[cfg(test)]
-use primitives::{bank::BankResourceExchangeError, resource::ResourceSet, trade::PlayerTrade};
-
-#[cfg(test)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GameStatus {
-    Waiting,
-    Ended,
-}
-
 #[derive(Debug, Clone)]
 pub struct EngineTransition {
-    #[cfg(test)]
-    pub status: GameStatus,
     pub transaction: EventTransaction,
     pub result: Option<GameResult>,
 }
@@ -173,8 +154,6 @@ impl GameEngine {
             reducer::apply_event(&mut self.core, event)?;
         }
         Ok(EngineTransition {
-            #[cfg(test)]
-            status: self.status(),
             transaction,
             result: self.result().cloned(),
         })
@@ -183,18 +162,11 @@ impl GameEngine {
     pub fn apply(&mut self, input: GameInput) -> Result<EngineTransition, EngineError> {
         let cause = match &input {
             GameInput::Start => EventCause::Start,
-            GameInput::Submit {
-                player_id,
-                decision_id,
-                ..
-            } => EventCause::PlayerCommand {
-                player_id: *player_id,
-                decision_id: *decision_id,
-            },
+            GameInput::Submit(DecisionResponse { token, .. }) => EventCause::PlayerCommand(*token),
         };
         let events = match input {
             GameInput::Start => decider::decide(&self.core, GameInput::Start),
-            submit @ GameInput::Submit { .. } => {
+            submit @ GameInput::Submit(_) => {
                 let context = decider::DecisionContext {
                     max_turns: self.runtime.max_turns,
                     max_invalid_actions: self.runtime.max_invalid_actions,
@@ -209,43 +181,24 @@ impl GameEngine {
             reducer::apply_event(&mut self.core, event)?;
         }
         Ok(EngineTransition {
-            #[cfg(test)]
-            status: self.status(),
             transaction,
             result: self.result().cloned(),
         })
     }
 
     pub fn submit(&mut self, response: DecisionResponse) -> Result<EngineTransition, EngineError> {
-        let (player_id, decision_id, command) = response.into_parts();
-        self.apply(GameInput::Submit {
-            player_id,
-            decision_id,
-            command,
-        })
-    }
-
-    #[cfg(test)]
-    fn status(&self) -> GameStatus {
-        if self.core.result().is_some() {
-            GameStatus::Ended
-        } else {
-            GameStatus::Waiting
-        }
+        self.apply(GameInput::Submit(response))
     }
 
     fn dice_roll_for_decider(&mut self, input: &GameInput) -> Option<DiceRoll> {
-        let GameInput::Submit {
-            player_id,
-            decision_id,
-            command,
-        } = input
-        else {
+        let GameInput::Submit(response) = input else {
             return None;
         };
+        let DecisionResponse { token, command } = response.clone();
+
         let active = self.core.as_playing()?;
-        let decision = active.pending.get(*decision_id)?;
-        if decision.player_id != *player_id {
+        let decision = active.pending.get(token.id)?;
+        if decision.player_id != token.player_id {
             return None;
         }
         match (decision.kind, command) {
@@ -262,20 +215,17 @@ impl GameEngine {
     }
 
     fn stolen_resource_for_decider(&mut self, input: &GameInput) -> Option<primitives::Resource> {
-        let GameInput::Submit {
-            player_id,
-            decision_id,
-            command,
-        } = input
-        else {
+        let GameInput::Submit(response) = input.clone() else {
             return None;
         };
+        let DecisionResponse { token, command } = response;
+
         let active = self.core.as_playing()?;
-        let decision = active.pending.get(*decision_id)?;
-        if decision.player_id != *player_id {
+        let decision = active.pending.get(token.id)?;
+        if decision.player_id != token.player_id {
             return None;
         }
-        let usage = match (decision.kind, command) {
+        let usage = match (decision.kind, &command) {
             (
                 DecisionKind::InitCommand,
                 PlayerCommand::InitCommand(command::InitCommand::UseDevCard(usage)),
@@ -285,14 +235,14 @@ impl GameEngine {
                 PlayerCommand::PostDice(command::PostDiceCommand::UseDevCard(usage)),
             ) => usage,
             _ => {
-                let robbed_id = match (decision.kind, command) {
+                let robbed_id = match (decision.kind, &command) {
                     (
                         DecisionKind::MoveRobber,
                         PlayerCommand::MoveRobber(command::MoveRobberCommand(hex)),
                     ) => {
                         let mut candidates = algorithm::robbery_candidates(
                             *hex,
-                            *player_id,
+                            token.player_id,
                             &active.game.builds,
                             &active.game.players,
                         );
@@ -398,6 +348,18 @@ impl GameEngine {
             .and_then(|active| active.trade_sessions.get(id.0 as usize))
     }
 }
+
+/* ------------ TESTING INFRASTRUCTURE ------------ */
+
+#[cfg(test)]
+use super::{
+    decision::{DecisionId, DecisionLifetime, PendingDecisions},
+    trade::{TradeOfferId, TradeResponseState, TradeScope, TradeSession, TradeSessionId},
+};
+#[cfg(test)]
+use crate::gameplay::game::lifecycle::FinishedEngine;
+#[cfg(test)]
+use primitives::{bank::BankResourceExchangeError, resource::ResourceSet, trade::PlayerTrade};
 
 #[cfg(test)]
 impl GameEngine {

@@ -16,9 +16,6 @@ use crate::gameplay::{
     },
 };
 
-#[cfg(test)]
-use crate::gameplay::game::phase::GamePhase;
-
 pub type TradeSessions = SmallVec<[TradeSession; 16]>;
 pub type PendingDiscards = SmallVec<[PlayerId; 8]>;
 
@@ -58,8 +55,6 @@ pub struct SetupEngine {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayingEngine {
     pub game: GameState,
-    #[cfg(test)]
-    pub phase: GamePhase,
     #[serde(skip)]
     pub index: GameIndex,
     pub pending: PendingDecisions,
@@ -110,8 +105,6 @@ impl SetupEngine {
         let index = GameIndex::rebuild(&game);
         PlayingEngine {
             game,
-            #[cfg(test)]
-            phase: GamePhase::Turn(crate::gameplay::game::phase::TurnPhase::InitCommand),
             index,
             pending: self.pending,
             next_decision_id: self.next_decision_id,
@@ -150,8 +143,6 @@ impl EngineState {
         let index = GameIndex::rebuild(&game);
         Self::Playing(PlayingEngine {
             game,
-            #[cfg(test)]
-            phase: GamePhase::NotStarted,
             index,
             pending: PendingDecisions::default(),
             next_decision_id: 0,
