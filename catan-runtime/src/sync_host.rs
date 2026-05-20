@@ -134,9 +134,9 @@ impl SyncGameHost {
                 ));
             }
         } else {
-            let transition = self.engine.start().expect("engine start should reduce");
+            let transaction = self.engine.start().expect("engine start should reduce");
             self.outputs
-                .extend(projector::project_transaction(&transition.transaction));
+                .extend(projector::project_transaction(&transaction));
         }
     }
 
@@ -154,12 +154,12 @@ impl SyncGameHost {
                 return Some(result);
             }
             if let Some(input) = self.inputs.pop_front() {
-                let transition = self
+                let transaction = self
                     .engine
                     .submit(input.response)
                     .expect("engine submit should reduce");
                 self.outputs
-                    .extend(projector::project_transaction(&transition.transaction));
+                    .extend(projector::project_transaction(&transaction));
                 continue;
             }
             return None;

@@ -35,15 +35,15 @@ impl SimulationHost {
 
     pub fn run(&mut self) -> GameResult {
         let mut queue = VecDeque::new();
-        let transition = match self.engine.start() {
-            Ok(transition) => transition,
+        let transaction = match self.engine.start() {
+            Ok(transaction) => transaction,
             Err(err) => {
                 return GameResult::Interrupted {
                     reason: format!("engine start failed: {err:?}"),
                 };
             }
         };
-        queue.extend(projector::project_transaction(&transition.transaction));
+        queue.extend(projector::project_transaction(&transaction));
 
         let mut steps = 0_u64;
         while self.engine.result().is_none() {
@@ -76,15 +76,15 @@ impl SimulationHost {
                 };
             };
 
-            let transition = match self.engine.submit(response) {
-                Ok(transition) => transition,
+            let transaction = match self.engine.submit(response) {
+                Ok(transaction) => transaction,
                 Err(err) => {
                     return GameResult::Interrupted {
                         reason: format!("engine apply failed: {err:?}"),
                     };
                 }
             };
-            queue.extend(projector::project_transaction(&transition.transaction));
+            queue.extend(projector::project_transaction(&transaction));
         }
 
         self.engine

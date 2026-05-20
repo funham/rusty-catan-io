@@ -27,12 +27,6 @@ use crate::{
     math::dice::DiceRoll,
 };
 
-#[derive(Debug, Clone)]
-pub struct EngineTransition {
-    pub transaction: EventTransaction,
-    pub result: Option<GameResult>,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EngineError {
     Apply(EngineApplyError),
@@ -150,7 +144,7 @@ impl GameEngine {
         }
     }
 
-    pub fn start(&mut self) -> Result<EngineTransition, EngineError> {
+    pub fn start(&mut self) -> Result<EventTransaction, EngineError> {
         let transaction = EventTransaction {
             cause: EventCause::Start,
             events: decider::decide(&self.core, GameInput::Start),
@@ -158,13 +152,10 @@ impl GameEngine {
         for event in &transaction.events {
             self.apply_event_to_core(event)?;
         }
-        Ok(EngineTransition {
-            transaction,
-            result: self.result().cloned(),
-        })
+        Ok(transaction)
     }
 
-    pub fn apply(&mut self, input: GameInput) -> Result<EngineTransition, EngineError> {
+    pub fn apply(&mut self, input: GameInput) -> Result<EventTransaction, EngineError> {
         let cause = match &input {
             GameInput::Start => EventCause::Start,
             GameInput::Submit(DecisionResponse { token, .. }) => EventCause::PlayerCommand(*token),
@@ -185,13 +176,10 @@ impl GameEngine {
         for event in &transaction.events {
             self.apply_event_to_core(event)?;
         }
-        Ok(EngineTransition {
-            transaction,
-            result: self.result().cloned(),
-        })
+        Ok(transaction)
     }
 
-    pub fn submit(&mut self, response: DecisionResponse) -> Result<EngineTransition, EngineError> {
+    pub fn submit(&mut self, response: DecisionResponse) -> Result<EventTransaction, EngineError> {
         self.apply(GameInput::Submit(response))
     }
 
