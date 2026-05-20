@@ -19,9 +19,6 @@ use crate::gameplay::{
 pub type TradeSessions = SmallVec<[TradeSession; 16]>;
 pub type PendingDiscards = SmallVec<[PlayerId; 8]>;
 
-#[cfg(test)]
-pub type EngineCore = EngineState;
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EngineState {
     Unstarted(UnstartedEngine),
@@ -139,7 +136,7 @@ impl EngineState {
         })
     }
 
-    pub fn from_game_for_tests(game: GameState) -> Self {
+    pub fn playing(game: GameState) -> Self {
         let index = GameIndex::rebuild(&game);
         Self::Playing(PlayingEngine {
             game,
@@ -151,64 +148,6 @@ impl EngineState {
             invalid_actions: 0,
             pending_discards: SmallVec::new(),
         })
-    }
-
-    pub fn as_setup(&self) -> Option<&SetupEngine> {
-        match self {
-            Self::Setup(setup) => Some(setup),
-            _ => None,
-        }
-    }
-
-    pub fn setup_mut(&mut self) -> Option<&mut SetupEngine> {
-        match self {
-            Self::Setup(setup) => Some(setup),
-            _ => None,
-        }
-    }
-
-    pub fn as_playing(&self) -> Option<&PlayingEngine> {
-        match self {
-            Self::Playing(playing) => Some(playing),
-            _ => None,
-        }
-    }
-
-    #[cfg(test)]
-    pub fn active(game: GameState) -> Self {
-        Self::from_game_for_tests(game)
-    }
-
-    #[cfg(test)]
-    pub fn as_active(&self) -> Option<&PlayingEngine> {
-        self.as_playing()
-    }
-
-    #[cfg(test)]
-    pub fn active_mut(&mut self) -> Option<&mut PlayingEngine> {
-        self.playing_mut()
-    }
-
-    #[cfg(test)]
-    pub fn force_playing_for_tests(&mut self) {
-        match std::mem::replace(self, Self::interrupted_placeholder()) {
-            Self::Unstarted(unstarted) => {
-                *self = Self::Playing(unstarted.into_setup().into_playing());
-            }
-            Self::Setup(setup) => {
-                *self = Self::Playing(setup.into_playing());
-            }
-            other => {
-                *self = other;
-            }
-        }
-    }
-
-    pub fn playing_mut(&mut self) -> Option<&mut PlayingEngine> {
-        match self {
-            Self::Playing(playing) => Some(playing),
-            _ => None,
-        }
     }
 
     pub fn table(&self) -> &TableState {
@@ -268,38 +207,5 @@ impl EngineState {
                 finished.index = GameIndex::rebuild(&finished.game);
             }
         }
-    }
-
-    pub(crate) fn take_setup(&mut self) -> Option<SetupEngine> {
-        match std::mem::replace(self, Self::interrupted_placeholder()) {
-            Self::Setup(setup) => Some(setup),
-            other => {
-                *self = other;
-                None
-            }
-        }
-    }
-
-    pub(crate) fn take_playing(&mut self) -> Option<PlayingEngine> {
-        match std::mem::replace(self, Self::interrupted_placeholder()) {
-            Self::Playing(playing) => Some(playing),
-            other => {
-                *self = other;
-                None
-            }
-        }
-    }
-
-    pub(crate) fn interrupted_placeholder() -> Self {
-        let init = GameInitializationState::default().finish();
-        let index = GameIndex::rebuild(&init);
-        Self::Finished(FinishedEngine {
-            game: init,
-            index,
-            result: GameResult::Interrupted {
-                reason: "engine state transition in progress".to_owned(),
-            },
-            stats: GameRunStats::default(),
-        })
     }
 }

@@ -113,14 +113,12 @@ fn start_updates_reducer_lifecycle_mirror() {
     let (engine, outputs) = started_engine();
     let decision = first_open_decision(&outputs);
 
-    let active = engine
-        .lifecycle()
-        .as_active()
-        .expect("started engine should have active lifecycle");
+    let EngineState::Setup(active) = engine.lifecycle() else {
+        panic!("started engine should have setup lifecycle");
+    };
 
-    assert!(matches!(active.phase, GamePhase::InitialPlacement));
-    assert!(active.pending.get(decision.id).is_some());
-    assert_eq!(active.next_decision_id, decision.id.0 + 1);
+    assert!(active.pending.get(decision.id()).is_some());
+    assert_eq!(active.next_decision_id, decision.id().0 + 1);
 }
 ```
 
@@ -340,4 +338,3 @@ Expected:
 - All tests pass.
 - Benchmark prints one-game JSON summary.
 - Git status is clean.
-

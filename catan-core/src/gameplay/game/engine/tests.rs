@@ -11,7 +11,7 @@ use crate::{
                 DecisionRequest, DecisionResponse, DecisionToken, GameInput, PlayerCommand,
                 TradeCommand, TradeResponseCommand,
             },
-            lifecycle::EngineCore,
+            lifecycle::EngineState,
             output::{CommandRejectionReason, GameOutput},
             projector, reducer,
             run::{GameResult, RunOptions},
@@ -115,7 +115,7 @@ fn output_events(outputs: &[GameOutput]) -> Vec<&GameEvent> {
 }
 
 fn add_two_initial_settlements(engine: &mut GameEngine) -> Hex {
-    engine.core.force_playing_for_tests();
+    engine.force_playing_for_tests();
     let mut victim_hex = None;
 
     for player_id in [P0, P1] {
@@ -140,9 +140,7 @@ fn add_two_initial_settlements(engine: &mut GameEngine) -> Hex {
         }
 
         engine
-            .core
-            .active_mut()
-            .expect("test engine should be active")
+            .playing_mut_for_tests()
             .game
             .builds
             .try_init_place(player_id, road, establishment)
@@ -165,9 +163,9 @@ fn event_batch_has_extra_inline_capacity() {
 
 #[test]
 fn reducer_moves_active_lifecycle_to_finished_result() {
-    let mut lifecycle = EngineCore::active(GameInitializationState::default().finish());
+    let mut lifecycle = EngineState::playing(GameInitializationState::default().finish());
 
-    reducer::reduce(
+    reducer::apply_event(
         &mut lifecycle,
         &GameEvent::GameFinished {
             result: crate::gameplay::game::run::GameResult::LimitReached { turns: 0 },
@@ -176,7 +174,7 @@ fn reducer_moves_active_lifecycle_to_finished_result() {
     )
     .unwrap();
 
-    let EngineCore::Finished(finished) = lifecycle else {
+    let EngineState::Finished(finished) = lifecycle else {
         panic!("finished event should move active lifecycle to finished");
     };
     assert_eq!(
@@ -196,9 +194,9 @@ fn reducer_replays_initial_placement_event() {
         .next()
         .expect("default board should have an initial placement");
     let (settlement, road) = placement.as_builds();
-    let mut lifecycle = EngineCore::active(init.finish());
+    let mut lifecycle = EngineState::playing(init.finish());
 
-    reducer::reduce(
+    reducer::apply_event(
         &mut lifecycle,
         &GameEvent::InitialPlacementBuilt {
             player_id: P0,
@@ -208,33 +206,37 @@ fn reducer_replays_initial_placement_event() {
     )
     .unwrap();
 
-    let active = lifecycle.as_active().expect("lifecycle should stay active");
+    let EngineState::Playing(active) = &lifecycle else {
+        panic!("lifecycle should stay active");
+    };
     assert_eq!(active.game.builds.by_player(0).settlements_count(), 1);
     assert_eq!(active.game.builds.by_player(0).roads_count(), 1);
 }
 
 #[test]
 fn reducer_applies_explicit_resource_distribution_event() {
-    let mut lifecycle = EngineCore::active(GameInitializationState::default().finish());
+    let mut lifecycle = EngineState::playing(GameInitializationState::default().finish());
     let mut by_player = smallvec::SmallVec::new();
     by_player.push((P0, one_brick()));
 
-    reducer::reduce(
+    reducer::apply_event(
         &mut lifecycle,
         &GameEvent::ResourcesDistributed { by_player },
     )
     .unwrap();
 
-    let active = lifecycle.as_active().expect("lifecycle should stay active");
+    let EngineState::Playing(active) = &lifecycle else {
+        panic!("lifecycle should stay active");
+    };
     assert_eq!(active.game.players.get(0).resources().brick, 1);
     assert_eq!(active.game.bank.resources.brick, 18);
 }
 
 #[test]
 fn reducer_applies_initial_resource_grant_event() {
-    let mut lifecycle = EngineCore::active(GameInitializationState::default().finish());
+    let mut lifecycle = EngineState::playing(GameInitializationState::default().finish());
 
-    reducer::reduce(
+    reducer::apply_event(
         &mut lifecycle,
         &GameEvent::InitialResourcesGranted {
             player_id: P0,
@@ -243,7 +245,9 @@ fn reducer_applies_initial_resource_grant_event() {
     )
     .unwrap();
 
-    let active = lifecycle.as_active().expect("lifecycle should stay active");
+    let EngineState::Playing(active) = &lifecycle else {
+        panic!("lifecycle should stay active");
+    };
     assert_eq!(active.game.players.get(0).resources().brick, 1);
     assert_eq!(active.game.bank.resources.brick, 18);
     assert_eq!(active.stats.resources_distributed, 0);
@@ -251,15 +255,16 @@ fn reducer_applies_initial_resource_grant_event() {
 
 #[test]
 fn reducer_applies_explicit_resource_stolen_event() {
-    let mut lifecycle = EngineCore::active(GameInitializationState::default().finish());
-    lifecycle
-        .active_mut()
-        .unwrap()
+    let mut lifecycle = EngineState::playing(GameInitializationState::default().finish());
+    let EngineState::Playing(active) = &mut lifecycle else {
+        panic!("lifecycle should be active");
+    };
+    active
         .game
         .transfer_from_bank(Resource::Brick.into(), 1)
         .unwrap();
 
-    reducer::reduce(
+    reducer::apply_event(
         &mut lifecycle,
         &GameEvent::ResourceStolen {
             player_id: P0,
@@ -269,23 +274,23 @@ fn reducer_applies_explicit_resource_stolen_event() {
     )
     .unwrap();
 
-    let active = lifecycle.as_active().expect("lifecycle should stay active");
+    let EngineState::Playing(active) = &lifecycle else {
+        panic!("lifecycle should stay active");
+    };
     assert_eq!(active.game.players.get(0).resources().brick, 1);
     assert_eq!(active.game.players.get(1).resources().brick, 0);
 }
 
 #[test]
 fn reducer_applies_discard_robber_and_turn_events() {
-    let mut lifecycle = EngineCore::active(GameInitializationState::default().finish());
-    lifecycle
-        .active_mut()
-        .unwrap()
-        .game
-        .transfer_from_bank(one_brick(), 0)
-        .unwrap();
+    let mut lifecycle = EngineState::playing(GameInitializationState::default().finish());
+    let EngineState::Playing(active) = &mut lifecycle else {
+        panic!("lifecycle should be active");
+    };
+    active.game.transfer_from_bank(one_brick(), 0).unwrap();
     let target_hex = Hex::new(1, 0);
 
-    reducer::reduce(
+    reducer::apply_event(
         &mut lifecycle,
         &GameEvent::PlayerDiscarded {
             player_id: P0,
@@ -293,7 +298,7 @@ fn reducer_applies_discard_robber_and_turn_events() {
         },
     )
     .unwrap();
-    reducer::reduce(
+    reducer::apply_event(
         &mut lifecycle,
         &GameEvent::RobberMoved {
             player_id: P0,
@@ -302,7 +307,7 @@ fn reducer_applies_discard_robber_and_turn_events() {
         },
     )
     .unwrap();
-    reducer::reduce(
+    reducer::apply_event(
         &mut lifecycle,
         &GameEvent::TurnEnded {
             player_id: P0,
@@ -311,7 +316,9 @@ fn reducer_applies_discard_robber_and_turn_events() {
     )
     .unwrap();
 
-    let active = lifecycle.as_active().expect("lifecycle should stay active");
+    let EngineState::Playing(active) = &lifecycle else {
+        panic!("lifecycle should stay active");
+    };
     assert_eq!(active.game.players.get(0).resources().brick, 0);
     assert_eq!(active.game.bank.resources.brick, 19);
     assert_eq!(active.game.board_state.robber_pos, target_hex);
@@ -321,10 +328,11 @@ fn reducer_applies_discard_robber_and_turn_events() {
 
 #[test]
 fn reducer_applies_bank_trade_event_with_exact_exchange() {
-    let mut lifecycle = EngineCore::active(GameInitializationState::default().finish());
-    lifecycle
-        .active_mut()
-        .unwrap()
+    let mut lifecycle = EngineState::playing(GameInitializationState::default().finish());
+    let EngineState::Playing(active) = &mut lifecycle else {
+        panic!("lifecycle should be active");
+    };
+    active
         .game
         .transfer_from_bank(
             ResourceSet {
@@ -335,7 +343,7 @@ fn reducer_applies_bank_trade_event_with_exact_exchange() {
         )
         .unwrap();
 
-    reducer::reduce(
+    reducer::apply_event(
         &mut lifecycle,
         &GameEvent::BankTradeCompleted {
             player_id: P0,
@@ -348,14 +356,16 @@ fn reducer_applies_bank_trade_event_with_exact_exchange() {
     )
     .unwrap();
 
-    let active = lifecycle.as_active().expect("lifecycle should stay active");
+    let EngineState::Playing(active) = &lifecycle else {
+        panic!("lifecycle should stay active");
+    };
     assert_eq!(active.game.players.get(0).resources().brick, 0);
     assert_eq!(active.game.players.get(0).resources().wood, 1);
 }
 
 #[test]
 fn decider_start_emits_game_started_and_initial_decision() {
-    let lifecycle = EngineCore::unstarted(GameInitializationState::default());
+    let lifecycle = EngineState::unstarted(GameInitializationState::default());
 
     let events = decider::decide(&lifecycle, GameInput::Start);
 
@@ -368,14 +378,16 @@ fn decider_start_emits_game_started_and_initial_decision() {
 
 #[test]
 fn decider_end_move_emits_turn_transition_events() {
-    let mut lifecycle = EngineCore::active(GameInitializationState::default().finish());
+    let mut lifecycle = EngineState::playing(GameInitializationState::default().finish());
     let decision = OpenDecision {
         id: crate::gameplay::game::decision::DecisionId(7),
         player_id: P0,
         kind: DecisionKind::RegularCommand,
         lifetime: DecisionLifetime::OneShot,
     };
-    let active = lifecycle.active_mut().expect("lifecycle should be active");
+    let EngineState::Playing(active) = &mut lifecycle else {
+        panic!("lifecycle should be active");
+    };
     active.next_decision_id = 8;
     active.pending.push(decision.clone());
 
@@ -412,14 +424,16 @@ fn decider_end_move_emits_turn_transition_events() {
 
 #[test]
 fn decider_valid_bank_trade_emits_trade_and_reopens_regular_decision() {
-    let mut lifecycle = EngineCore::active(GameInitializationState::default().finish());
+    let mut lifecycle = EngineState::playing(GameInitializationState::default().finish());
     let decision = OpenDecision {
         id: crate::gameplay::game::decision::DecisionId(7),
         player_id: P0,
         kind: DecisionKind::RegularCommand,
         lifetime: DecisionLifetime::OneShot,
     };
-    let active = lifecycle.active_mut().expect("lifecycle should be active");
+    let EngineState::Playing(active) = &mut lifecycle else {
+        panic!("lifecycle should be active");
+    };
     active.next_decision_id = 8;
     active
         .game
@@ -497,14 +511,16 @@ fn decider_valid_build_emits_build_and_reopens_regular_decision() {
             candidate.build(P0, *build).is_ok()
         })
         .expect("player should have a valid road extension");
-    let mut lifecycle = EngineCore::active(game);
+    let mut lifecycle = EngineState::playing(game);
     let decision = OpenDecision {
         id: crate::gameplay::game::decision::DecisionId(7),
         player_id: P0,
         kind: DecisionKind::RegularCommand,
         lifetime: DecisionLifetime::OneShot,
     };
-    let active = lifecycle.active_mut().expect("lifecycle should be active");
+    let EngineState::Playing(active) = &mut lifecycle else {
+        panic!("lifecycle should be active");
+    };
     active.next_decision_id = 8;
     active.pending.push(decision.clone());
 
@@ -539,14 +555,16 @@ fn decider_valid_build_emits_build_and_reopens_regular_decision() {
 
 #[test]
 fn decider_roll_dice_harvest_emits_complete_facts() {
-    let mut lifecycle = EngineCore::active(GameInitializationState::default().finish());
+    let mut lifecycle = EngineState::playing(GameInitializationState::default().finish());
     let decision = OpenDecision {
         id: crate::gameplay::game::decision::DecisionId(7),
         player_id: P0,
         kind: DecisionKind::InitCommand,
         lifetime: DecisionLifetime::OneShot,
     };
-    let active = lifecycle.active_mut().expect("lifecycle should be active");
+    let EngineState::Playing(active) = &mut lifecycle else {
+        panic!("lifecycle should be active");
+    };
     active.next_decision_id = 8;
     active.pending.push(decision.clone());
 
@@ -586,14 +604,16 @@ fn decider_roll_dice_harvest_emits_complete_facts() {
 
 #[test]
 fn decider_roll_dice_seven_opens_discard_or_robber_decision() {
-    let mut lifecycle = EngineCore::active(GameInitializationState::default().finish());
+    let mut lifecycle = EngineState::playing(GameInitializationState::default().finish());
     let decision = OpenDecision {
         id: crate::gameplay::game::decision::DecisionId(7),
         player_id: P0,
         kind: DecisionKind::InitCommand,
         lifetime: DecisionLifetime::OneShot,
     };
-    let active = lifecycle.active_mut().expect("lifecycle should be active");
+    let EngineState::Playing(active) = &mut lifecycle else {
+        panic!("lifecycle should be active");
+    };
     active.next_decision_id = 8;
     active.pending.push(decision.clone());
 
@@ -632,14 +652,16 @@ fn decider_roll_dice_seven_opens_discard_or_robber_decision() {
 
 #[test]
 fn decider_buy_dev_card_emits_private_draw_fact_and_reopens_regular_decision() {
-    let mut lifecycle = EngineCore::active(GameInitializationState::default().finish());
+    let mut lifecycle = EngineState::playing(GameInitializationState::default().finish());
     let decision = OpenDecision {
         id: crate::gameplay::game::decision::DecisionId(7),
         player_id: P0,
         kind: DecisionKind::RegularCommand,
         lifetime: DecisionLifetime::OneShot,
     };
-    let active = lifecycle.active_mut().expect("lifecycle should be active");
+    let EngineState::Playing(active) = &mut lifecycle else {
+        panic!("lifecycle should be active");
+    };
     active.next_decision_id = 8;
     active
         .game
@@ -678,14 +700,16 @@ fn decider_buy_dev_card_emits_private_draw_fact_and_reopens_regular_decision() {
 
 #[test]
 fn decider_use_dev_card_emits_usage_and_post_dev_card_decision() {
-    let mut lifecycle = EngineCore::active(GameInitializationState::default().finish());
+    let mut lifecycle = EngineState::playing(GameInitializationState::default().finish());
     let decision = OpenDecision {
         id: crate::gameplay::game::decision::DecisionId(7),
         player_id: P0,
         kind: DecisionKind::InitCommand,
         lifetime: DecisionLifetime::OneShot,
     };
-    let active = lifecycle.active_mut().expect("lifecycle should be active");
+    let EngineState::Playing(active) = &mut lifecycle else {
+        panic!("lifecycle should be active");
+    };
     active.next_decision_id = 8;
     active
         .game
@@ -740,10 +764,9 @@ fn start_updates_reducer_lifecycle_mirror() {
     let (engine, outputs) = started_engine();
     let decision = first_open_decision(&outputs);
 
-    let active = engine
-        .lifecycle()
-        .as_setup()
-        .expect("started engine should have setup lifecycle");
+    let EngineState::Setup(active) = engine.lifecycle() else {
+        panic!("started engine should have setup lifecycle");
+    };
 
     assert!(active.pending.get(decision.id()).is_some());
     assert_eq!(active.next_decision_id, decision.id().0 + 1);
@@ -1014,13 +1037,7 @@ fn buying_dev_card_emits_private_drawn_card_event() {
             ..ResourceSet::EMPTY
         },
     );
-    engine
-        .core
-        .active_mut()
-        .expect("test engine should be active")
-        .game
-        .bank
-        .dev_cards = vec![DevCardKind::VictoryPoint];
+    engine.playing_mut_for_tests().game.bank.dev_cards = vec![DevCardKind::VictoryPoint];
     let decision = engine.open_decision_for_test(0, DecisionKind::RegularCommand);
     let mut sink = Vec::new();
 

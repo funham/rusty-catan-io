@@ -41,42 +41,53 @@ pub fn apply_event(lifecycle: &mut EngineState, event: &GameEvent) -> Result<(),
         GameEvent::CommandRejected {
             counts_toward_limit,
             ..
-        } => {
-            if *counts_toward_limit {
-                if let Some(active) = lifecycle.setup_mut() {
-                    active.invalid_actions += 1;
-                    active.stats.action_rejections += 1;
-                } else if let Some(active) = lifecycle.playing_mut() {
-                    active.invalid_actions += 1;
-                    active.stats.action_rejections += 1;
-                }
-            }
-            Ok(())
-        }
+        } => command_rejected(lifecycle, *counts_toward_limit),
         GameEvent::InitialPlacementBuilt { .. }
         | GameEvent::InitialResourcesGranted { .. }
         | GameEvent::TurnStarted { .. } => apply_setup_or_playing(lifecycle, event),
-        _ => match lifecycle {
-            EngineState::Setup(setup) => apply_setup(setup, event),
-            EngineState::Playing(active) => apply_playing(active, event),
-            _ => Err(EngineApplyError::WrongState),
-        },
+        _ => apply_current_phase(lifecycle, event),
     }
 }
 
-#[cfg(test)]
-pub fn reduce(lifecycle: &mut EngineState, event: &GameEvent) -> Result<(), EngineApplyError> {
-    apply_event(lifecycle, event)
+#[inline]
+fn command_rejected(
+    lifecycle: &mut EngineState,
+    counts_toward_limit: bool,
+) -> Result<(), EngineApplyError> {
+    if counts_toward_limit {
+        match lifecycle {
+            EngineState::Setup(active) => {
+                active.invalid_actions += 1;
+                active.stats.action_rejections += 1;
+            }
+            EngineState::Playing(active) => {
+                active.invalid_actions += 1;
+                active.stats.action_rejections += 1;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+#[inline]
+fn apply_current_phase(
+    lifecycle: &mut EngineState,
+    event: &GameEvent,
+) -> Result<(), EngineApplyError> {
+    match lifecycle {
+        EngineState::Setup(setup) => apply_setup(setup, event),
+        EngineState::Playing(active) => apply_playing(active, event),
+        _ => Err(EngineApplyError::WrongState),
+    }
 }
 
 #[inline]
 fn game_started(lifecycle: &mut EngineState) -> Result<(), EngineApplyError> {
-    let EngineState::Unstarted(unstarted) =
-        std::mem::replace(lifecycle, EngineState::interrupted_placeholder())
-    else {
+    let EngineState::Unstarted(unstarted) = lifecycle else {
         return Err(EngineApplyError::WrongState);
     };
-    let mut setup = unstarted.into_setup();
+    let mut setup = unstarted.clone().into_setup();
     setup.stats.game_started += 1;
     *lifecycle = EngineState::Setup(setup);
     Ok(())
@@ -88,20 +99,18 @@ fn apply_setup_or_playing(
     event: &GameEvent,
 ) -> Result<(), EngineApplyError> {
     match lifecycle {
-        EngineState::Setup(setup) => apply_setup(setup, event)?,
-        EngineState::Playing(active) => apply_playing(active, event)?,
-        _ => return Err(EngineApplyError::WrongState),
-    }
-    if matches!(lifecycle, EngineState::Setup(_)) && matches!(event, GameEvent::TurnStarted { .. })
-    {
-        let setup = lifecycle.take_setup().ok_or(EngineApplyError::WrongState)?;
-        let mut active = setup.into_playing();
-        if let GameEvent::TurnStarted { player_id, .. } = event {
-            turn_started(&mut active, *player_id);
+        EngineState::Setup(setup) => {
+            apply_setup(setup, event)?;
+            if let GameEvent::TurnStarted { player_id, .. } = event {
+                let mut active = setup.clone().into_playing();
+                turn_started(&mut active, *player_id);
+                *lifecycle = EngineState::Playing(active);
+            }
+            Ok(())
         }
-        *lifecycle = EngineState::Playing(active);
+        EngineState::Playing(active) => apply_playing(active, event),
+        _ => Err(EngineApplyError::WrongState),
     }
-    Ok(())
 }
 
 #[inline]
@@ -585,12 +594,10 @@ fn robber_moved(active: &mut PlayingEngine, hex: Hex) {
 }
 
 fn finish(lifecycle: &mut EngineState, result: &GameResult) -> Result<(), EngineApplyError> {
-    let mut active = if let Some(active) = lifecycle.take_playing() {
-        active
-    } else if let Some(setup) = lifecycle.take_setup() {
-        setup.into_playing()
-    } else {
-        return Err(EngineApplyError::WrongState);
+    let mut active = match lifecycle {
+        EngineState::Playing(active) => active.clone(),
+        EngineState::Setup(setup) => setup.clone().into_playing(),
+        _ => return Err(EngineApplyError::WrongState),
     };
     match result {
         GameResult::Win(_) => active.stats.games_ended += 1,

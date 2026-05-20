@@ -106,13 +106,18 @@ pub struct GameEngineSnapshot {
 }
 
 impl GameEngine {
+    fn apply_event_to_core(&mut self, event: &GameEvent) -> Result<(), EngineError> {
+        reducer::apply_event(&mut self.core, event)?;
+        Ok(())
+    }
+
     pub fn new(game: GameState) -> Self {
         Self::new_with_options(game, RunOptions::default())
     }
 
     pub fn new_with_options(game: GameState, options: RunOptions) -> Self {
         Self {
-            core: EngineState::from_game_for_tests(game),
+            core: EngineState::playing(game),
             runtime: EngineRuntime::new(options),
         }
     }
@@ -151,7 +156,7 @@ impl GameEngine {
             events: decider::decide(&self.core, GameInput::Start),
         };
         for event in &transaction.events {
-            reducer::apply_event(&mut self.core, event)?;
+            self.apply_event_to_core(event)?;
         }
         Ok(EngineTransition {
             transaction,
@@ -178,7 +183,7 @@ impl GameEngine {
         };
         let transaction = EventTransaction { cause, events };
         for event in &transaction.events {
-            reducer::apply_event(&mut self.core, event)?;
+            self.apply_event_to_core(event)?;
         }
         Ok(EngineTransition {
             transaction,
@@ -196,7 +201,9 @@ impl GameEngine {
         };
         let DecisionResponse { token, command } = response.clone();
 
-        let active = self.core.as_playing()?;
+        let EngineState::Playing(active) = &self.core else {
+            return None;
+        };
         let decision = active.pending.get(token.id)?;
         if decision.player_id != token.player_id {
             return None;
@@ -220,7 +227,9 @@ impl GameEngine {
         };
         let DecisionResponse { token, command } = response;
 
-        let active = self.core.as_playing()?;
+        let EngineState::Playing(active) = &self.core else {
+            return None;
+        };
         let decision = active.pending.get(token.id)?;
         if decision.player_id != token.player_id {
             return None;
@@ -285,8 +294,7 @@ impl GameEngine {
     }
 
     pub fn apply_event(&mut self, event: &GameEvent) -> Result<(), EngineError> {
-        reducer::apply_event(&mut self.core, event)?;
-        Ok(())
+        self.apply_event_to_core(event)
     }
 
     pub fn is_started(&self) -> bool {
@@ -294,16 +302,12 @@ impl GameEngine {
     }
 
     pub fn pending_decisions(&self) -> impl Iterator<Item = &OpenDecision> {
-        self.core
-            .as_setup()
-            .into_iter()
-            .flat_map(|setup| setup.pending.iter())
-            .chain(
-                self.core
-                    .as_playing()
-                    .into_iter()
-                    .flat_map(|active| active.pending.iter()),
-            )
+        let pending = match &self.core {
+            EngineState::Setup(setup) => Some(&setup.pending),
+            EngineState::Playing(active) => Some(&active.pending),
+            _ => None,
+        };
+        pending.into_iter().flat_map(|pending| pending.iter())
     }
 
     pub fn index(&self) -> &GameIndex {
@@ -330,22 +334,22 @@ impl GameEngine {
 
     #[cfg(test)]
     fn finish_core(&mut self, result: GameResult) {
-        let Some(active) = self.core.take_playing() else {
-            return;
-        };
-        self.core = EngineState::Finished(FinishedEngine {
-            game: active.game,
-            index: active.index,
-            result,
-            stats: active.stats,
-        });
+        if let EngineState::Playing(active) = &self.core {
+            self.core = EngineState::Finished(FinishedEngine {
+                game: active.game.clone(),
+                index: active.index.clone(),
+                result,
+                stats: active.stats,
+            });
+        }
     }
 
     #[cfg(test)]
     fn trade_session(&self, id: TradeSessionId) -> Option<&TradeSession> {
-        self.core
-            .as_playing()
-            .and_then(|active| active.trade_sessions.get(id.0 as usize))
+        let EngineState::Playing(active) = &self.core else {
+            return None;
+        };
+        active.trade_sessions.get(id.0 as usize)
     }
 }
 
@@ -357,19 +361,36 @@ use super::{
     trade::{TradeOfferId, TradeResponseState, TradeScope, TradeSession, TradeSessionId},
 };
 #[cfg(test)]
-use crate::gameplay::game::lifecycle::FinishedEngine;
+use crate::gameplay::game::lifecycle::{FinishedEngine, PlayingEngine};
 #[cfg(test)]
 use primitives::{bank::BankResourceExchangeError, resource::ResourceSet, trade::PlayerTrade};
 
 #[cfg(test)]
 impl GameEngine {
+    fn force_playing_for_tests(&mut self) {
+        let next = match &self.core {
+            EngineState::Unstarted(unstarted) => Some(EngineState::Playing(
+                unstarted.clone().into_setup().into_playing(),
+            )),
+            EngineState::Setup(setup) => Some(EngineState::Playing(setup.clone().into_playing())),
+            _ => None,
+        };
+        if let Some(next) = next {
+            self.core = next;
+        }
+    }
+
+    fn playing_mut_for_tests(&mut self) -> &mut PlayingEngine {
+        self.force_playing_for_tests();
+        let EngineState::Playing(active) = &mut self.core else {
+            unreachable!("test engine should be active");
+        };
+        active
+    }
+
     pub fn test_force_regular_action_phase(&mut self, player_id: impl Into<PlayerId>) {
         let player_id = player_id.into();
-        self.core.force_playing_for_tests();
-        let active = self
-            .core
-            .playing_mut()
-            .expect("test engine should be active");
+        let active = self.playing_mut_for_tests();
         active.pending = PendingDecisions::default();
         active.next_decision_id = active.next_decision_id.max(100);
         let decision = OpenDecision {
@@ -384,11 +405,7 @@ impl GameEngine {
 
     pub fn test_give_resources(&mut self, player_id: impl Into<PlayerId>, resources: ResourceSet) {
         let player_id = player_id.into();
-        self.core.force_playing_for_tests();
-        let active = self
-            .core
-            .playing_mut()
-            .expect("test engine should be active");
+        let active = self.playing_mut_for_tests();
         match active.game.transfer_from_bank(resources, player_id) {
             Ok(()) | Err(BankResourceExchangeError::BankIsShort) => {}
             Err(BankResourceExchangeError::AccountIsShort { .. }) => unreachable!(),
@@ -397,11 +414,7 @@ impl GameEngine {
 
     pub fn test_take_resources(&mut self, player_id: impl Into<PlayerId>, resources: ResourceSet) {
         let player_id = player_id.into();
-        self.core.force_playing_for_tests();
-        let active = self
-            .core
-            .playing_mut()
-            .expect("test engine should be active");
+        let active = self.playing_mut_for_tests();
         let _ = active.game.transfer_to_bank(resources, player_id);
     }
 
@@ -418,11 +431,7 @@ impl GameEngine {
             }
             _ => DecisionLifetime::OneShot,
         };
-        self.core.force_playing_for_tests();
-        let active = self
-            .core
-            .playing_mut()
-            .expect("test engine should be active");
+        let active = self.playing_mut_for_tests();
         let decision = OpenDecision {
             id: DecisionId(active.next_decision_id),
             player_id,
@@ -441,11 +450,7 @@ impl GameEngine {
         trade: PlayerTrade,
     ) -> TradeSessionId {
         let proposer = proposer.into();
-        self.core.force_playing_for_tests();
-        let active = self
-            .core
-            .playing_mut()
-            .expect("test engine should be active");
+        let active = self.playing_mut_for_tests();
         let id = TradeSessionId(active.trade_sessions.len() as u64);
         let player_count = active.game.players.count();
         active
@@ -467,11 +472,7 @@ impl GameEngine {
         offer_id: TradeOfferId,
     ) {
         let player_id = player_id.into();
-        self.core.force_playing_for_tests();
-        let active = self
-            .core
-            .playing_mut()
-            .expect("test engine should be active");
+        let active = self.playing_mut_for_tests();
         active
             .trade_sessions
             .get_mut(session.0 as usize)

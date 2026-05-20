@@ -2,16 +2,16 @@
 
 ## Active path
 
-`SyncGameHost -> GameEngine -> EngineCore -> decider -> reducer -> projector -> runtime observers`
+`SyncGameHost -> GameEngine -> EngineState -> decider -> reducer -> projector -> runtime observers`
 
-`GameEngine` now owns a single `EngineCore` source of truth instead of mirrored legacy fields plus a
+`GameEngine` now owns a single `EngineState` source of truth instead of mirrored legacy fields plus a
 lifecycle copy. Initialized `Start` and submitted player commands are reducer-driven through
 `decider -> reducer`. `GameOutput::Event` carries event visibility.
 Persistence writes committed event records rather than serialized output envelopes.
 
 ## Target path
 
-`SyncGameHost -> GameEngine -> EngineCore -> decider -> reducer -> GameOutput projection`
+`SyncGameHost -> GameEngine -> EngineState -> decider -> reducer -> GameOutput projection`
 
 ## Legacy path
 
@@ -25,8 +25,8 @@ CLI-owned snapshot writing has been retired. Snapshots are host-owned.
 Separate state-driving `GameEnded` and `GameInterrupted` events have been retired. Terminal state
 is represented by `GameFinished`.
 
-The `GameEngine` duplicate lifecycle mirror has been retired. `EngineCore::Active` and
-`EngineCore::Finished` are the current lifecycle facts.
+The `GameEngine` duplicate lifecycle mirror has been retired. `EngineState` variants are the
+current lifecycle facts.
 
 `game::action` is retired. Canonical command payloads live under `game::command`.
 
