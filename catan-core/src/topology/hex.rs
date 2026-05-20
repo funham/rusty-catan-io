@@ -217,7 +217,7 @@ pub enum SignedAxis {
     QN, // South
 }
 
-/// Q: [_], R: [/], S: [\\]
+/// Q: `_`, R: `/`, S: `\`.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Axis {
     Q,

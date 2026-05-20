@@ -2,6 +2,7 @@
 name = "catan-runtime"
 version = "0.1.0"
 edition = "2024"
+publish = false
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -12,7 +13,7 @@ catan-render = { path = "../catan-render" }
 crossterm = "0.29"
 log = "0.4.29"
 env_logger = "0.11.10"
-ratatui = "0.29"
+ratatui = "0.30"
 chrono = { version = "0.4.42", default-features = false, features = ["clock"] }
 
 [features]

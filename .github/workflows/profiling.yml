@@ -1,0 +1,106 @@
+name: Profiling
+
+on:
+  workflow_dispatch:
+    inputs:
+      bench_games:
+        description: Number of games per benchmark sample
+        required: true
+        default: "30"
+      hyperfine_runs:
+        description: Number of measured hyperfine runs
+        required: true
+        default: "10"
+      profile_games:
+        description: Number of games for flamegraph profiling
+        required: true
+        default: "100"
+      flamegraph:
+        description: Generate a Linux perf flamegraph
+        required: true
+        default: true
+        type: boolean
+  schedule:
+    - cron: "17 3 * * 1"
+  push:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/profiling.yml"
+      - "scripts/bench-stable.sh"
+      - "scripts/profile-flamegraph.sh"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "catan-*/Cargo.toml"
+      - "catan-*/src/**"
+      - "catan-runtime/data/**"
+
+permissions:
+  contents: read
+
+env:
+  ARTIFACT_DIR: target/bench-artifacts
+  BENCH_CONFIG: catan-runtime/data/configurations/greedy_brawl.json
+  BENCH_GAMES: ${{ inputs.bench_games || '30' }}
+  BENCH_RUNS: ${{ inputs.hyperfine_runs || '10' }}
+  BENCH_WARMUP: "2"
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+  PROFILE_GAMES: ${{ inputs.profile_games || '100' }}
+
+jobs:
+  stable-benchmark:
+    name: Stable Benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install hyperfine
+        run: cargo install hyperfine --locked
+
+      - name: Run stable benchmark
+        run: scripts/bench-stable.sh
+
+      - name: Upload benchmark artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: catan-stable-benchmark
+          path: target/bench-artifacts/
+
+  flamegraph:
+    name: Flamegraph
+    runs-on: ubuntu-latest
+    needs: stable-benchmark
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.flamegraph }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install flamegraph
+        run: cargo install flamegraph --locked
+
+      - name: Relax perf restrictions
+        run: |
+          sudo sysctl kernel.perf_event_paranoid=1
+          sudo sysctl kernel.kptr_restrict=0
+
+      - name: Generate flamegraph
+        run: scripts/profile-flamegraph.sh
+
+      - name: Upload flamegraph artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: catan-flamegraph
+          path: target/bench-artifacts/

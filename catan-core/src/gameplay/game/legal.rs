@@ -684,7 +684,10 @@ pub fn legal_bank_trades(context: &PlayerDecisionContext<'_>) -> Vec<BankTrade> 
     legal_bank_trades_iter(context).collect()
 }
 
-pub fn resources_after_bank_trade(resources: &ResourceSet, trade: BankTrade) -> Option<ResourceSet> {
+pub fn resources_after_bank_trade(
+    resources: &ResourceSet,
+    trade: BankTrade,
+) -> Option<ResourceSet> {
     let mut resources = resources.checked_sub(&trade.to_bank())?;
     resources += trade.from_bank();
     Some(resources)

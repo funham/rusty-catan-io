@@ -8,6 +8,30 @@ catan-runtime/data/configurations/greedy_brawl.json
 
 Use release builds only for timing and profiling.
 
+## Stable Hyperfine Pipeline
+
+The stable benchmark pipeline builds the deterministic benchmark binary with
+`bench-counters`, writes one JSON summary, and times repeated release runs with
+`hyperfine`.
+
+Install the required cargo plugin locally:
+
+```sh
+cargo install hyperfine --locked
+```
+
+Run the same command used by CI:
+
+```sh
+BENCH_GAMES=30 BENCH_RUNS=10 BENCH_WARMUP=2 scripts/bench-stable.sh
+```
+
+Artifacts are written under `target/bench-artifacts/`:
+
+- `catan-bench-summary.json`
+- `hyperfine.json`
+- `hyperfine.md`
+
 ## One-Off Release Run
 
 ```sh
@@ -77,12 +101,12 @@ RUST_LOG=off target/release/catan-bench \
 On Linux/x86_64, prefer host-native `perf` or `cargo flamegraph`:
 
 ```sh
-RUSTFLAGS="-C debuginfo=1 -C force-frame-pointers=yes" \
-  cargo build --release -p catan-runtime --bin catan-bench
+cargo install flamegraph --locked
 
-perf record -g -- target/release/catan-bench \
-  --config catan-runtime/data/configurations/greedy_brawl.json \
-  --games 100 \
-  --seed 0 \
-  --no-log
+PROFILE_GAMES=100 scripts/profile-flamegraph.sh
 ```
+
+The flamegraph SVG is written to
+`target/bench-artifacts/catan-bench-flamegraph.svg`. On Linux runners this
+requires access to `perf`; the GitHub Actions profiling workflow relaxes the
+runner's perf settings before invoking the script.

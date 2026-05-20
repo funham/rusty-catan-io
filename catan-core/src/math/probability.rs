@@ -90,8 +90,8 @@ pub trait Probable {
     fn prob(&self) -> Probability;
 }
 
-/// Disjunction of possible Die rolls
-/// (all unique) (basically Set<DiceVal>)
+/// Disjunction of possible die rolls.
+/// Values are unique, similar to `Set<DiceVal>`.
 #[derive(Clone)]
 pub struct Variant<T: Probable + PartialEq + Clone> {
     values: SmallVec<[T; 11]>,

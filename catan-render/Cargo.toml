@@ -2,9 +2,9 @@
 name = "catan-render"
 version = "0.1.0"
 edition = "2024"
+publish = false
 
 [dependencies]
 catan-core = { path = "../catan-core" }
-ratatui = "0.29"
+ratatui = "0.30"
 termcolor = "1.4.1"
-itertools = "0.14.0"
