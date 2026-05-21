@@ -2,11 +2,12 @@ use catan_agents::cli_command::{
     CliCommand, DevCardCommand, ParseCommandErrorKind, parse_cli_command,
 };
 use catan_core::gameplay::{
-    game::command::RegularCommand,
+    game::{command::RegularCommand, trade::TradeScope},
     primitives::{
         build::Build,
         dev_card::{DevCardUsage, UsableDevCard},
-        resource::Resource,
+        player::PlayerId,
+        resource::{Resource, ResourceSet},
         trade::BankTradeKind,
     },
 };
@@ -32,6 +33,10 @@ fn parser_accepts_short_interactive_commands() {
         parse_cli_command("br").unwrap(),
         Some(CliCommand::InteractiveBuildRoad)
     );
+    assert_eq!(
+        parse_cli_command("pt").unwrap(),
+        Some(CliCommand::InteractivePlayerTrade)
+    );
 }
 
 #[test]
@@ -52,6 +57,37 @@ fn parser_accepts_full_regular_and_dev_card_commands() {
         Some(CliCommand::DevCard(DevCardCommand::Usage(
             DevCardUsage::Monopoly(Resource::Ore)
         )))
+    ));
+}
+
+#[test]
+fn parser_accepts_player_trade_commands() {
+    assert!(matches!(
+        parse_cli_command("trade public brick ore").unwrap(),
+        Some(CliCommand::PlayerTradeProposal {
+            scope: TradeScope::Public,
+            offer,
+        }) if offer.give == ResourceSet::from(Resource::Brick)
+            && offer.take == ResourceSet::from(Resource::Ore)
+    ));
+
+    assert!(matches!(
+        parse_cli_command("trade p2 wood sheep").unwrap(),
+        Some(CliCommand::PlayerTradeProposal {
+            scope: TradeScope::Targeted(peer),
+            offer,
+        }) if peer == PlayerId::new(2)
+            && offer.give == ResourceSet::from(Resource::Wood)
+            && offer.take == ResourceSet::from(Resource::Sheep)
+    ));
+
+    assert!(matches!(
+        parse_cli_command("trade public 1 0 0 0 0 0 0 0 0 1").unwrap(),
+        Some(CliCommand::PlayerTradeProposal {
+            scope: TradeScope::Public,
+            offer,
+        }) if offer.give == ResourceSet::from(Resource::Brick)
+            && offer.take == ResourceSet::from(Resource::Ore)
     ));
 }
 

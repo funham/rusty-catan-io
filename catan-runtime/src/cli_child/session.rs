@@ -23,6 +23,7 @@ use super::{
     input::{
         read_hex, read_init_action, read_initial_road, read_initial_settlement,
         read_post_dice_action, read_regular_action, read_resource_collection, read_robbed_player,
+        read_trade_owner_action, read_trade_response_action,
     },
     logging::init_socket_logger,
     tui::{CliUi, CliViewMode, ControlInput},
@@ -241,8 +242,8 @@ fn decision_request_from_output(
             DecisionRequestFrame::ChoosePlayerToRob(envelope)
         }
         DecisionKind::DropHalf { .. } => DecisionRequestFrame::DropHalf(envelope),
-        DecisionKind::TradeResponse { .. } => DecisionRequestFrame::AnswerTrade(envelope),
-        DecisionKind::TradeOwnerAction { .. } => return None,
+        DecisionKind::TradeResponse { .. } => DecisionRequestFrame::TradeResponse(envelope),
+        DecisionKind::TradeOwnerAction { .. } => DecisionRequestFrame::TradeOwnerAction(envelope),
     })
 }
 
@@ -283,6 +284,13 @@ fn command_from_decision_response(
             };
             Some(PlayerCommand::Trade(TradeCommand::Respond(response)))
         }
+        (DecisionKind::TradeResponse { .. }, DecisionResponseFrame::TradeResponse(response)) => {
+            Some(PlayerCommand::Trade(TradeCommand::Respond(response)))
+        }
+        (
+            DecisionKind::TradeOwnerAction { .. },
+            DecisionResponseFrame::TradeOwnerAction(command),
+        ) => Some(PlayerCommand::Trade(command)),
         _ => None,
     }
 }
@@ -630,6 +638,38 @@ fn handle_decision(
             };
             Ok(DecisionResponseFrame::AnswerTrade(answer))
         }
+        DecisionRequestFrame::TradeResponse(envelope) => {
+            log::trace!(
+                target: "catan_runtime::cli_child::session",
+                "processing TradeResponse decision id={}",
+                envelope.request_id
+            );
+            let session = envelope
+                .view
+                .public
+                .trade_sessions
+                .last()
+                .map(|session| session.id)
+                .unwrap_or(catan_core::gameplay::game::trade::TradeSessionId(0));
+            let response = read_trade_response_action(ui, &envelope.view, session)?;
+            Ok(DecisionResponseFrame::TradeResponse(response))
+        }
+        DecisionRequestFrame::TradeOwnerAction(envelope) => {
+            log::trace!(
+                target: "catan_runtime::cli_child::session",
+                "processing TradeOwnerAction decision id={}",
+                envelope.request_id
+            );
+            let session = envelope
+                .view
+                .public
+                .trade_sessions
+                .last()
+                .map(|session| session.id)
+                .unwrap_or(catan_core::gameplay::game::trade::TradeSessionId(0));
+            let command = read_trade_owner_action(ui, &envelope.view, session)?;
+            Ok(DecisionResponseFrame::TradeOwnerAction(command))
+        }
         DecisionRequestFrame::DropHalf(envelope) => {
             log::trace!(
                 target: "catan_runtime::cli_child::session",
@@ -651,7 +691,8 @@ mod tests {
         gameplay::game::command::RegularCommand,
         gameplay::game::{
             decision::{DecisionId, DecisionKind, DecisionLifetime, OpenDecision},
-            input::PlayerCommand,
+            input::{PlayerCommand, TradeCommand, TradeResponseCommand},
+            trade::{TradeOfferId, TradeSessionId},
             view::{ContextFactory, VisibilityConfig},
         },
         gameplay::primitives::player::PlayerId,
@@ -670,6 +711,7 @@ mod tests {
             state: &state,
             index: &index,
             visibility: &visibility,
+            trade_sessions: &[],
         };
         UiModel::from_decision(&factory.player_decision_context(0, None))
     }
@@ -700,6 +742,43 @@ mod tests {
         assert!(matches!(
             command,
             Some(PlayerCommand::Regular(RegularCommand::EndMove))
+        ));
+    }
+
+    #[test]
+    fn event_decision_trade_response_maps_to_submit_command_payload() {
+        let command = command_from_decision_response(
+            DecisionKind::TradeResponse {
+                session: TradeSessionId(3),
+            },
+            DecisionResponseFrame::TradeResponse(TradeResponseCommand::Accept {
+                offer_id: TradeOfferId(1),
+            }),
+        );
+
+        assert!(matches!(
+            command,
+            Some(PlayerCommand::Trade(TradeCommand::Respond(
+                TradeResponseCommand::Accept { offer_id }
+            ))) if offer_id == TradeOfferId(1)
+        ));
+    }
+
+    #[test]
+    fn event_decision_trade_owner_maps_to_submit_command_payload() {
+        let command = command_from_decision_response(
+            DecisionKind::TradeOwnerAction {
+                session: TradeSessionId(3),
+            },
+            DecisionResponseFrame::TradeOwnerAction(TradeCommand::Commit {
+                offer_id: TradeOfferId(2),
+            }),
+        );
+
+        assert!(matches!(
+            command,
+            Some(PlayerCommand::Trade(TradeCommand::Commit { offer_id }))
+                if offer_id == TradeOfferId(2)
         ));
     }
 

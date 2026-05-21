@@ -41,7 +41,7 @@ use super::{
     panels::{
         adjust_drop_selection, bank_panel_lines, bank_trade_menu_lines, drop_personal_lines,
         game_ended_lines, personal_model_lines, player_menu_lines, public_player_lines,
-        resource_picker_lines, snapshot_state_lines,
+        resource_picker_lines, snapshot_state_lines, trade_panel_lines,
     },
     render::{field_lines, field_lines_cropped_left, field_size},
     selectors::{
@@ -1117,6 +1117,14 @@ fn render_normal_layout(
     let field = Paragraph::new(field_lines(model, overlay)).block(panel_block("Field"));
     frame.render_widget(field, layout.field);
 
+    let trade = Paragraph::new(trade_panel_lines(
+        model,
+        usize::from(layout.trade.width.saturating_sub(2)),
+    ))
+    .wrap(Wrap { trim: false })
+    .block(panel_block("Trade"));
+    frame.render_widget(trade, layout.trade);
+
     if let Some(lines) = state.public_override {
         let area = right_column_area(layout);
         let public = Paragraph::new(lines)
@@ -1261,7 +1269,7 @@ fn command_panel_lines(
 
 fn command_short_hints(view_mode: CliViewMode) -> &'static str {
     match view_mode {
-        CliViewMode::Normal => "[r|e|bd|br|bs|bc|bt|kn|yp|m|rb]",
+        CliViewMode::Normal => "[r|e|bd|br|bs|bc|bt|pt|kn|yp|m|rb]",
         CliViewMode::Snapshot => "[s]",
     }
 }
@@ -1281,6 +1289,7 @@ fn command_help_lines(view_mode: CliViewMode, width: usize) -> Vec<Line<'static>
             "roll/r, end/e, buy dev/bd",
             "build: br, bs, bc or build road|settlement|city ...",
             "bank-trade: bt or bank-trade give take G4|G3|S2",
+            "player-trade: pt or trade public|pN give take",
             "dev: kn, yp, m, rb or use knight|yop|monopoly|roadbuild ...",
             "drop: five resource counts or drop",
         ]
@@ -1345,7 +1354,7 @@ mod tests {
             .join("\n");
 
         assert_eq!(rendered.lines().count(), 1);
-        assert!(rendered.contains("command: [r|e|bd|br|bs|bc|bt|kn|yp|m|rb]"));
+        assert!(rendered.contains("command: [r|e|bd|br|bs|bc|bt|pt|kn|yp|m|rb]"));
     }
 
     #[test]

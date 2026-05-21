@@ -182,6 +182,7 @@ mod tests {
             state,
             index: &index,
             visibility: &visibility,
+            trade_sessions: &[],
         };
         let output = GameOutput::event(GameEventRecord {
             event: GameEvent::GameStarted,
@@ -221,6 +222,7 @@ mod tests {
             state,
             index: &index,
             visibility: &visibility,
+            trade_sessions: &[],
         };
 
         for _ in 0..3 {

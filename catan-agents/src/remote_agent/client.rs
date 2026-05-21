@@ -6,7 +6,6 @@ use catan_core::{
             command::{
                 ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, InitialPlacementCommand,
                 MoveRobberCommand, PostDevCardCommand, PostDiceCommand, RegularCommand,
-                TradeAnswer,
             },
             decision::DecisionKind,
             event::{
@@ -15,6 +14,7 @@ use catan_core::{
             },
             input::DecisionRequest,
             input::{PlayerCommand, TradeCommand, TradeResponseCommand},
+            trade::TradeSessionId,
             view::{PlayerDecisionContext, PlayerNotificationContext},
         },
         primitives::player::PlayerId,
@@ -30,7 +30,7 @@ use super::{
     },
 };
 
-use crate::bot::{BotPolicy, unsupported_decision_command};
+use crate::bot::BotPolicy;
 
 pub struct RemoteCliAgent {
     player_id: PlayerId,
@@ -182,10 +182,26 @@ impl RemoteCliAgent {
         }
     }
 
-    fn answer_trade(&mut self, context: PlayerDecisionContext<'_>) -> TradeAnswer {
+    fn trade_response(
+        &mut self,
+        context: PlayerDecisionContext<'_>,
+        _session: TradeSessionId,
+    ) -> TradeResponseCommand {
         let envelope = self.envelope(&context, None);
-        match self.request(DecisionRequestFrame::AnswerTrade(envelope)) {
-            DecisionResponseFrame::AnswerTrade(action) => action,
+        match self.request(DecisionRequestFrame::TradeResponse(envelope)) {
+            DecisionResponseFrame::TradeResponse(action) => action,
+            other => panic!("unexpected CLI response: {other:?}"),
+        }
+    }
+
+    fn trade_owner_action(
+        &mut self,
+        context: PlayerDecisionContext<'_>,
+        _session: TradeSessionId,
+    ) -> TradeCommand {
+        let envelope = self.envelope(&context, None);
+        match self.request(DecisionRequestFrame::TradeOwnerAction(envelope)) {
+            DecisionResponseFrame::TradeOwnerAction(action) => action,
             other => panic!("unexpected CLI response: {other:?}"),
         }
     }
@@ -230,13 +246,12 @@ impl BotPolicy for RemoteCliAgent {
                 PlayerCommand::ChooseRobbedPlayer(self.choose_player_to_rob(context, robber_pos)),
             ),
             DecisionKind::DropHalf { .. } => Some(PlayerCommand::DropHalf(self.drop_half(context))),
-            DecisionKind::TradeResponse { .. } => {
-                Some(PlayerCommand::Trade(match self.answer_trade(context) {
-                    TradeAnswer::Accept => return None,
-                    TradeAnswer::Decline => TradeCommand::Respond(TradeResponseCommand::Reject),
-                }))
-            }
-            DecisionKind::TradeOwnerAction { .. } => unsupported_decision_command(request),
+            DecisionKind::TradeResponse { session } => Some(PlayerCommand::Trade(
+                TradeCommand::Respond(self.trade_response(context, session)),
+            )),
+            DecisionKind::TradeOwnerAction { session } => Some(PlayerCommand::Trade(
+                self.trade_owner_action(context, session),
+            )),
         }
     }
 }

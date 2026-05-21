@@ -6,6 +6,7 @@ use catan_core::gameplay::{
     game::{
         event::ObserverNotificationContext,
         state::TableState,
+        trade::{TradeOfferId, TradeResponseState, TradeScope, TradeSessionId},
         view::{
             OmniscientGameView, PlayerDecisionContext, PlayerNotificationContext,
             PrivatePlayerView, PublicBankDevCards, PublicBankResources, PublicGameView,
@@ -19,6 +20,7 @@ use catan_core::gameplay::{
         dev_card::{DevCardData, UsableDevCardSet},
         player::PlayerId,
         resource::{ResourceMap, ResourceSet},
+        trade::PlayerTrade,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -39,8 +41,28 @@ pub struct UiPublicGame {
     pub bank: UiPublicBank,
     pub players: Vec<UiPublicPlayer>,
     pub builds: Vec<UiPlayerBuilds>,
+    pub trade_sessions: Vec<UiTradeSession>,
     pub longest_road_owner: Option<PlayerId>,
     pub largest_army_owner: Option<PlayerId>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiTradeSession {
+    pub id: TradeSessionId,
+    pub proposer: PlayerId,
+    pub scope: TradeScope,
+    pub offers: Vec<UiTradeOffer>,
+    pub responses: Vec<Option<TradeResponseState>>,
+    pub version: u64,
+    pub open: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiTradeOffer {
+    pub id: TradeOfferId,
+    pub proposer: PlayerId,
+    pub peer: Option<PlayerId>,
+    pub trade: PlayerTrade,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -232,6 +254,29 @@ impl UiPublicGame {
                     player_id,
                     establishments: builds.establishments.iter().copied().collect(),
                     roads: builds.roads.iter().collect(),
+                })
+                .collect(),
+            trade_sessions: public
+                .trade_sessions
+                .iter()
+                .filter(|session| session.open)
+                .map(|session| UiTradeSession {
+                    id: session.id,
+                    proposer: session.proposer,
+                    scope: session.scope,
+                    offers: session
+                        .offers
+                        .iter()
+                        .map(|offer| UiTradeOffer {
+                            id: offer.id,
+                            proposer: offer.proposer,
+                            peer: offer.peer,
+                            trade: offer.trade.clone(),
+                        })
+                        .collect(),
+                    responses: session.responses.clone(),
+                    version: session.version,
+                    open: session.open,
                 })
                 .collect(),
             longest_road_owner: public.longest_road_owner,

@@ -12,7 +12,7 @@ use catan_core::{
         game::{
             decision::DecisionId,
             event::{GameEvent, ObserverKind},
-            input::PlayerCommand,
+            input::{PlayerCommand, TradeCommand, TradeResponseCommand},
             legal::{self, BuildClass},
             output::GameOutput,
             view::PlayerDecisionContext,
@@ -140,6 +140,8 @@ pub enum DecisionRequestFrame {
     MoveRobber(DecisionRequestEnvelope),
     ChoosePlayerToRob(DecisionRequestEnvelope),
     AnswerTrade(DecisionRequestEnvelope),
+    TradeResponse(DecisionRequestEnvelope),
+    TradeOwnerAction(DecisionRequestEnvelope),
     DropHalf(DecisionRequestEnvelope),
 }
 
@@ -153,6 +155,8 @@ pub enum DecisionResponseFrame {
     MoveRobber(MoveRobberCommand),
     ChoosePlayerToRob(ChooseRobbedPlayerCommand),
     AnswerTrade(TradeAnswer),
+    TradeResponse(TradeResponseCommand),
+    TradeOwnerAction(TradeCommand),
     DropHalf(DropHalfCommand),
 }
 
@@ -199,6 +203,8 @@ impl DecisionRequestFrame {
             Self::MoveRobber(_) => "move_robber",
             Self::ChoosePlayerToRob(_) => "choose_player_to_rob",
             Self::AnswerTrade(_) => "answer_trade",
+            Self::TradeResponse(_) => "trade_response",
+            Self::TradeOwnerAction(_) => "trade_owner_action",
             Self::DropHalf(_) => "drop_half",
         }
     }
@@ -213,6 +219,8 @@ impl DecisionRequestFrame {
             | Self::MoveRobber(envelope)
             | Self::ChoosePlayerToRob(envelope)
             | Self::AnswerTrade(envelope)
+            | Self::TradeResponse(envelope)
+            | Self::TradeOwnerAction(envelope)
             | Self::DropHalf(envelope) => envelope,
         }
     }

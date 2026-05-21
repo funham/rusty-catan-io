@@ -4,7 +4,7 @@
 //! discard selection, bank-trade menus, resource pickers, player menus, and game-end stats.
 
 use catan_agents::remote_agent::{
-    UiModel, UiPublicBankDevCards, UiPublicBankResources, UiPublicPlayerResources,
+    UiModel, UiPublicBankDevCards, UiPublicBankResources, UiPublicPlayerResources, UiTradeSession,
 };
 use catan_core::gameplay::{
     game::event::GameEndPlayerStats,
@@ -13,7 +13,7 @@ use catan_core::gameplay::{
         dev_card::{DevCardData, DevCardKind, UsableDevCard},
         player::PlayerId,
         resource::{Resource, ResourceSet},
-        trade::{BankTrade, BankTradeKind},
+        trade::{BankTrade, BankTradeKind, PlayerTrade},
     },
 };
 use catan_render::{adapters::ratatui::color as ratatui_color, field::FieldRenderer};
@@ -194,6 +194,104 @@ pub(crate) fn personal_model_lines(model: &UiModel) -> Vec<Line<'static>> {
         lines.push(Line::from("no private player data"));
     }
     lines
+}
+
+pub(crate) fn trade_panel_lines(model: &UiModel, width: usize) -> Vec<Line<'static>> {
+    let Some(session) = model.public.trade_sessions.last() else {
+        return vec![Line::from(Span::styled(
+            "no active player trade",
+            subtle_box_style(),
+        ))];
+    };
+
+    let mut lines = Vec::new();
+    lines.push(trade_session_summary_line(session));
+    if let Some(offer) = session.offers.last() {
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("#{} ", offer.id.0),
+                Style::default().fg(Color::Yellow),
+            ),
+            Span::raw(format!("p{} ", offer.proposer)),
+            Span::raw(player_trade_label(&offer.trade)),
+        ]));
+    }
+    lines.push(trade_responses_line(session));
+    let hint = if Some(session.proposer) == model.actor {
+        "owner: Enter commits accepted offer, c cancels"
+    } else {
+        "peer: a accepts, r rejects, c counters"
+    };
+    lines.push(Line::from(Span::styled(
+        truncate_display(hint, width),
+        Style::default().fg(Color::Gray),
+    )));
+    lines
+}
+
+fn trade_session_summary_line(session: &UiTradeSession) -> Line<'static> {
+    let scope = match session.scope {
+        catan_core::gameplay::game::trade::TradeScope::Public => "public".to_owned(),
+        catan_core::gameplay::game::trade::TradeScope::Targeted(peer) => format!("p{peer}"),
+    };
+    Line::from(vec![
+        Span::styled(
+            format!("s{} ", session.id.0),
+            Style::default().fg(Color::Cyan),
+        ),
+        Span::raw(format!("p{} -> {}  ", session.proposer, scope)),
+        Span::raw(format!("offers {}", session.offers.len())),
+    ])
+}
+
+fn trade_responses_line(session: &UiTradeSession) -> Line<'static> {
+    let mut spans = Vec::new();
+    for (idx, response) in session.responses.iter().enumerate() {
+        let Some(response) = response else {
+            continue;
+        };
+        if !spans.is_empty() {
+            spans.push(Span::raw(" "));
+        }
+        let label = match response {
+            catan_core::gameplay::game::trade::TradeResponseState::Waiting => "?",
+            catan_core::gameplay::game::trade::TradeResponseState::Accepted { offer_id } => {
+                return Line::from(format!("p{idx}: accepted #{}", offer_id.0));
+            }
+            catan_core::gameplay::game::trade::TradeResponseState::Rejected => "x",
+            catan_core::gameplay::game::trade::TradeResponseState::Countered { offer_id } => {
+                return Line::from(format!("p{idx}: countered #{}", offer_id.0));
+            }
+        };
+        spans.push(Span::raw(format!("p{idx}:{label}")));
+    }
+    if spans.is_empty() {
+        Line::from("responses: -")
+    } else {
+        Line::from(spans)
+    }
+}
+
+fn player_trade_label(trade: &PlayerTrade) -> String {
+    format!(
+        "{} -> {}",
+        compact_resource_set_label(&trade.give),
+        compact_resource_set_label(&trade.take)
+    )
+}
+
+fn compact_resource_set_label(resources: &ResourceSet) -> String {
+    let parts = Resource::iter()
+        .filter_map(|resource| {
+            let count = resources[resource];
+            (count > 0).then(|| format!("{count}{:?}", resource))
+        })
+        .collect::<Vec<_>>();
+    if parts.is_empty() {
+        "-".to_owned()
+    } else {
+        parts.join(",")
+    }
 }
 
 pub(crate) fn snapshot_state_lines(
@@ -1008,6 +1106,7 @@ mod tests {
             state: &state,
             index: &index,
             visibility: &visibility,
+            trade_sessions: &[],
         };
         let model = UiModel::from_observer(
             ObserverNotificationContext::Player {
@@ -1041,6 +1140,7 @@ mod tests {
             state: &state,
             index: &index,
             visibility: &visibility,
+            trade_sessions: &[],
         };
         let model = UiModel::from_observer(
             ObserverNotificationContext::Player {
@@ -1150,6 +1250,7 @@ mod tests {
             state: &state,
             index: &index,
             visibility: &visibility,
+            trade_sessions: &[],
         };
         let model = UiModel::from_observer(
             ObserverNotificationContext::Omniscient {
@@ -1194,6 +1295,7 @@ mod tests {
             state: &state,
             index: &index,
             visibility: &visibility,
+            trade_sessions: &[],
         };
         let model = UiModel::from_observer(
             ObserverNotificationContext::Spectator {
@@ -1233,6 +1335,7 @@ mod tests {
             state: &state,
             index: &index,
             visibility: &visibility,
+            trade_sessions: &[],
         };
         let model = UiModel::from_observer(
             ObserverNotificationContext::Spectator {

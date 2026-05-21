@@ -9,12 +9,12 @@ use catan_core::{
             command::{
                 ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, InitialPlacementCommand,
                 MoveRobberCommand, PostDevCardCommand, PostDiceCommand, RegularCommand,
-                TradeAnswer,
             },
             decision::DecisionKind,
             event::{GameEvent, PlayerNotification},
             input::DecisionRequest,
             input::{PlayerCommand, TradeCommand, TradeResponseCommand},
+            trade::{TradeOfferId, TradeSessionId},
             view::{PlayerDecisionContext, PlayerNotificationContext},
         },
         primitives::{player::PlayerId, resource::ResourceSet},
@@ -23,7 +23,7 @@ use catan_core::{
 };
 
 use crate::{
-    bot::{BotPolicy, unsupported_decision_command},
+    bot::BotPolicy,
     cli_command::{CliCommand, parse_cli_command},
 };
 
@@ -116,8 +116,24 @@ impl CliAgent {
         ChooseRobbedPlayerCommand(TerminalUi::read_player_id("player id: "))
     }
 
-    fn answer_trade(&mut self, _context: PlayerDecisionContext<'_>) -> TradeAnswer {
-        TradeAnswer::Decline
+    fn answer_trade(
+        &mut self,
+        context: PlayerDecisionContext<'_>,
+        session: TradeSessionId,
+    ) -> TradeResponseCommand {
+        let _guard = self.terminal.inner.lock().expect("terminal mutex poisoned");
+        TerminalUi::print_decision_context("Trade response", &context);
+        TerminalUi::read_trade_response(session)
+    }
+
+    fn trade_owner_action(
+        &mut self,
+        context: PlayerDecisionContext<'_>,
+        session: TradeSessionId,
+    ) -> TradeCommand {
+        let _guard = self.terminal.inner.lock().expect("terminal mutex poisoned");
+        TerminalUi::print_decision_context("Trade owner action", &context);
+        TerminalUi::read_trade_owner_action(session)
     }
 
     fn drop_half(&mut self, context: PlayerDecisionContext<'_>) -> DropHalfCommand {
@@ -160,13 +176,12 @@ impl BotPolicy for CliAgent {
                 PlayerCommand::ChooseRobbedPlayer(self.choose_player_to_rob(context, robber_pos)),
             ),
             DecisionKind::DropHalf { .. } => Some(PlayerCommand::DropHalf(self.drop_half(context))),
-            DecisionKind::TradeResponse { .. } => {
-                Some(PlayerCommand::Trade(match self.answer_trade(context) {
-                    TradeAnswer::Accept => return None,
-                    TradeAnswer::Decline => TradeCommand::Respond(TradeResponseCommand::Reject),
-                }))
-            }
-            DecisionKind::TradeOwnerAction { .. } => unsupported_decision_command(request),
+            DecisionKind::TradeResponse { session } => Some(PlayerCommand::Trade(
+                TradeCommand::Respond(self.answer_trade(context, session)),
+            )),
+            DecisionKind::TradeOwnerAction { session } => Some(PlayerCommand::Trade(
+                self.trade_owner_action(context, session),
+            )),
         }
     }
 }
@@ -194,6 +209,25 @@ impl TerminalUi {
         match parse_cli_command(line).ok().flatten() {
             None => Some(RegularCommand::EndMove),
             Some(CliCommand::Regular(action)) => Some(action),
+            Some(CliCommand::PlayerTradeProposal { scope, offer }) => match scope {
+                catan_core::gameplay::game::trade::TradeScope::Public => {
+                    Some(RegularCommand::OfferPublicTrade(
+                        catan_core::gameplay::primitives::trade::PublicTradeOffer {
+                            give: offer.give,
+                            take: offer.take,
+                        },
+                    ))
+                }
+                catan_core::gameplay::game::trade::TradeScope::Targeted(peer_id) => {
+                    Some(RegularCommand::OfferPersonalTrade(
+                        catan_core::gameplay::primitives::trade::PersonalTradeOffer {
+                            give: offer.give,
+                            take: offer.take,
+                            peer_id,
+                        },
+                    ))
+                }
+            },
             _ => None,
         }
     }
@@ -294,6 +328,86 @@ impl TerminalUi {
             }
             println!("expected unsigned integer");
         }
+    }
+
+    fn read_trade_response(session: TradeSessionId) -> TradeResponseCommand {
+        loop {
+            let line = Self::read_line(&format!(
+                "trade session {} [accept <offer_id> | reject | counter <5 give counts> <5 take counts>]: ",
+                session.0
+            ));
+            let parts = line.split_whitespace().collect::<Vec<_>>();
+            match parts.as_slice() {
+                ["accept", offer_id] | ["a", offer_id] => match offer_id.parse::<u64>() {
+                    Ok(offer_id) => {
+                        return TradeResponseCommand::Accept {
+                            offer_id: TradeOfferId(offer_id),
+                        };
+                    }
+                    Err(_) => println!("expected unsigned offer id"),
+                },
+                ["reject"] | ["r"] | ["decline"] => return TradeResponseCommand::Reject,
+                ["counter", b1, w1, wh1, s1, o1, b2, w2, wh2, s2, o2] => {
+                    if let Some(offer) = Self::resource_sets_from_counts(
+                        [b1, w1, wh1, s1, o1],
+                        [b2, w2, wh2, s2, o2],
+                    ) {
+                        return TradeResponseCommand::Counter {
+                            offer: catan_core::gameplay::primitives::trade::PlayerTrade {
+                                give: offer.0,
+                                take: offer.1,
+                            },
+                        };
+                    }
+                    println!("expected ten unsigned resource counts");
+                }
+                _ => println!("expected accept, reject, or counter"),
+            }
+        }
+    }
+
+    fn read_trade_owner_action(session: TradeSessionId) -> TradeCommand {
+        loop {
+            let line = Self::read_line(&format!(
+                "trade session {} [commit <offer_id> | cancel]: ",
+                session.0
+            ));
+            let parts = line.split_whitespace().collect::<Vec<_>>();
+            match parts.as_slice() {
+                ["commit", offer_id] | ["c", offer_id] => match offer_id.parse::<u64>() {
+                    Ok(offer_id) => {
+                        return TradeCommand::Commit {
+                            offer_id: TradeOfferId(offer_id),
+                        };
+                    }
+                    Err(_) => println!("expected unsigned offer id"),
+                },
+                ["cancel"] | ["x"] => return TradeCommand::Cancel,
+                _ => println!("expected commit or cancel"),
+            }
+        }
+    }
+
+    fn resource_sets_from_counts(
+        give: [&str; 5],
+        take: [&str; 5],
+    ) -> Option<(ResourceSet, ResourceSet)> {
+        Some((
+            ResourceSet {
+                brick: give[0].parse().ok()?,
+                wood: give[1].parse().ok()?,
+                wheat: give[2].parse().ok()?,
+                sheep: give[3].parse().ok()?,
+                ore: give[4].parse().ok()?,
+            },
+            ResourceSet {
+                brick: take[0].parse().ok()?,
+                wood: take[1].parse().ok()?,
+                wheat: take[2].parse().ok()?,
+                sheep: take[3].parse().ok()?,
+                ore: take[4].parse().ok()?,
+            },
+        ))
     }
 
     fn read_line(prompt: &str) -> String {

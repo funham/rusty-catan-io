@@ -6,6 +6,7 @@ use ratatui::layout::Rect;
 pub(crate) struct NormalLayoutAreas {
     pub status: Rect,
     pub field: Rect,
+    pub trade: Rect,
     pub personal: Rect,
     pub journal: Rect,
     pub bank: Rect,
@@ -20,12 +21,13 @@ pub(crate) fn normal_layout_areas(
 ) -> NormalLayoutAreas {
     let (status, body, command) = split_terminal(area, command_line_count);
     let (left, right) = split_body_columns(body, field_size.0.saturating_add(2), 34);
-    let (field, personal) = split_left_column(left, field_size.1.saturating_add(2));
+    let (field, trade, personal) = split_left_column(left, field_size.1.saturating_add(2));
     let (journal, bank, players) = split_info_column(right);
 
     NormalLayoutAreas {
         status,
         field,
+        trade,
         personal,
         journal,
         bank,
@@ -119,21 +121,38 @@ fn split_body_columns(body: Rect, preferred_left_width: u16, min_right_width: u1
     )
 }
 
-fn split_left_column(left: Rect, preferred_field_height: u16) -> (Rect, Rect) {
+fn split_left_column(left: Rect, preferred_field_height: u16) -> (Rect, Rect, Rect) {
     if left.height <= 1 {
-        return (left, Rect::new(left.x, left.bottom(), left.width, 0));
+        let empty = Rect::new(left.x, left.bottom(), left.width, 0);
+        return (left, empty, empty);
     }
 
     let personal_min = if left.height >= 8 { 5 } else { 1 };
-    let max_field_height = left.height.saturating_sub(personal_min).max(1);
+    let trade_height = if left.height >= 14 { 5 } else { 0 };
+    let max_field_height = left
+        .height
+        .saturating_sub(personal_min)
+        .saturating_sub(trade_height)
+        .max(1);
     let field_height = preferred_field_height.min(max_field_height).max(1);
-    let personal_height = left.height.saturating_sub(field_height);
+    let personal_height = left
+        .height
+        .saturating_sub(field_height)
+        .saturating_sub(trade_height);
 
     (
         Rect::new(left.x, left.y, left.width, field_height),
         Rect::new(
             left.x,
             left.y.saturating_add(field_height),
+            left.width,
+            trade_height,
+        ),
+        Rect::new(
+            left.x,
+            left.y
+                .saturating_add(field_height)
+                .saturating_add(trade_height),
             left.width,
             personal_height,
         ),
@@ -191,6 +210,7 @@ mod tests {
         for pane in [
             layout.status,
             layout.field,
+            layout.trade,
             layout.personal,
             layout.journal,
             layout.bank,
@@ -204,6 +224,7 @@ mod tests {
         }
 
         assert!(layout.field.width > 0);
+        assert!(layout.trade.height > 0);
         assert!(layout.journal.width > 0);
         assert!(layout.command.height >= 3);
     }

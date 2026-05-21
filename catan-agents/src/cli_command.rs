@@ -2,18 +2,19 @@ use std::{error::Error, fmt};
 
 use catan_core::{
     gameplay::{
-        game::command::RegularCommand,
+        game::{command::RegularCommand, trade::TradeScope},
         primitives::{
             build::{Build, Establishment, EstablishmentType, Road},
             dev_card::{DevCardUsage, UsableDevCard},
-            resource::Resource,
-            trade::{BankTrade, BankTradeKind},
+            player::PlayerId,
+            resource::{Resource, ResourceSet},
+            trade::{BankTrade, BankTradeKind, PlayerTrade},
         },
     },
     topology::{HexIndex, Intersection, Path, repr::Dual},
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CliCommand {
     RollDice,
     Regular(RegularCommand),
@@ -22,6 +23,11 @@ pub enum CliCommand {
     InteractiveBuildSettlement,
     InteractiveBuildCity,
     InteractiveBankTrade,
+    InteractivePlayerTrade,
+    PlayerTradeProposal {
+        scope: TradeScope,
+        offer: PlayerTrade,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,6 +101,23 @@ pub fn parse_cli_command(line: &str) -> Result<Option<CliCommand>, ParseCommandE
         ["bs"] | ["build", "settlement"] => Ok(Some(CliCommand::InteractiveBuildSettlement)),
         ["bc"] | ["build", "city"] => Ok(Some(CliCommand::InteractiveBuildCity)),
         ["bt"] | ["bank-trade"] => Ok(Some(CliCommand::InteractiveBankTrade)),
+        ["pt"] | ["player-trade"] => Ok(Some(CliCommand::InteractivePlayerTrade)),
+        ["trade", scope, give, take] => Ok(Some(CliCommand::PlayerTradeProposal {
+            scope: parse_trade_scope(scope)?,
+            offer: PlayerTrade {
+                give: parse_resource(give)?.into(),
+                take: parse_resource(take)?.into(),
+            },
+        })),
+        ["trade", scope, b1, w1, wh1, s1, o1, b2, w2, wh2, s2, o2] => {
+            Ok(Some(CliCommand::PlayerTradeProposal {
+                scope: parse_trade_scope(scope)?,
+                offer: PlayerTrade {
+                    give: parse_resource_set_counts([b1, w1, wh1, s1, o1])?,
+                    take: parse_resource_set_counts([b2, w2, wh2, s2, o2])?,
+                },
+            }))
+        }
         ["kn"] | ["use", "knight"] => Ok(Some(interactive_dev(UsableDevCard::Knight))),
         ["yp"] | ["use", "yop"] | ["use", "year-of-plenty"] => {
             Ok(Some(interactive_dev(UsableDevCard::YearOfPlenty)))
@@ -182,6 +205,34 @@ fn parse_resource(token: &str) -> Result<Resource, ParseCommandError> {
             "unknown resource '{token}'"
         ))),
     }
+}
+
+fn parse_resource_set_counts(tokens: [&str; 5]) -> Result<ResourceSet, ParseCommandError> {
+    let [brick, wood, wheat, sheep, ore] = tokens
+        .map(|token| token.parse::<u16>())
+        .map(|value| value.map_err(|_| ParseCommandError::invalid("invalid resource count")));
+    Ok(ResourceSet {
+        brick: brick?,
+        wood: wood?,
+        wheat: wheat?,
+        sheep: sheep?,
+        ore: ore?,
+    })
+}
+
+fn parse_trade_scope(token: &str) -> Result<TradeScope, ParseCommandError> {
+    if matches!(token, "public" | "open" | "all") {
+        return Ok(TradeScope::Public);
+    }
+    if let Some(raw) = token.strip_prefix('p') {
+        let peer_id = raw
+            .parse::<PlayerId>()
+            .map_err(|_| ParseCommandError::invalid("invalid trade player id"))?;
+        return Ok(TradeScope::Targeted(peer_id));
+    }
+    Err(ParseCommandError::invalid(format!(
+        "unknown trade scope '{token}'"
+    )))
 }
 
 fn parse_bank_trade_kind(token: &str) -> Result<BankTradeKind, ParseCommandError> {

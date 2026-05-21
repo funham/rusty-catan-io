@@ -6,7 +6,7 @@ pub use client::{RemoteCliAgent, RemoteCliObserver};
 pub use model::{
     UiBoard, UiModel, UiOmniscient, UiPlayerBuilds, UiPrivatePlayer, UiPublicBank,
     UiPublicBankDevCards, UiPublicBankResources, UiPublicGame, UiPublicPlayer,
-    UiPublicPlayerResources, ui_model_summary,
+    UiPublicPlayerResources, UiTradeOffer, UiTradeSession, ui_model_summary,
 };
 pub use protocol::{
     CliRole, CliToHost, DecisionRequestEnvelope, DecisionRequestFrame, DecisionResponseFrame,
@@ -27,12 +27,14 @@ mod tests {
                 event::{GameEvent, GameObserver, ObserverKind, ObserverNotificationContext},
                 index::GameIndex,
                 state::SetupGameState,
+                trade::{TradeScope, TradeSession},
                 view::{ContextFactory, SearchFactory, VisibilityConfig},
             },
             primitives::{
                 dev_card::{DevCardKind, DevCardUsage, UsableDevCard},
                 player::PlayerId,
                 resource::{Resource, ResourceSet},
+                trade::PlayerTrade,
             },
         },
     };
@@ -124,6 +126,7 @@ mod tests {
             state: &state,
             index: &index,
             visibility: &visibility,
+            trade_sessions: &[],
         };
         let model = UiModel::from_decision(&factory.player_decision_context(P0, None));
         let msg = HostToCli::Hello {
@@ -133,6 +136,36 @@ mod tests {
         serde_json::to_vec(&board).unwrap();
         serde_json::to_vec(&model).unwrap();
         serde_json::to_vec(&msg).unwrap();
+    }
+
+    #[test]
+    fn ui_model_projects_open_trade_sessions() {
+        let state = SetupGameState::default().finish();
+        let index = GameIndex::rebuild(&state);
+        let visibility = VisibilityConfig::default();
+        let sessions = vec![TradeSession::new(
+            catan_core::gameplay::game::trade::TradeSessionId(7),
+            P0,
+            TradeScope::Targeted(P1),
+            PlayerTrade {
+                give: ResourceSet::from(Resource::Brick),
+                take: ResourceSet::from(Resource::Ore),
+            },
+            state.players.count(),
+        )];
+        let factory = ContextFactory {
+            state: &state,
+            index: &index,
+            visibility: &visibility,
+            trade_sessions: &sessions,
+        };
+
+        let model = UiModel::from_decision(&factory.player_decision_context(P0, None));
+
+        assert_eq!(model.public.trade_sessions.len(), 1);
+        assert_eq!(model.public.trade_sessions[0].id.0, 7);
+        assert_eq!(model.public.trade_sessions[0].offers[0].trade.give.brick, 1);
+        assert_eq!(model.public.trade_sessions[0].offers[0].trade.take.ore, 1);
     }
 
     #[test]
@@ -162,6 +195,7 @@ mod tests {
             state: &state,
             index: &index,
             visibility: &visibility,
+            trade_sessions: &[],
         };
         let search = Some(SearchFactory::new(&state, visibility.player_policy(P0), P0));
         let context = factory.player_decision_context(P0, search);
@@ -219,6 +253,7 @@ mod tests {
             state: &state,
             index: &index,
             visibility: &visibility,
+            trade_sessions: &[],
         };
         let search = Some(SearchFactory::new(&state, visibility.player_policy(P0), P0));
         let context = factory.player_decision_context(P0, search);
@@ -238,6 +273,7 @@ mod tests {
             state: &state,
             index: &index,
             visibility: &visibility,
+            trade_sessions: &[],
         };
 
         let normal = UiModel::from_observer(
@@ -273,6 +309,7 @@ mod tests {
             state: &state,
             index: &index,
             visibility: &visibility,
+            trade_sessions: &[],
         };
         let model = UiModel::from_observer(
             ObserverNotificationContext::Omniscient {
@@ -317,6 +354,7 @@ mod tests {
             state: &state,
             index: &index,
             visibility: &visibility,
+            trade_sessions: &[],
         };
         let model = UiModel::from_observer(
             ObserverNotificationContext::Omniscient {
@@ -360,6 +398,7 @@ mod tests {
                 state: &state,
                 index: &first_index,
                 visibility: &visibility,
+                trade_sessions: &[],
             };
             observer.on_event(
                 &GameEvent::GameStarted,
@@ -377,6 +416,7 @@ mod tests {
                 state: &state,
                 index: &second_index,
                 visibility: &visibility,
+                trade_sessions: &[],
             };
             observer.on_event(
                 &GameEvent::ResourcesDistributed {
@@ -428,6 +468,7 @@ mod tests {
             state: &state,
             index: &index,
             visibility: &visibility,
+            trade_sessions: &[],
         };
         let model = UiModel::from_observer(
             ObserverNotificationContext::Omniscient {

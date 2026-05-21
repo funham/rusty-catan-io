@@ -1149,6 +1149,7 @@ mod tests {
             state,
             index: &index,
             visibility: &visibility,
+            trade_sessions: &[],
         };
         let search = Some(SearchFactory::new(
             state,
@@ -1187,6 +1188,7 @@ mod tests {
             state,
             index: &index,
             visibility: &visibility,
+            trade_sessions: &[],
         };
         let context = factory.player_decision_context(player_id, None);
         legal_bank_trades(&context)
@@ -1203,6 +1205,7 @@ mod tests {
             state,
             index: &index,
             visibility: &visibility,
+            trade_sessions: &[],
         };
         let search = Some(SearchFactory::new(
             state,
@@ -1594,6 +1597,7 @@ mod tests {
             state: &state,
             index: &index,
             visibility: &visibility,
+            trade_sessions: &[],
         };
         let search = Some(SearchFactory::new(&state, visibility.player_policy(P0), P0));
         let context = factory.player_decision_context(P0, search);
@@ -1643,6 +1647,7 @@ mod tests {
             state: &state,
             index: &index,
             visibility: &visibility,
+            trade_sessions: &[],
         };
         let context = factory.player_decision_context(P0, None);
         let legal = legal_initial_placements(&context)
@@ -1665,6 +1670,7 @@ mod tests {
             state: &state,
             index: &index,
             visibility: &visibility,
+            trade_sessions: &[],
         };
         let context = factory.player_decision_context(P0, None);
         let placements = legal_initial_placements(&context);
@@ -1812,6 +1818,7 @@ mod tests {
             state: &state,
             index: &index,
             visibility: &visibility,
+            trade_sessions: &[],
         };
         let search = Some(SearchFactory::new(&state, visibility.player_policy(P0), P0));
         let context = factory.player_decision_context(P0, search);
@@ -1843,6 +1850,7 @@ mod tests {
             state: &state,
             index: &index,
             visibility: &visibility,
+            trade_sessions: &[],
         };
         let search = Some(SearchFactory::new(&state, visibility.player_policy(P0), P0));
         let context = factory.player_decision_context(P0, search);

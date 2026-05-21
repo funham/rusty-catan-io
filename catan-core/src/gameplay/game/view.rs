@@ -6,6 +6,7 @@ use crate::{
     gameplay::{
         constants::capacities::{PLAYER_PORTS_INLINE, PLAYER_VIEW_INLINE},
         field::state::{BoardLayout, BoardState},
+        game::trade::TradeSession,
         game::{index::GameIndex, query::GameQuery, state::TableState},
         primitives::{
             PortKind,
@@ -122,6 +123,7 @@ mod tests {
             state: &state,
             index: &index,
             visibility: &visibility,
+            trade_sessions: &[],
         };
 
         let public = factory.spectator_public_view();
@@ -145,6 +147,7 @@ mod tests {
             state: &state,
             index: &index,
             visibility: &visibility,
+            trade_sessions: &[],
         };
 
         let public = factory.public_view(VisibilityPolicy::Omniscient);
@@ -201,6 +204,7 @@ pub struct PublicGameView<'a> {
     pub bank: PublicBankView,
     pub players: PublicPlayerViews,
     pub builds: &'a BoardBuildData,
+    pub trade_sessions: &'a [TradeSession],
     pub longest_road_owner: Option<PlayerId>,
     pub largest_army_owner: Option<PlayerId>,
     ports_acquired: &'a [SmallSet<PortKind, PLAYER_PORTS_INLINE>],
@@ -261,6 +265,7 @@ pub struct ContextFactory<'a> {
     pub state: &'a TableState,
     pub index: &'a GameIndex,
     pub visibility: &'a VisibilityConfig,
+    pub trade_sessions: &'a [TradeSession],
 }
 
 impl<'a> PublicGameView<'a> {
@@ -357,6 +362,7 @@ impl<'a> ContextFactory<'a> {
             bank: self.project_bank(policy),
             players: self.project_players(policy),
             builds: &self.state.builds,
+            trade_sessions: self.trade_sessions,
             longest_road_owner: query.longest_road_owner(),
             largest_army_owner: query.largest_army_owner(),
             ports_acquired: &self.index.ports_acquired,

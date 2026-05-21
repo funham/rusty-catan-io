@@ -1,7 +1,4 @@
-use crate::{
-    bot::{BotPolicy, unsupported_decision_command},
-    lazy, legal,
-};
+use crate::{bot::BotPolicy, lazy, legal, trade};
 use catan_core::{
     gameplay::{
         game::{
@@ -10,8 +7,8 @@ use catan_core::{
                 MoveRobberCommand, PostDevCardCommand, PostDiceCommand, RegularCommand,
             },
             decision::DecisionKind,
-            input::DecisionRequest,
-            input::PlayerCommand,
+            input::{DecisionRequest, PlayerCommand, TradeCommand, TradeResponseCommand},
+            trade::{TradeScope, TradeSessionId},
             view::PlayerDecisionContext,
         },
         primitives::{
@@ -33,6 +30,7 @@ use rand::{
 pub struct RandomAgent<R = SmallRng> {
     id: PlayerId,
     rng: R,
+    attempted_trades: Vec<(PlayerId, ResourceSet, ResourceSet)>,
 }
 
 impl Default for RandomAgent {
@@ -56,7 +54,11 @@ impl RandomAgent {
 impl<R> RandomAgent<R> {
     pub fn with_rng(id: impl Into<PlayerId>, rng: R) -> Self {
         let id = id.into();
-        Self { id, rng }
+        Self {
+            id,
+            rng,
+            attempted_trades: Vec::new(),
+        }
     }
 }
 
@@ -78,7 +80,7 @@ impl<R: Rng> RandomAgent<R> {
     }
 
     fn regular_action(&mut self, context: PlayerDecisionContext<'_>) -> RegularCommand {
-        rand_regular_action(context, &mut self.rng)
+        rand_regular_action_with_trades(context, &mut self.rng, &mut self.attempted_trades)
     }
 
     fn move_robber(&mut self, context: PlayerDecisionContext<'_>) -> MoveRobberCommand {
@@ -95,6 +97,22 @@ impl<R: Rng> RandomAgent<R> {
 
     fn drop_half(&mut self, context: PlayerDecisionContext<'_>) -> DropHalfCommand {
         rand_drop_half(context, &mut self.rng)
+    }
+
+    fn trade_response(
+        &mut self,
+        context: PlayerDecisionContext<'_>,
+        session_id: TradeSessionId,
+    ) -> TradeResponseCommand {
+        rand_trade_response(context, session_id, &mut self.rng)
+    }
+
+    fn trade_owner_action(
+        &mut self,
+        context: PlayerDecisionContext<'_>,
+        session_id: TradeSessionId,
+    ) -> TradeCommand {
+        rand_trade_owner_action(context, session_id, &mut self.rng)
     }
 }
 
@@ -129,9 +147,12 @@ impl<R: Rng> BotPolicy for RandomAgent<R> {
                 PlayerCommand::ChooseRobbedPlayer(self.choose_player_to_rob(context, robber_pos)),
             ),
             DecisionKind::DropHalf { .. } => Some(PlayerCommand::DropHalf(self.drop_half(context))),
-            DecisionKind::TradeResponse { .. } | DecisionKind::TradeOwnerAction { .. } => {
-                unsupported_decision_command(request)
-            }
+            DecisionKind::TradeResponse { session } => Some(PlayerCommand::Trade(
+                TradeCommand::Respond(self.trade_response(context, session)),
+            )),
+            DecisionKind::TradeOwnerAction { session } => Some(PlayerCommand::Trade(
+                self.trade_owner_action(context, session),
+            )),
         }
     }
 }
@@ -176,19 +197,31 @@ pub fn rand_regular_action(
     context: PlayerDecisionContext<'_>,
     rng: &mut impl Rng,
 ) -> RegularCommand {
+    let mut attempted = Vec::new();
+    rand_regular_action_with_trades(context, rng, &mut attempted)
+}
+
+fn rand_regular_action_with_trades(
+    context: PlayerDecisionContext<'_>,
+    rng: &mut impl Rng,
+    attempted_trades: &mut Vec<(PlayerId, ResourceSet, ResourceSet)>,
+) -> RegularCommand {
     let categories = [
         RandomRegularCommandCategory::EndMove,
         RandomRegularCommandCategory::BuyDevCard,
         RandomRegularCommandCategory::BuildRoad,
         RandomRegularCommandCategory::BuildSettlement,
         RandomRegularCommandCategory::BuildCity,
+        RandomRegularCommandCategory::PlayerTrade,
         RandomRegularCommandCategory::TradeWithBank,
     ];
     let start = rng.random_range(0..categories.len());
 
     for offset in 0..categories.len() {
         let category = categories[(start + offset) % categories.len()];
-        if let Some(action) = rand_regular_action_in_category(&context, category, rng) {
+        if let Some(action) =
+            rand_regular_action_in_category(&context, category, rng, attempted_trades)
+        {
             return action;
         }
     }
@@ -231,6 +264,7 @@ enum RandomRegularCommandCategory {
     BuildRoad,
     BuildSettlement,
     BuildCity,
+    PlayerTrade,
     TradeWithBank,
 }
 
@@ -238,6 +272,7 @@ fn rand_regular_action_in_category(
     context: &PlayerDecisionContext<'_>,
     category: RandomRegularCommandCategory,
     rng: &mut impl Rng,
+    attempted_trades: &mut Vec<(PlayerId, ResourceSet, ResourceSet)>,
 ) -> Option<RegularCommand> {
     match category {
         RandomRegularCommandCategory::EndMove => Some(RegularCommand::EndMove),
@@ -259,10 +294,84 @@ fn rand_regular_action_in_category(
                 .choose(rng)
                 .map(RegularCommand::Build)
         }
+        RandomRegularCommandCategory::PlayerTrade => {
+            rand_player_trade(context, rng, attempted_trades)
+        }
         RandomRegularCommandCategory::TradeWithBank => {
             rand_bank_trade(context, rng).map(RegularCommand::TradeWithBank)
         }
     }
+}
+
+fn rand_player_trade(
+    context: &PlayerDecisionContext<'_>,
+    rng: &mut impl Rng,
+    attempted_trades: &mut Vec<(PlayerId, ResourceSet, ResourceSet)>,
+) -> Option<RegularCommand> {
+    let candidates = trade::one_card_trade_candidates(context)
+        .into_iter()
+        .filter_map(|(scope, offer)| {
+            let TradeScope::Targeted(peer_id) = scope else {
+                return None;
+            };
+            if attempted_trades.contains(&(peer_id, offer.give, offer.take)) {
+                return None;
+            }
+            if !trade::exact_resources(context, peer_id)?.has_enough(&offer.take) {
+                return None;
+            }
+            Some((peer_id, offer))
+        })
+        .collect::<Vec<_>>();
+    let (peer_id, offer) = candidates.choose(rng).cloned()?;
+    attempted_trades.push((peer_id, offer.give, offer.take));
+    Some(RegularCommand::OfferPersonalTrade(
+        catan_core::gameplay::primitives::trade::PersonalTradeOffer {
+            give: offer.give,
+            take: offer.take,
+            peer_id,
+        },
+    ))
+}
+
+pub fn rand_trade_response(
+    context: PlayerDecisionContext<'_>,
+    session_id: TradeSessionId,
+    rng: &mut impl Rng,
+) -> TradeResponseCommand {
+    let Some(session) = trade::session(&context, session_id) else {
+        return TradeResponseCommand::Reject;
+    };
+    let funded = session
+        .offers
+        .iter()
+        .filter(|offer| offer.peer.is_none() || offer.peer == Some(context.actor))
+        .filter(|offer| trade::offer_is_funded(&context, session, offer.id, context.actor))
+        .map(|offer| offer.id)
+        .collect::<Vec<_>>();
+    funded
+        .choose(rng)
+        .copied()
+        .filter(|_| rng.random_bool(0.5))
+        .map(|offer_id| TradeResponseCommand::Accept { offer_id })
+        .unwrap_or(TradeResponseCommand::Reject)
+}
+
+pub fn rand_trade_owner_action(
+    context: PlayerDecisionContext<'_>,
+    session_id: TradeSessionId,
+    rng: &mut impl Rng,
+) -> TradeCommand {
+    let Some(session) = trade::session(&context, session_id) else {
+        return TradeCommand::Cancel;
+    };
+    trade::committable_offers(&context, session)
+        .into_iter()
+        .map(|(offer_id, _)| offer_id)
+        .choose(rng)
+        .filter(|_| rng.random_bool(0.8))
+        .map(|offer_id| TradeCommand::Commit { offer_id })
+        .unwrap_or(TradeCommand::Cancel)
 }
 
 fn rand_bank_trade(context: &PlayerDecisionContext<'_>, rng: &mut impl Rng) -> Option<BankTrade> {

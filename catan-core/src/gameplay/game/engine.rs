@@ -23,6 +23,7 @@ use crate::{
             index::GameIndex,
             run::{GameResult, RunOptions},
             state::{GameState, SetupGameState, TableState},
+            trade::TradeSession,
         },
         primitives::{self, player::PlayerId, turn},
         random::GameRandom,
@@ -312,6 +313,13 @@ impl GameEngine {
         }
     }
 
+    pub fn trade_sessions(&self) -> &[TradeSession] {
+        match &self.core {
+            EngineState::Playing(active) => &active.trade_sessions,
+            EngineState::Unstarted(_) | EngineState::Setup(_) | EngineState::Finished(_) => &[],
+        }
+    }
+
     pub fn state(&self) -> &GameState {
         self.core
             .game()
@@ -357,7 +365,7 @@ impl GameEngine {
 #[cfg(test)]
 use super::{
     decision::{DecisionId, DecisionLifetime, PendingDecisions},
-    trade::{TradeOfferId, TradeResponseState, TradeScope, TradeSession, TradeSessionId},
+    trade::{TradeOfferId, TradeResponseState, TradeScope, TradeSessionId},
 };
 
 #[cfg(test)]

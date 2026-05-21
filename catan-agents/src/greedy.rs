@@ -10,8 +10,8 @@ use catan_core::{
                 MoveRobberCommand, PostDevCardCommand, PostDiceCommand, RegularCommand,
             },
             decision::DecisionKind,
-            input::DecisionRequest,
-            input::PlayerCommand,
+            input::{DecisionRequest, PlayerCommand, TradeCommand, TradeResponseCommand},
+            trade::TradeSessionId,
             view::{CountingMode, PlayerDecisionContext, PublicPlayerResources, PublicVpKnowledge},
         },
         primitives::{
@@ -19,21 +19,19 @@ use catan_core::{
             build::{Build, EstablishmentType},
             player::PlayerId,
             resource::{Resource, ResourceSet},
-            trade::BankTrade,
+            trade::{BankTrade, PlayerTrade},
         },
     },
     topology::{Hex, Intersection},
 };
 
-use crate::{
-    bot::{BotPolicy, unsupported_decision_command},
-    legal,
-};
+use crate::{bot::BotPolicy, legal, trade};
 
 #[derive(Debug, Default)]
 pub struct GreedyAgent {
     id: PlayerId,
     first_initial_resources: Option<BTreeSet<Resource>>,
+    attempted_trades: Vec<(PlayerId, ResourceSet, ResourceSet)>,
 }
 
 impl GreedyAgent {
@@ -42,6 +40,7 @@ impl GreedyAgent {
         Self {
             id,
             first_initial_resources: None,
+            attempted_trades: Vec::new(),
         }
     }
 }
@@ -78,7 +77,7 @@ impl GreedyAgent {
     }
 
     fn regular_decision(&mut self, context: PlayerDecisionContext<'_>) -> RegularCommand {
-        greedy_regular_action(&context, self.id)
+        greedy_regular_action_with_trades(&context, self.id, &mut self.attempted_trades)
     }
 
     fn move_robber_decision(&mut self, context: PlayerDecisionContext<'_>) -> MoveRobberCommand {
@@ -95,6 +94,22 @@ impl GreedyAgent {
 
     fn drop_half(&mut self, context: PlayerDecisionContext<'_>) -> DropHalfCommand {
         greedy_drop_half(context)
+    }
+
+    fn trade_response(
+        &mut self,
+        context: PlayerDecisionContext<'_>,
+        session_id: TradeSessionId,
+    ) -> TradeResponseCommand {
+        greedy_trade_response(context, session_id)
+    }
+
+    fn trade_owner_action(
+        &mut self,
+        context: PlayerDecisionContext<'_>,
+        session_id: TradeSessionId,
+    ) -> TradeCommand {
+        greedy_trade_owner_action(context, session_id)
     }
 }
 
@@ -131,9 +146,12 @@ impl BotPolicy for GreedyAgent {
                 PlayerCommand::ChooseRobbedPlayer(self.choose_player_to_rob(context, robber_pos)),
             ),
             DecisionKind::DropHalf { .. } => Some(PlayerCommand::DropHalf(self.drop_half(context))),
-            DecisionKind::TradeResponse { .. } | DecisionKind::TradeOwnerAction { .. } => {
-                unsupported_decision_command(request)
-            }
+            DecisionKind::TradeResponse { session } => Some(PlayerCommand::Trade(
+                TradeCommand::Respond(self.trade_response(context, session)),
+            )),
+            DecisionKind::TradeOwnerAction { session } => Some(PlayerCommand::Trade(
+                self.trade_owner_action(context, session),
+            )),
         }
     }
 }
@@ -243,6 +261,15 @@ pub fn greedy_regular_action(
     context: &PlayerDecisionContext<'_>,
     player_id: PlayerId,
 ) -> RegularCommand {
+    let mut attempted = Vec::new();
+    greedy_regular_action_with_trades(context, player_id, &mut attempted)
+}
+
+fn greedy_regular_action_with_trades(
+    context: &PlayerDecisionContext<'_>,
+    player_id: PlayerId,
+    attempted_trades: &mut Vec<(PlayerId, ResourceSet, ResourceSet)>,
+) -> RegularCommand {
     if let Some(build) = best_city_build(context, player_id) {
         return RegularCommand::Build(build);
     }
@@ -255,10 +282,98 @@ pub fn greedy_regular_action(
     if legal::can_buy_dev_card(context) {
         return RegularCommand::BuyDevCard;
     }
+    if let Some((peer_id, trade)) = best_player_trade(context, player_id, attempted_trades) {
+        attempted_trades.push((peer_id, trade.give, trade.take));
+        return RegularCommand::OfferPersonalTrade(
+            catan_core::gameplay::primitives::trade::PersonalTradeOffer {
+                give: trade.give,
+                take: trade.take,
+                peer_id,
+            },
+        );
+    }
     if let Some(trade) = best_bank_trade(context, player_id) {
         return RegularCommand::TradeWithBank(trade);
     }
     RegularCommand::EndMove
+}
+
+fn best_player_trade(
+    context: &PlayerDecisionContext<'_>,
+    player_id: PlayerId,
+    attempted_trades: &[(PlayerId, ResourceSet, ResourceSet)],
+) -> Option<(PlayerId, PlayerTrade)> {
+    let current_score =
+        next_objective_score_for_resources(context, player_id, context.private.resources);
+    trade::one_card_trade_candidates(context)
+        .into_iter()
+        .filter_map(|(scope, trade)| {
+            let catan_core::gameplay::game::trade::TradeScope::Targeted(peer_id) = scope else {
+                return None;
+            };
+            if attempted_trades.contains(&(peer_id, trade.give, trade.take)) {
+                return None;
+            }
+            if !trade::exact_resources(context, peer_id)?.has_enough(&trade.take) {
+                return None;
+            }
+            let after = trade::resources_after_as_proposer(context.private.resources, &trade)?;
+            let score = next_objective_score_for_resources(context, player_id, &after);
+            (score > current_score).then_some((peer_id, trade, score))
+        })
+        .max_by_key(|(_, _, score)| *score)
+        .map(|(peer_id, trade, _)| (peer_id, trade))
+}
+
+pub fn greedy_trade_response(
+    context: PlayerDecisionContext<'_>,
+    session_id: TradeSessionId,
+) -> TradeResponseCommand {
+    let Some(session) = trade::session(&context, session_id) else {
+        return TradeResponseCommand::Reject;
+    };
+    let current_score =
+        next_objective_score_for_resources(&context, context.actor, context.private.resources);
+    let best_offer = session
+        .offers
+        .iter()
+        .filter(|offer| offer.peer.is_none() || offer.peer == Some(context.actor))
+        .filter_map(|offer| {
+            if !trade::offer_is_funded(&context, session, offer.id, context.actor) {
+                return None;
+            }
+            let after = trade::resources_after_as_peer(context.private.resources, &offer.trade)?;
+            let score = next_objective_score_for_resources(&context, context.actor, &after);
+            (score > current_score).then_some((offer.id, score))
+        })
+        .max_by_key(|(_, score)| *score)
+        .map(|(offer_id, _)| offer_id);
+    if let Some(offer_id) = best_offer {
+        return TradeResponseCommand::Accept { offer_id };
+    }
+
+    TradeResponseCommand::Reject
+}
+
+pub fn greedy_trade_owner_action(
+    context: PlayerDecisionContext<'_>,
+    session_id: TradeSessionId,
+) -> TradeCommand {
+    let Some(session) = trade::session(&context, session_id) else {
+        return TradeCommand::Cancel;
+    };
+    trade::committable_offers(&context, session)
+        .into_iter()
+        .filter_map(|(offer_id, _)| {
+            let offer = session.offer(offer_id)?;
+            let after =
+                trade::resources_after_as_proposer(context.private.resources, &offer.trade)?;
+            let score = next_objective_score_for_resources(&context, context.actor, &after);
+            Some((offer_id, score))
+        })
+        .max_by_key(|(_, score)| *score)
+        .map(|(offer_id, _)| TradeCommand::Commit { offer_id })
+        .unwrap_or(TradeCommand::Cancel)
 }
 
 pub fn greedy_init_action(context: PlayerDecisionContext<'_>, _player_id: PlayerId) -> InitCommand {
@@ -857,6 +972,7 @@ mod tests {
             state,
             index: &index,
             visibility: &visibility,
+            trade_sessions: &[],
         };
         let search = Some(SearchFactory::new(
             state,

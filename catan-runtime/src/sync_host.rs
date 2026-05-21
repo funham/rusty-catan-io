@@ -182,6 +182,7 @@ impl SyncGameHost {
             state: self.engine.table(),
             index: self.engine.index(),
             visibility: &self.visibility,
+            trade_sessions: self.engine.trade_sessions(),
         };
         for observer in &mut self.observers {
             observer.on_output(ObserverFrame {
@@ -240,7 +241,7 @@ pub fn bot_seat(policy: Box<dyn BotPolicy>) -> Box<dyn Seat> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use catan_agents::{bot::decline_trade_command, lazy::LazyAgent};
+    use catan_agents::{bot::decline_trade_command, greedy::GreedyAgent, lazy::LazyAgent};
     use catan_core::gameplay::{
         game::{
             command::RegularCommand,
@@ -412,6 +413,52 @@ mod tests {
         let _ = host.run_until_waiting();
 
         assert!(output_count.get() > 0);
+    }
+
+    #[test]
+    fn greedy_bots_emit_player_trade_events() {
+        let init = SetupGameState::default();
+        let seats = (0..init.board.n_players)
+            .map(|id| {
+                bot_seat(Box::new(GreedyAgent::new(
+                    catan_core::gameplay::primitives::player::PlayerId::try_from(id)
+                        .expect("test player id should fit"),
+                )))
+            })
+            .collect();
+        let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let observer = Box::new(EventRecordingObserver {
+            events: events.clone(),
+        });
+        let mut host = SyncGameHost::new(
+            init,
+            seats,
+            RunOptions {
+                max_turns: Some(100),
+                random: GameRandom::seeded(0),
+                ..RunOptions::default()
+            },
+        );
+
+        host.add_observer(observer);
+        host.start();
+        let _ = host.run_until_waiting();
+
+        let events = events.borrow();
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, GameEvent::TradeOpened { .. }))
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, GameEvent::TradeResponseUpdated { .. }))
+        );
+        assert!(events.iter().any(|event| matches!(
+            event,
+            GameEvent::TradeCompleted { .. } | GameEvent::TradeCancelled { .. }
+        )));
     }
 
     struct EventRecordingObserver {

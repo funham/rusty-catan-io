@@ -109,6 +109,7 @@ impl SimulationHost {
             state: self.engine.table(),
             index: self.engine.index(),
             visibility: &self.visibility,
+            trade_sessions: self.engine.trade_sessions(),
         };
         let search = Some(SearchFactory::new(self.engine.table(), policy, player_id));
         let context = factory.player_decision_context(player_id, search);

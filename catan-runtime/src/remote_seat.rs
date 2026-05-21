@@ -352,6 +352,7 @@ mod tests {
             state: &state,
             index: &index,
             visibility: &visibility,
+            trade_sessions: &[],
         };
         let view = factory.player_decision_context(0, None);
         let output = GameOutput::DecisionOpened(
@@ -404,6 +405,7 @@ mod tests {
             state: &state,
             index: &index,
             visibility: &visibility,
+            trade_sessions: &[],
         };
         let view = factory.player_decision_context(0, None);
         let output = GameOutput::DecisionOpened(
@@ -463,6 +465,7 @@ mod tests {
             state: engine.table(),
             index: engine.index(),
             visibility: &visibility,
+            trade_sessions: &[],
         };
         let output = GameOutput::CommandRejected {
             token: DecisionToken {

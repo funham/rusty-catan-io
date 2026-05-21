@@ -6,3 +6,4 @@ pub mod lazy;
 pub mod legal;
 pub mod random;
 pub mod remote_agent;
+pub mod trade;

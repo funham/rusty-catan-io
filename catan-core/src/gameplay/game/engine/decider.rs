@@ -462,15 +462,6 @@ fn decide_open_trade(
         offer: trade,
     });
     let mut decisions = active.decisions();
-    open_decision(
-        events,
-        &mut decisions,
-        decision.player_id,
-        DecisionKind::TradeOwnerAction {
-            session: session_id,
-        },
-        DecisionLifetime::UntilSessionClosed(session_id),
-    );
     for player_id in player_ids(active.game.players.count()) {
         if player_id != decision.player_id && scope.includes(player_id) {
             open_decision(
@@ -484,6 +475,15 @@ fn decide_open_trade(
             );
         }
     }
+    open_decision(
+        events,
+        &mut decisions,
+        decision.player_id,
+        DecisionKind::TradeOwnerAction {
+            session: session_id,
+        },
+        DecisionLifetime::UntilSessionClosed(session_id),
+    );
 }
 
 fn trade_from_public_offer(
