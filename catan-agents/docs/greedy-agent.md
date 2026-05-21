@@ -37,4 +37,14 @@ For the second settlement, it prefers resources that were not acquired by the fi
 
 ## Trading
 
-# TODO
+When no immediate objective can be executed, the agent evaluates legal bank and port trades.
+
+If exact search state is available, it chooses the trade that unlocks the highest-priority next objective: city, settlement, road, then development card. It ignores trades that the bank cannot pay. Without search state, it falls back to the first legal bank trade.
+
+## Discard and robber choices
+
+When dropping half its hand, the agent discards one card at a time and keeps the remaining hand as close as possible to its next greedy objective.
+
+When moving the robber, human visibility mode blocks the hex with the strongest visible opponent production. Counting mode also considers exact known opponent resources and prefers hexes that can steal cards useful for the agent's next objective.
+
+When choosing a player to rob, human visibility mode prefers the legal target with the highest visible VP and resource total. Counting mode prefers the legal target holding the most useful exact resources for the agent's current hand.
