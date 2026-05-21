@@ -76,6 +76,121 @@ pub(crate) enum ControlInput {
     Redraw,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct CardGlyph {
+    label: String,
+    style: Style,
+    indices: [Option<u16>; 3],
+}
+
+impl CardGlyph {
+    pub(crate) fn new(label: impl Into<String>, style: Style) -> Self {
+        Self {
+            label: label.into(),
+            style,
+            indices: [None, None, None],
+        }
+    }
+
+    pub(crate) fn indices(mut self, indices: [Option<u16>; 3]) -> Self {
+        self.indices = indices;
+        self
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn lines(&self) -> Vec<Line<'static>> {
+        let rows = self.row_texts();
+        rows.into_iter()
+            .zip(self.indices)
+            .map(|(row, index)| {
+                Line::from(vec![
+                    Span::styled(row, self.style),
+                    Span::raw(format!(" {:>1}", count_label(index))),
+                ])
+            })
+            .collect()
+    }
+
+    pub(crate) fn push_to_rows(&self, rows: &mut [Vec<Span<'static>>; 3]) {
+        let row_texts = self.row_texts();
+        for (idx, row) in row_texts.into_iter().enumerate() {
+            rows[idx].push(Span::styled(row, self.style));
+            if self.indices.iter().any(Option::is_some) {
+                rows[idx].push(Span::raw(format!(" {:>1}", count_label(self.indices[idx]))));
+            }
+        }
+    }
+
+    fn row_texts(&self) -> [String; 3] {
+        [
+            "┌──┐".to_owned(),
+            format!("│{:^2}│", truncate_cell_text(&self.label, 2)),
+            "└──┘".to_owned(),
+        ]
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct InlineBadge {
+    spans: Vec<Span<'static>>,
+}
+
+impl InlineBadge {
+    pub(crate) fn new(spans: Vec<Span<'static>>) -> Self {
+        Self { spans }
+    }
+
+    pub(crate) fn push_to(self, target: &mut Vec<Span<'static>>) {
+        target.extend(self.spans);
+    }
+}
+
+pub(crate) fn append_gap(rows: &mut [Vec<Span<'static>>; 3], gap: &'static str) {
+    for row in rows {
+        row.push(Span::raw(gap));
+    }
+}
+
+pub(crate) fn join_lines_horizontal(
+    left: &[Line<'static>],
+    separator: Line<'static>,
+    right: &[Line<'static>],
+) -> Vec<Line<'static>> {
+    let rows = left.len().max(right.len());
+    (0..rows)
+        .map(|idx| {
+            let mut spans = left
+                .get(idx)
+                .cloned()
+                .unwrap_or_else(|| Line::from(""))
+                .spans;
+            spans.extend(separator.clone().spans);
+            spans.extend(
+                right
+                    .get(idx)
+                    .cloned()
+                    .unwrap_or_else(|| Line::from(""))
+                    .spans,
+            );
+            Line::from(spans)
+        })
+        .collect()
+}
+
+fn count_label(count: Option<u16>) -> String {
+    count
+        .map(|count| count.min(99).to_string())
+        .unwrap_or_else(|| " ".to_owned())
+}
+
+fn truncate_cell_text(text: &str, width: usize) -> String {
+    let mut value = text.chars().take(width).collect::<String>();
+    while value.chars().count() < width {
+        value.push(' ');
+    }
+    value
+}
+
 impl CliUi {
     pub(crate) fn new(view_mode: CliViewMode) -> io::Result<Self> {
         log::trace!("Initializing CLI UI");
@@ -909,7 +1024,8 @@ fn resource_event_style(token: &str) -> Option<Style> {
 }
 
 fn render_bank(frame: &mut Frame<'_>, area: Rect, model: &UiModel) {
-    let bank = Paragraph::new(bank_panel_lines(model))
+    let inner_width = usize::from(area.width.saturating_sub(2));
+    let bank = Paragraph::new(bank_panel_lines(model, inner_width))
         .wrap(Wrap { trim: false })
         .block(panel_block("Bank"));
     frame.render_widget(bank, area);
@@ -925,11 +1041,7 @@ fn render_players(
         return;
     }
 
-    let constraints =
-        vec![
-            Constraint::Ratio(1, model.public.players.len().try_into().unwrap_or(u32::MAX),);
-            model.public.players.len()
-        ];
+    let constraints = vec![Constraint::Length(4); model.public.players.len()];
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints(constraints)
@@ -1124,18 +1236,34 @@ fn command_panel_lines(
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     if !prompt.is_empty() {
-        lines.push(Line::from(fit_command_text(prompt, inner_width)));
-    }
-    if !input.is_empty() {
-        lines.push(Line::from(Span::styled(
-            fit_command_text(input, inner_width),
-            Style::default().fg(Color::Yellow),
-        )));
+        let mut spans = vec![Span::raw(prompt.to_owned())];
+        if input.is_empty() {
+            spans.push(Span::styled(
+                fit_command_text(
+                    command_short_hints(view_mode),
+                    inner_width.saturating_sub(prompt.len()),
+                ),
+                Style::default().fg(Color::Gray),
+            ));
+        } else {
+            spans.push(Span::styled(
+                fit_command_text(input, inner_width.saturating_sub(prompt.len())),
+                Style::default().fg(Color::Yellow),
+            ));
+        }
+        lines.push(Line::from(spans));
     }
     if show_help {
         lines.extend(command_help_lines(view_mode, inner_width));
     }
     lines
+}
+
+fn command_short_hints(view_mode: CliViewMode) -> &'static str {
+    match view_mode {
+        CliViewMode::Normal => "[r|e|bd|br|bs|bc|bt|kn|yp|m|rb]",
+        CliViewMode::Snapshot => "[s]",
+    }
 }
 
 fn command_panel_line_count(
@@ -1204,32 +1332,42 @@ fn observer_status_suffix(event_count: u64, summary: Option<&str>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{CliViewMode, command_panel_lines};
+    use ratatui::style::{Color, Style};
+
+    use super::{CardGlyph, CliViewMode, command_panel_lines};
 
     #[test]
-    fn command_panel_hides_action_hints_by_default() {
+    fn command_panel_shows_short_hints_when_empty() {
         let rendered = command_panel_lines(CliViewMode::Normal, "command: ", "", false, 80)
             .into_iter()
             .map(|line| line.to_string())
             .collect::<Vec<_>>()
             .join("\n");
 
-        assert!(rendered.contains("command:"));
-        assert!(!rendered.contains("roll"));
-        assert!(!rendered.contains("bank-trade"));
-        assert!(!rendered.contains("help"));
+        assert_eq!(rendered.lines().count(), 1);
+        assert!(rendered.contains("command: [r|e|bd|br|bs|bc|bt|kn|yp|m|rb]"));
     }
 
     #[test]
-    fn command_panel_shows_action_hints_after_help_command() {
-        let rendered = command_panel_lines(CliViewMode::Normal, "command: ", "", true, 80)
+    fn command_panel_renders_input_to_right_of_prompt() {
+        let rendered = command_panel_lines(CliViewMode::Normal, "command: ", "kn", false, 80)
             .into_iter()
             .map(|line| line.to_string())
             .collect::<Vec<_>>()
             .join("\n");
 
-        assert!(rendered.contains("roll"));
-        assert!(rendered.contains("bank-trade"));
-        assert!(rendered.contains("dev"));
+        assert_eq!(rendered, "command: kn");
+    }
+
+    #[test]
+    fn card_glyph_renders_three_lines_with_optional_indices() {
+        let lines = CardGlyph::new("KN", Style::default().fg(Color::Magenta))
+            .indices([Some(1), Some(2), None])
+            .lines()
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+
+        assert_eq!(lines, vec!["┌──┐ 1", "│KN│ 2", "└──┘  "]);
     }
 }

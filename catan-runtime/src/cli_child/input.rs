@@ -5,18 +5,20 @@
 
 use std::io;
 
-use catan_agents::remote_agent::{DecisionRequestEnvelope, UiModel};
+use catan_agents::{
+    cli_command::{CliCommand, DevCardCommand, ParseCommandError, parse_cli_command},
+    remote_agent::{DecisionRequestEnvelope, UiModel},
+};
 use catan_core::{
     constants,
     gameplay::game::command::{InitCommand, PostDiceCommand, RegularCommand},
     gameplay::primitives::{
-        build::{Build, Establishment, EstablishmentType, Road},
+        build::{Build, EstablishmentType, Road},
         dev_card::{DevCardUsage, UsableDevCard},
         player::PlayerId,
-        resource::{Resource, ResourceSet},
-        trade::{BankTrade, BankTradeKind},
+        resource::ResourceSet,
     },
-    topology::{Hex, HexIndex, Intersection, Path as BoardPath, repr::Dual},
+    topology::{Hex, Intersection},
 };
 
 use super::{
@@ -35,24 +37,29 @@ pub(crate) fn read_init_action(
     loop {
         let model = &envelope.view;
         let line = ui.prompt(model, "command: ")?;
-        let line = line.trim();
-        if line.is_empty() || matches!(line, "roll" | "r") {
-            log::trace!("Init action: RollDice");
-            return Ok(InitCommand::RollDice);
+        match parse_cli_command(&line) {
+            Ok(None) | Ok(Some(CliCommand::RollDice)) => {
+                log::trace!("Init action: RollDice");
+                return Ok(InitCommand::RollDice);
+            }
+            Ok(Some(CliCommand::DevCard(command))) => {
+                match handle_dev_card_command(ui, envelope, command)? {
+                    CommandOutcome::Accepted(usage) => {
+                        log::trace!("Init action: UseDevCard({:?})", usage);
+                        return Ok(InitCommand::UseDevCard(usage));
+                    }
+                    CommandOutcome::Handled => continue,
+                    CommandOutcome::NotMatched => unreachable!("dev-card command should match"),
+                }
+            }
+            Ok(Some(command)) => {
+                set_invalid_use(
+                    ui,
+                    format!("{} is not available before rolling", command_label(command)),
+                )?;
+            }
+            Err(err) => set_parse_error(ui, &line, err)?,
         }
-        if let Some(usage) = handle_interactive_dev_card_action(ui, envelope, line)? {
-            log::trace!("Init interactive action: UseDevCard({:?})", usage);
-            return Ok(InitCommand::UseDevCard(usage));
-        }
-        if partial_dev_card_command(line).is_some() {
-            continue;
-        }
-        if let Some(usage) = parse_dev_card_usage(line) {
-            log::trace!("Init action: UseDevCard({:?})", usage);
-            return Ok(InitCommand::UseDevCard(usage));
-        }
-        log::warn!("Could not parse init action: {}", line);
-        ui.set_message("could not parse action".to_owned())?;
     }
 }
 
@@ -64,31 +71,33 @@ pub(crate) fn read_post_dice_action(
     loop {
         let model = &envelope.view;
         let line = ui.prompt(model, "command: ")?;
-        if let Some(usage) = parse_dev_card_usage(&line) {
-            log::trace!("Post-dice action: UseDevCard({:?})", usage);
-            return Ok(PostDiceCommand::UseDevCard(usage));
-        }
-        if let Some(usage) = handle_interactive_dev_card_action(ui, envelope, &line)? {
-            log::trace!("Post-dice interactive action: UseDevCard({:?})", usage);
-            return Ok(PostDiceCommand::UseDevCard(usage));
-        }
-        if partial_dev_card_command(&line).is_some() {
-            continue;
-        }
-        match handle_interactive_regular_action(ui, envelope, &line)? {
-            CommandOutcome::Accepted(action) => {
-                log::trace!("Post-dice interactive action: RegularCommand({:?})", action);
-                return Ok(PostDiceCommand::RegularCommand(action));
+        match parse_cli_command(&line) {
+            Ok(None) => return Ok(PostDiceCommand::RegularCommand(RegularCommand::EndMove)),
+            Ok(Some(CliCommand::RollDice)) => {
+                set_invalid_use(ui, "dice have already been rolled".to_owned())?;
             }
-            CommandOutcome::Handled => continue,
-            CommandOutcome::NotMatched => {}
+            Ok(Some(CliCommand::DevCard(command))) => {
+                match handle_dev_card_command(ui, envelope, command)? {
+                    CommandOutcome::Accepted(usage) => {
+                        log::trace!("Post-dice action: UseDevCard({:?})", usage);
+                        return Ok(PostDiceCommand::UseDevCard(usage));
+                    }
+                    CommandOutcome::Handled => continue,
+                    CommandOutcome::NotMatched => unreachable!("dev-card command should match"),
+                }
+            }
+            Ok(Some(command)) => match handle_regular_command(ui, envelope, command)? {
+                CommandOutcome::Accepted(action) => {
+                    log::trace!("Post-dice action: RegularCommand({:?})", action);
+                    return Ok(PostDiceCommand::RegularCommand(action));
+                }
+                CommandOutcome::Handled => continue,
+                CommandOutcome::NotMatched => {
+                    set_invalid_use(ui, "command is not a regular action".to_owned())?;
+                }
+            },
+            Err(err) => set_parse_error(ui, &line, err)?,
         }
-        if let Some(action) = parse_regular_action(&line) {
-            log::trace!("Post-dice action: RegularCommand({:?})", action);
-            return Ok(PostDiceCommand::RegularCommand(action));
-        }
-        log::warn!("Could not parse post-dice action: {}", line);
-        ui.set_message("could not parse action".to_owned())?;
     }
 }
 
@@ -100,20 +109,33 @@ pub(crate) fn read_regular_action(
     loop {
         let model = &envelope.view;
         let line = ui.prompt(model, "command: ")?;
-        match handle_interactive_regular_action(ui, envelope, &line)? {
-            CommandOutcome::Accepted(action) => {
-                log::trace!("Regular interactive action: {:?}", action);
-                return Ok(action);
+        match parse_cli_command(&line) {
+            Ok(None) => return Ok(RegularCommand::EndMove),
+            Ok(Some(CliCommand::RollDice)) => {
+                set_invalid_use(ui, "dice have already been rolled".to_owned())?;
             }
-            CommandOutcome::Handled => continue,
-            CommandOutcome::NotMatched => {}
+            Ok(Some(CliCommand::DevCard(command))) => {
+                match handle_dev_card_command(ui, envelope, command)? {
+                    CommandOutcome::Accepted(usage) => {
+                        log::trace!("Regular action: UseDevCard({:?})", usage);
+                        return Ok(RegularCommand::UseDevCard(usage));
+                    }
+                    CommandOutcome::Handled => continue,
+                    CommandOutcome::NotMatched => unreachable!("dev-card command should match"),
+                }
+            }
+            Ok(Some(command)) => match handle_regular_command(ui, envelope, command)? {
+                CommandOutcome::Accepted(action) => {
+                    log::trace!("Regular action: {:?}", action);
+                    return Ok(action);
+                }
+                CommandOutcome::Handled => continue,
+                CommandOutcome::NotMatched => {
+                    set_invalid_use(ui, "command is not a regular action".to_owned())?;
+                }
+            },
+            Err(err) => set_parse_error(ui, &line, err)?,
         }
-        if let Some(action) = parse_regular_action(&line) {
-            log::trace!("Regular action: {:?}", action);
-            return Ok(action);
-        }
-        log::warn!("Could not parse regular action: {}", line);
-        ui.set_message("could not parse action".to_owned())?;
     }
 }
 
@@ -123,83 +145,115 @@ enum CommandOutcome<T> {
     NotMatched,
 }
 
-fn handle_interactive_regular_action(
+fn handle_regular_command(
     ui: &mut CliUi,
     envelope: &DecisionRequestEnvelope,
-    line: &str,
+    command: CliCommand,
 ) -> io::Result<CommandOutcome<RegularCommand>> {
     let model = &envelope.view;
-    if let Some(kind) = partial_build_command(line) {
-        let builds = legal_builds_for_mode(&envelope.legal, kind);
-        if builds.is_empty() {
-            let reason = build_unavailable_reason(model, kind);
-            log::warn!(
-                target: "catan_runtime::cli_child::input",
-                "Build command recognized but no legal {} placements are available: {reason}",
-                kind.label()
-            );
-            ui.set_message(reason)?;
-            return Ok(CommandOutcome::Handled);
+    match command {
+        CliCommand::Regular(action) => Ok(CommandOutcome::Accepted(action)),
+        CliCommand::InteractiveBuildRoad => {
+            select_interactive_build(ui, envelope, PartialBuildMode::Road)
         }
-        return Ok(match ui.select_build(model, builds, "build: ")? {
-            Some(build) => CommandOutcome::Accepted(RegularCommand::Build(build)),
-            None => CommandOutcome::Handled,
-        });
-    }
-    if matches!(line, "bank-trade" | "bt") {
-        if envelope.legal.bank_trades.is_empty() {
-            let reason = "no legal bank trades: missing resources or required port".to_owned();
-            log::warn!(
-                target: "catan_runtime::cli_child::input",
-                "Bank trade command recognized but {reason}"
-            );
-            ui.set_message(reason)?;
-            return Ok(CommandOutcome::Handled);
+        CliCommand::InteractiveBuildSettlement => {
+            select_interactive_build(ui, envelope, PartialBuildMode::Settlement)
         }
-        return Ok(match ui.select_bank_trade(model, &envelope.legal)? {
-            Some(trade) => CommandOutcome::Accepted(RegularCommand::TradeWithBank(trade)),
-            None => CommandOutcome::Handled,
-        });
+        CliCommand::InteractiveBuildCity => {
+            select_interactive_build(ui, envelope, PartialBuildMode::City)
+        }
+        CliCommand::InteractiveBankTrade => {
+            if envelope.legal.bank_trades.is_empty() {
+                let reason = "no legal bank trades: missing resources or required port".to_owned();
+                log::warn!(
+                    target: "catan_runtime::cli_child::input",
+                    "invalid command use: {reason}"
+                );
+                ui.set_message(format!("invalid command use: {reason}"))?;
+                return Ok(CommandOutcome::Handled);
+            }
+            Ok(match ui.select_bank_trade(model, &envelope.legal)? {
+                Some(trade) => CommandOutcome::Accepted(RegularCommand::TradeWithBank(trade)),
+                None => CommandOutcome::Handled,
+            })
+        }
+        CliCommand::RollDice | CliCommand::DevCard(_) => Ok(CommandOutcome::NotMatched),
     }
-    Ok(CommandOutcome::NotMatched)
 }
 
-#[cfg(test)]
-fn partial_regular_command(line: &str) -> bool {
-    partial_build_command(line).is_some() || matches!(line, "bank-trade" | "bt")
+fn select_interactive_build(
+    ui: &mut CliUi,
+    envelope: &DecisionRequestEnvelope,
+    kind: PartialBuildMode,
+) -> io::Result<CommandOutcome<RegularCommand>> {
+    let model = &envelope.view;
+    let builds = legal_builds_for_mode(&envelope.legal, kind);
+    if builds.is_empty() {
+        let reason = build_unavailable_reason(model, kind);
+        log::warn!(
+            target: "catan_runtime::cli_child::input",
+            "invalid command use: {reason}"
+        );
+        ui.set_message(format!("invalid command use: {reason}"))?;
+        return Ok(CommandOutcome::Handled);
+    }
+    Ok(match ui.select_build(model, builds, "build: ")? {
+        Some(build) => CommandOutcome::Accepted(RegularCommand::Build(build)),
+        None => CommandOutcome::Handled,
+    })
+}
+
+fn handle_dev_card_command(
+    ui: &mut CliUi,
+    envelope: &DecisionRequestEnvelope,
+    command: DevCardCommand,
+) -> io::Result<CommandOutcome<DevCardUsage>> {
+    match command {
+        DevCardCommand::Interactive(card) => {
+            handle_interactive_dev_card_action(ui, envelope, PartialDevCardMode::from_card(card))
+        }
+        DevCardCommand::Usage(usage) => {
+            let mode = PartialDevCardMode::from_card(usage.card_kind());
+            if !dev_card_usage_is_legal(envelope, usage) {
+                let reason = dev_card_unavailable_reason(&envelope.view, envelope, mode);
+                log::warn!(
+                    target: "catan_runtime::cli_child::input",
+                    "invalid command use: {reason}"
+                );
+                ui.set_message(format!("invalid command use: {reason}"))?;
+                return Ok(CommandOutcome::Handled);
+            }
+            Ok(CommandOutcome::Accepted(usage))
+        }
+    }
 }
 
 fn handle_interactive_dev_card_action(
     ui: &mut CliUi,
     envelope: &DecisionRequestEnvelope,
-    line: &str,
-) -> io::Result<Option<DevCardUsage>> {
+    mode: PartialDevCardMode,
+) -> io::Result<CommandOutcome<DevCardUsage>> {
     let model = &envelope.view;
-    let Some(mode) = partial_dev_card_command(line) else {
-        return Ok(None);
-    };
-
     if !dev_card_mode_has_legal_usage(envelope, mode) {
-        let reason = dev_card_unavailable_reason(model, mode);
+        let reason = dev_card_unavailable_reason(model, envelope, mode);
         log::warn!(
             target: "catan_runtime::cli_child::input",
-            "Dev card command recognized but unavailable: mode={:?}, reason={reason}",
-            mode
+            "invalid command use: {reason}"
         );
-        ui.set_message(reason)?;
-        return Ok(None);
+        ui.set_message(format!("invalid command use: {reason}"))?;
+        return Ok(CommandOutcome::Handled);
     }
 
-    match mode {
-        PartialDevCardMode::Knight => select_knight_usage(ui, envelope),
-        PartialDevCardMode::RoadBuild => select_roadbuild_usage(ui, envelope),
-        PartialDevCardMode::Monopoly => Ok(ui
+    let usage = match mode {
+        PartialDevCardMode::Knight => select_knight_usage(ui, envelope)?,
+        PartialDevCardMode::RoadBuild => select_roadbuild_usage(ui, envelope)?,
+        PartialDevCardMode::Monopoly => ui
             .select_resource(
                 model,
                 "monopoly: ",
                 "select monopoly resource with left/right",
             )?
-            .map(DevCardUsage::Monopoly)),
+            .map(DevCardUsage::Monopoly),
         PartialDevCardMode::YearOfPlenty => {
             let Some(first) = ui.select_resource(
                 model,
@@ -207,7 +261,7 @@ fn handle_interactive_dev_card_action(
                 "select first year-of-plenty resource",
             )?
             else {
-                return Ok(None);
+                return Ok(CommandOutcome::Handled);
             };
             let Some(second) = ui.select_resource(
                 model,
@@ -215,17 +269,25 @@ fn handle_interactive_dev_card_action(
                 "select second year-of-plenty resource",
             )?
             else {
-                return Ok(None);
+                return Ok(CommandOutcome::Handled);
             };
-            Ok(Some(DevCardUsage::YearOfPlenty([first, second])))
+            Some(DevCardUsage::YearOfPlenty([first, second]))
         }
-    }
+    };
+
+    Ok(match usage {
+        Some(usage) => CommandOutcome::Accepted(usage),
+        None => CommandOutcome::Handled,
+    })
 }
 
 fn dev_card_mode_has_legal_usage(
     envelope: &DecisionRequestEnvelope,
     mode: PartialDevCardMode,
 ) -> bool {
+    if envelope.legal.dev_card_used_this_turn {
+        return false;
+    }
     envelope
         .legal
         .dev_card_usages
@@ -233,33 +295,39 @@ fn dev_card_mode_has_legal_usage(
         .any(|usage| usage.card_kind() == mode.card_kind())
 }
 
-fn dev_card_unavailable_reason(model: &UiModel, mode: PartialDevCardMode) -> String {
+fn dev_card_usage_is_legal(envelope: &DecisionRequestEnvelope, usage: DevCardUsage) -> bool {
+    if envelope.legal.dev_card_used_this_turn {
+        return false;
+    }
+    envelope.legal.dev_card_usages.contains(&usage)
+}
+
+fn dev_card_unavailable_reason(
+    model: &UiModel,
+    envelope: &DecisionRequestEnvelope,
+    mode: PartialDevCardMode,
+) -> String {
+    if envelope.legal.dev_card_used_this_turn {
+        return "development card already used this turn".to_owned();
+    }
+
     let Some(private) = &model.private else {
         return format!(
-            "invalid dev card action: no legal {} usage and private card data is unavailable",
+            "no legal {} usage and private card data is unavailable",
             mode.label()
         );
     };
 
     let card = mode.card_kind();
     if private.dev_cards.active[card] == 0 && private.dev_cards.queued[card] > 0 {
-        return format!(
-            "invalid dev card action: {} is queued until next turn",
-            mode.label()
-        );
+        return format!("{} is queued until next turn", mode.label());
     }
 
     if private.dev_cards.active[card] == 0 {
-        return format!(
-            "invalid dev card action: no active {} card is available",
-            mode.label()
-        );
+        return format!("no active {} card is available", mode.label());
     }
 
-    format!(
-        "invalid dev card action: no legal {} usage is available now",
-        mode.label()
-    )
+    format!("no legal {} usage is available now", mode.label())
 }
 
 fn select_knight_usage(
@@ -304,6 +372,15 @@ pub(crate) enum PartialDevCardMode {
 }
 
 impl PartialDevCardMode {
+    fn from_card(card: UsableDevCard) -> Self {
+        match card {
+            UsableDevCard::Knight => Self::Knight,
+            UsableDevCard::YearOfPlenty => Self::YearOfPlenty,
+            UsableDevCard::RoadBuild => Self::RoadBuild,
+            UsableDevCard::Monopoly => Self::Monopoly,
+        }
+    }
+
     fn card_kind(self) -> UsableDevCard {
         match self {
             Self::Knight => UsableDevCard::Knight,
@@ -320,20 +397,6 @@ impl PartialDevCardMode {
             Self::Monopoly => "monopoly",
             Self::YearOfPlenty => "year of plenty",
         }
-    }
-}
-
-pub(crate) fn partial_dev_card_command(line: &str) -> Option<PartialDevCardMode> {
-    match line.split_whitespace().collect::<Vec<_>>().as_slice() {
-        ["use", "knight"] | ["kn"] => Some(PartialDevCardMode::Knight),
-        ["use", "roadbuild"] | ["use", "road-build"] | ["rb"] => {
-            Some(PartialDevCardMode::RoadBuild)
-        }
-        ["use", "monopoly"] | ["m"] => Some(PartialDevCardMode::Monopoly),
-        ["use", "yop"] | ["use", "year-of-plenty"] | ["yp"] => {
-            Some(PartialDevCardMode::YearOfPlenty)
-        }
-        _ => None,
     }
 }
 
@@ -367,15 +430,6 @@ impl PartialBuildMode {
             Self::Road => constants::costs::ROAD,
             Self::City => constants::costs::CITY,
         }
-    }
-}
-
-pub(crate) fn partial_build_command(line: &str) -> Option<PartialBuildMode> {
-    match line.split_whitespace().collect::<Vec<_>>().as_slice() {
-        ["build", "settlement"] | ["bs"] => Some(PartialBuildMode::Settlement),
-        ["build", "road"] | ["br"] => Some(PartialBuildMode::Road),
-        ["build", "city"] | ["bc"] => Some(PartialBuildMode::City),
-        _ => None,
     }
 }
 
@@ -444,116 +498,36 @@ fn player_piece_count(model: &UiModel, actor: PlayerId, kind: PartialBuildMode) 
     }
 }
 
-pub(crate) fn parse_regular_action(line: &str) -> Option<RegularCommand> {
-    let line = line.trim();
-    if matches!(line, "end" | "e") || line.is_empty() {
-        return Some(RegularCommand::EndMove);
-    }
-    if matches!(line, "buy dev" | "buy-dev" | "bd") {
-        return Some(RegularCommand::BuyDevCard);
-    }
-    if let Some(build) = parse_build(line) {
-        return Some(RegularCommand::Build(build));
-    }
-    if let Some(trade) = parse_bank_trade(line) {
-        return Some(RegularCommand::TradeWithBank(trade));
-    }
-    None
+fn set_parse_error(ui: &mut CliUi, line: &str, err: ParseCommandError) -> io::Result<()> {
+    let message = format!("command syntax error: {err}");
+    log::warn!(
+        target: "catan_runtime::cli_child::input",
+        "{message}; input={line:?}"
+    );
+    ui.set_message(message)
 }
 
-fn parse_build(line: &str) -> Option<Build> {
-    let parts = line.split_whitespace().collect::<Vec<_>>();
-    match parts.as_slice() {
-        ["build", "road", h1, h2] => Some(Build::Road(Road {
-            path: path_from_tokens(h1, h2)?,
-        })),
-        ["build", "settlement", h1, h2, h3] => Some(Build::Establishment(Establishment {
-            vtx: intersection_from_tokens(h1, h2, h3)?,
-            stage: EstablishmentType::Settlement,
-        })),
-        ["build", "city", h1, h2, h3] => Some(Build::Establishment(Establishment {
-            vtx: intersection_from_tokens(h1, h2, h3)?,
-            stage: EstablishmentType::City,
-        })),
-        _ => None,
+fn set_invalid_use(ui: &mut CliUi, cause: String) -> io::Result<()> {
+    let message = format!("invalid command use: {cause}");
+    log::warn!(target: "catan_runtime::cli_child::input", "{message}");
+    ui.set_message(message)
+}
+
+fn command_label(command: CliCommand) -> &'static str {
+    match command {
+        CliCommand::RollDice => "roll",
+        CliCommand::Regular(RegularCommand::EndMove) => "end",
+        CliCommand::Regular(RegularCommand::BuyDevCard) => "buy-dev",
+        CliCommand::Regular(RegularCommand::Build(_))
+        | CliCommand::InteractiveBuildRoad
+        | CliCommand::InteractiveBuildSettlement
+        | CliCommand::InteractiveBuildCity => "build",
+        CliCommand::Regular(RegularCommand::TradeWithBank(_))
+        | CliCommand::InteractiveBankTrade => "bank-trade",
+        CliCommand::Regular(RegularCommand::UseDevCard(_)) | CliCommand::DevCard(_) => "dev-card",
+        CliCommand::Regular(RegularCommand::OfferPublicTrade(_))
+        | CliCommand::Regular(RegularCommand::OfferPersonalTrade(_)) => "player-trade",
     }
-}
-
-fn parse_bank_trade(line: &str) -> Option<BankTrade> {
-    let parts = line.split_whitespace().collect::<Vec<_>>();
-    match parts.as_slice() {
-        ["bank-trade", give, take, kind] => Some(BankTrade {
-            give: parse_resource(give)?,
-            take: parse_resource(take)?,
-            kind: match *kind {
-                "G4" => BankTradeKind::BankGeneric,
-                "G3" => BankTradeKind::PortGeneric,
-                "S2" => BankTradeKind::PortSpecific,
-                _ => return None,
-            },
-        }),
-        _ => None,
-    }
-}
-
-fn parse_dev_card_usage(line: &str) -> Option<DevCardUsage> {
-    let parts = line.split_whitespace().collect::<Vec<_>>();
-    match parts.as_slice() {
-        ["use", "knight", hex] => Some(DevCardUsage::Knight {
-            rob_hex: HexIndex::spiral_to_hex(hex.parse().ok()?),
-            robbed_id: None,
-        }),
-        ["use", "knight", hex, "none"] => Some(DevCardUsage::Knight {
-            rob_hex: HexIndex::spiral_to_hex(hex.parse().ok()?),
-            robbed_id: None,
-        }),
-        ["use", "knight", hex, robbed_id] => Some(DevCardUsage::Knight {
-            rob_hex: HexIndex::spiral_to_hex(hex.parse().ok()?),
-            robbed_id: Some(robbed_id.parse().ok()?),
-        }),
-        ["use", "yop", first, second] | ["use", "year-of-plenty", first, second] => {
-            Some(DevCardUsage::YearOfPlenty([
-                parse_resource(first)?,
-                parse_resource(second)?,
-            ]))
-        }
-        ["use", "monopoly", resource] => Some(DevCardUsage::Monopoly(parse_resource(resource)?)),
-        ["use", "roadbuild", h1, h2, h3, h4] | ["use", "road-build", h1, h2, h3, h4] => {
-            Some(DevCardUsage::RoadBuild([
-                path_from_tokens(h1, h2)?,
-                path_from_tokens(h3, h4)?,
-            ]))
-        }
-        _ => None,
-    }
-}
-
-fn parse_resource(token: &str) -> Option<Resource> {
-    match token.to_lowercase().as_str() {
-        "brick" => Some(Resource::Brick),
-        "wood" => Some(Resource::Wood),
-        "wheat" => Some(Resource::Wheat),
-        "sheep" => Some(Resource::Sheep),
-        "ore" => Some(Resource::Ore),
-        _ => None,
-    }
-}
-
-fn path_from_tokens(h1: &str, h2: &str) -> Option<BoardPath> {
-    let h1 = HexIndex::spiral_to_hex(h1.parse().ok()?);
-    let h2 = HexIndex::spiral_to_hex(h2.parse().ok()?);
-    BoardPath::try_from((h1, h2))
-        .or_else(|_| BoardPath::<Dual>::try_from((h1, h2)).map(|path| path.canon()))
-        .ok()
-}
-
-fn intersection_from_tokens(h1: &str, h2: &str, h3: &str) -> Option<Intersection> {
-    Intersection::try_from([
-        HexIndex::spiral_to_hex(h1.parse().ok()?),
-        HexIndex::spiral_to_hex(h2.parse().ok()?),
-        HexIndex::spiral_to_hex(h3.parse().ok()?),
-    ])
-    .ok()
 }
 
 pub(crate) fn read_resource_collection(
@@ -655,74 +629,4 @@ pub(crate) fn read_robbed_player(
 
     ui.set_message("rob target selection cancelled".to_owned())?;
     read_player_id(ui, &envelope.view, prompt)
-}
-
-#[cfg(test)]
-mod tests {
-    use catan_core::gameplay::game::command::RegularCommand;
-
-    use super::{
-        PartialBuildMode, PartialDevCardMode, parse_regular_action, partial_build_command,
-        partial_dev_card_command, partial_regular_command,
-    };
-
-    #[test]
-    fn partial_build_commands_parse_aliases() {
-        assert_eq!(
-            partial_build_command("build settlement"),
-            Some(PartialBuildMode::Settlement)
-        );
-        assert_eq!(
-            partial_build_command("bs"),
-            Some(PartialBuildMode::Settlement)
-        );
-        assert_eq!(
-            partial_build_command("build road"),
-            Some(PartialBuildMode::Road)
-        );
-        assert_eq!(partial_build_command("br"), Some(PartialBuildMode::Road));
-        assert_eq!(
-            partial_build_command("build city"),
-            Some(PartialBuildMode::City)
-        );
-        assert_eq!(partial_build_command("bc"), Some(PartialBuildMode::City));
-        assert_eq!(partial_build_command("build road 0 1"), None);
-    }
-
-    #[test]
-    fn interactive_shortcuts_parse() {
-        assert!(partial_regular_command("bt"));
-        assert!(matches!(
-            parse_regular_action("bd"),
-            Some(RegularCommand::BuyDevCard)
-        ));
-        assert!(matches!(
-            parse_regular_action("e"),
-            Some(RegularCommand::EndMove)
-        ));
-        assert_eq!(
-            partial_dev_card_command("kn"),
-            Some(PartialDevCardMode::Knight)
-        );
-        assert_eq!(
-            partial_dev_card_command("use knight"),
-            Some(PartialDevCardMode::Knight)
-        );
-        assert_eq!(
-            partial_dev_card_command("rb"),
-            Some(PartialDevCardMode::RoadBuild)
-        );
-        assert_eq!(
-            partial_dev_card_command("use roadbuild"),
-            Some(PartialDevCardMode::RoadBuild)
-        );
-        assert_eq!(
-            partial_dev_card_command("m"),
-            Some(PartialDevCardMode::Monopoly)
-        );
-        assert_eq!(
-            partial_dev_card_command("yp"),
-            Some(PartialDevCardMode::YearOfPlenty)
-        );
-    }
 }

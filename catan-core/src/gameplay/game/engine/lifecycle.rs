@@ -56,6 +56,8 @@ pub struct PlayingEngine {
     pub trade_sessions: TradeSessions,
     pub invalid_actions: u64,
     pub pending_discards: PendingDiscards,
+    #[serde(default)]
+    pub dev_card_used_this_turn: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -102,6 +104,7 @@ impl SetupEngine {
             trade_sessions: SmallVec::new(),
             invalid_actions: self.invalid_actions,
             pending_discards: SmallVec::new(),
+            dev_card_used_this_turn: false,
         }
     }
 }
@@ -138,6 +141,7 @@ impl EngineState {
             trade_sessions: SmallVec::new(),
             invalid_actions: 0,
             pending_discards: SmallVec::new(),
+            dev_card_used_this_turn: false,
         }))
     }
 

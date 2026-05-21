@@ -22,11 +22,13 @@ use ratatui::{
     text::{Line, Span},
 };
 
+use super::tui::{CardGlyph, InlineBadge, append_gap, join_lines_horizontal};
+
 #[cfg(test)]
 pub(crate) fn public_model_lines(model: &UiModel) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     lines.push(section_header("bank"));
-    lines.extend(bank_panel_lines(model));
+    lines.extend(bank_panel_lines(model, 80));
     lines.push(Line::from(""));
     lines.push(section_header("players"));
     for player in &model.public.players {
@@ -42,55 +44,72 @@ pub(crate) fn public_model_lines(model: &UiModel) -> Vec<Line<'static>> {
     lines
 }
 
-pub(crate) fn bank_panel_lines(model: &UiModel) -> Vec<Line<'static>> {
-    let mut top = Vec::new();
-    let mut middle = Vec::new();
-    let mut bottom = Vec::new();
+pub(crate) fn bank_panel_lines(model: &UiModel, width: usize) -> Vec<Line<'static>> {
+    let mut rows = [Vec::new(), Vec::new(), Vec::new()];
 
     match &model.public.bank.resources {
         UiPublicBankResources::Exact(resources) => {
             for (idx, resource) in Resource::iter().enumerate() {
                 if idx > 0 {
-                    push_card_gap(&mut top, &mut middle, &mut bottom);
+                    append_gap(&mut rows, " ");
                 }
-                push_status_card(
-                    &mut top,
-                    &mut middle,
-                    &mut bottom,
-                    resource_style(resource),
+                CardGlyph::new(
                     format!("{:>2}", resources[resource].min(99)),
-                );
+                    resource_style(resource),
+                )
+                .push_to_rows(&mut rows);
             }
         }
         UiPublicBankResources::Approx(resources) => {
             for (idx, resource) in Resource::iter().enumerate() {
                 if idx > 0 {
-                    push_card_gap(&mut top, &mut middle, &mut bottom);
+                    append_gap(&mut rows, " ");
                 }
-                push_status_card(
-                    &mut top,
-                    &mut middle,
-                    &mut bottom,
-                    resource_style(resource),
+                CardGlyph::new(
                     fullness_symbol(resources[resource]),
-                );
+                    resource_style(resource),
+                )
+                .push_to_rows(&mut rows);
             }
         }
     }
 
-    push_card_gap(&mut top, &mut middle, &mut bottom);
-    push_status_card(
-        &mut top,
-        &mut middle,
-        &mut bottom,
-        dev_card_style(),
+    append_gap(&mut rows, " ");
+    CardGlyph::new(
         match model.public.bank.dev_cards {
             UiPublicBankDevCards::Exact(count) => format!("{:>2}", count.min(99)),
             UiPublicBankDevCards::Approx(level) => fullness_symbol(level).to_owned(),
         },
-    );
+        dev_card_style(),
+    )
+    .push_to_rows(&mut rows);
 
-    vec![Line::from(top), Line::from(middle), Line::from(bottom)]
+    let card_lines = rows.into_iter().map(Line::from).collect::<Vec<_>>();
+    add_bank_legend_if_fits(card_lines, width)
+}
+
+fn add_bank_legend_if_fits(card_lines: Vec<Line<'static>>, width: usize) -> Vec<Line<'static>> {
+    let card_width = card_lines.iter().map(Line::width).max().unwrap_or(0);
+    let legend = [
+        Line::from("?? 14+"),
+        Line::from("? 8-13"),
+        Line::from("?! 1-7 | ! 0"),
+    ];
+    let legend_width = legend.iter().map(Line::width).max().unwrap_or(0);
+    if card_width + 2 + legend_width > width {
+        return card_lines;
+    }
+
+    card_lines
+        .into_iter()
+        .zip(legend)
+        .map(|(mut left, right)| {
+            let padding = card_width.saturating_sub(left.width()) + 2;
+            left.spans.push(Span::raw(" ".repeat(padding)));
+            left.spans.extend(right.spans);
+            left
+        })
+        .collect()
 }
 
 pub(crate) fn game_ended_lines(
@@ -166,9 +185,11 @@ pub(crate) fn personal_model_lines(model: &UiModel) -> Vec<Line<'static>> {
             Span::raw(format!("you: p{}  ", private.player_id)),
             private_vp_span(model, private.player_id, private.dev_cards.victory_pts),
         ]));
-        lines.extend(resource_card_lines(&private.resources, None));
-        lines.push(Line::from(""));
-        lines.extend(dev_card_lines(&private.dev_cards));
+        lines.extend(join_lines_horizontal(
+            &resource_card_lines(&private.resources, None),
+            Line::from(Span::styled("│", subtle_box_style())),
+            &dev_card_lines(&private.dev_cards),
+        ));
     } else {
         lines.push(Line::from("no private player data"));
     }
@@ -599,9 +620,7 @@ fn dev_deck_next_summary(dev_cards: &[DevCardKind]) -> String {
 
 fn dev_deck_card_lines(dev_cards: &[DevCardKind]) -> Vec<Line<'static>> {
     let counts = dev_deck_counts(dev_cards);
-    let mut top = Vec::new();
-    let mut middle = Vec::new();
-    let mut bottom = Vec::new();
+    let mut rows = [Vec::new(), Vec::new(), Vec::new()];
     let mut count = Vec::new();
 
     for (idx, (label, amount)) in [
@@ -615,12 +634,10 @@ fn dev_deck_card_lines(dev_cards: &[DevCardKind]) -> Vec<Line<'static>> {
     .enumerate()
     {
         if idx > 0 {
-            top.push(Span::raw(" "));
-            middle.push(Span::raw(" "));
-            bottom.push(Span::raw(" "));
+            append_gap(&mut rows, " ");
             count.push(Span::raw(" "));
         }
-        push_bank_dev_card(&mut top, &mut middle, &mut bottom, label);
+        CardGlyph::new(label, dev_card_style()).push_to_rows(&mut rows);
         count.push(Span::styled(
             format!("{:^4}", amount.min(99)),
             Style::default().fg(Color::Magenta),
@@ -628,45 +645,11 @@ fn dev_deck_card_lines(dev_cards: &[DevCardKind]) -> Vec<Line<'static>> {
     }
 
     vec![
-        Line::from(top),
-        Line::from(middle),
-        Line::from(bottom),
+        Line::from(rows[0].clone()),
+        Line::from(rows[1].clone()),
+        Line::from(rows[2].clone()),
         Line::from(count),
     ]
-}
-
-fn push_bank_dev_card(
-    top: &mut Vec<Span<'static>>,
-    middle: &mut Vec<Span<'static>>,
-    bottom: &mut Vec<Span<'static>>,
-    label: &'static str,
-) {
-    let style = Style::default().fg(Color::Magenta);
-    top.push(Span::styled("┌──┐", style));
-    middle.push(Span::styled(format!("│{:^2}│", label), style));
-    bottom.push(Span::styled("└──┘", style));
-}
-
-fn push_card_gap(
-    top: &mut Vec<Span<'static>>,
-    middle: &mut Vec<Span<'static>>,
-    bottom: &mut Vec<Span<'static>>,
-) {
-    top.push(Span::raw(" "));
-    middle.push(Span::raw(" "));
-    bottom.push(Span::raw(" "));
-}
-
-fn push_status_card(
-    top: &mut Vec<Span<'static>>,
-    middle: &mut Vec<Span<'static>>,
-    bottom: &mut Vec<Span<'static>>,
-    style: Style,
-    label: impl Into<String>,
-) {
-    top.push(Span::styled("┌──┐", style));
-    middle.push(Span::styled(format!("│{:^2}│", label.into()), style));
-    bottom.push(Span::styled("└──┘", style));
 }
 
 #[derive(Default)]
@@ -696,24 +679,17 @@ pub(crate) fn resource_card_lines(
     resources: &ResourceSet,
     selected_drop: Option<&ResourceSet>,
 ) -> Vec<Line<'static>> {
-    let mut top = Vec::new();
-    let mut middle = Vec::new();
-    let mut bottom = Vec::new();
+    let mut rows = [Vec::new(), Vec::new(), Vec::new()];
     let mut selected = Vec::new();
 
     for (idx, resource) in Resource::iter().enumerate() {
         if idx > 0 {
-            for spans in [&mut top, &mut middle, &mut bottom, &mut selected] {
-                spans.push(Span::raw(" "));
-            }
+            append_gap(&mut rows, " ");
+            selected.push(Span::raw(" "));
         }
         let style = resource_style(resource);
-        top.push(Span::styled("┌──┐", style));
-        middle.push(Span::styled(
-            format!("│{:02}│", resources[resource].min(99)),
-            style,
-        ));
-        bottom.push(Span::styled("└──┘", style));
+        CardGlyph::new(format!("{:02}", resources[resource].min(99)), style)
+            .push_to_rows(&mut rows);
         if let Some(drop) = selected_drop {
             selected.push(Span::styled(
                 format!(" {:02} ", drop[resource].min(99)),
@@ -722,7 +698,7 @@ pub(crate) fn resource_card_lines(
         }
     }
 
-    let mut lines = vec![Line::from(top), Line::from(middle), Line::from(bottom)];
+    let mut lines = rows.into_iter().map(Line::from).collect::<Vec<_>>();
     if selected_drop.is_some() {
         lines.push(Line::from(selected));
     }
@@ -730,15 +706,11 @@ pub(crate) fn resource_card_lines(
 }
 
 pub(crate) fn dev_card_lines(dev_cards: &DevCardData) -> Vec<Line<'static>> {
-    let mut lines = dev_card_compact_lines(dev_cards);
-    lines.push(dev_card_label_line());
-    lines
+    dev_card_compact_lines(dev_cards)
 }
 
 fn dev_card_compact_lines(dev_cards: &DevCardData) -> Vec<Line<'static>> {
-    let mut top = Vec::new();
-    let mut middle = Vec::new();
-    let mut bottom = Vec::new();
+    let mut rows = [Vec::new(), Vec::new(), Vec::new()];
 
     for (idx, card) in [
         UsableDevCard::Knight,
@@ -750,42 +722,23 @@ fn dev_card_compact_lines(dev_cards: &DevCardData) -> Vec<Line<'static>> {
     .enumerate()
     {
         if idx > 0 {
-            push_dev_card_gap(&mut top, &mut middle, &mut bottom);
+            append_gap(&mut rows, " ");
         }
-        push_dev_card(
-            &mut top,
-            &mut middle,
-            &mut bottom,
-            dev_card_abbrev(card),
-            [
+        CardGlyph::new(dev_card_abbrev(card), dev_card_style())
+            .indices([
                 Some(dev_cards.used[card]),
                 Some(dev_cards.active[card]),
                 Some(dev_cards.queued[card]),
-            ],
-        );
+            ])
+            .push_to_rows(&mut rows);
     }
 
-    push_dev_card_gap(&mut top, &mut middle, &mut bottom);
-    push_dev_card(
-        &mut top,
-        &mut middle,
-        &mut bottom,
-        "VP",
-        [None, Some(dev_cards.victory_pts), None],
-    );
+    append_gap(&mut rows, " ");
+    CardGlyph::new("VP", dev_card_style())
+        .indices([None, Some(dev_cards.victory_pts), None])
+        .push_to_rows(&mut rows);
 
-    vec![Line::from(top), Line::from(middle), Line::from(bottom)]
-}
-
-fn dev_card_label_line() -> Line<'static> {
-    let mut labels = Vec::new();
-    for (idx, label) in ["KN", "YP", "M", "RB", "VP"].into_iter().enumerate() {
-        if idx > 0 {
-            labels.push(Span::raw(" "));
-        }
-        labels.push(Span::raw(format!("{:^6}", label)));
-    }
-    Line::from(labels)
+    rows.into_iter().map(Line::from).collect()
 }
 
 pub(crate) fn drop_personal_lines(
@@ -928,46 +881,17 @@ pub(crate) fn adjust_drop_selection(
     }
 }
 
-fn push_dev_card_gap(
-    top: &mut Vec<Span<'static>>,
-    middle: &mut Vec<Span<'static>>,
-    bottom: &mut Vec<Span<'static>>,
-) {
-    for spans in [top, middle, bottom] {
-        spans.push(Span::raw(" "));
-    }
-}
-
 fn push_unknown_resource_card_inline(spans: &mut Vec<Span<'static>>) {
-    spans.push(Span::styled("[", resource_style(Resource::Brick)));
-    spans.push(Span::styled("?", resource_style(Resource::Wheat)));
-    spans.push(Span::styled("]", resource_style(Resource::Wood)));
+    InlineBadge::new(vec![
+        Span::styled("[", resource_style(Resource::Brick)),
+        Span::styled("?", resource_style(Resource::Wheat)),
+        Span::styled("]", resource_style(Resource::Wood)),
+    ])
+    .push_to(spans);
 }
 
 fn push_dev_card_inline(spans: &mut Vec<Span<'static>>) {
-    spans.push(Span::styled("[?]", dev_card_style()));
-}
-
-fn push_dev_card(
-    top: &mut Vec<Span<'static>>,
-    middle: &mut Vec<Span<'static>>,
-    bottom: &mut Vec<Span<'static>>,
-    label: &'static str,
-    counts: [Option<u16>; 3],
-) {
-    let style = Style::default().fg(Color::Magenta);
-    top.push(Span::styled("┌──┐", style));
-    top.push(Span::raw(format!("{:>2}", count_label(counts[0]))));
-    middle.push(Span::styled(format!("│{:^2}│", label), style));
-    middle.push(Span::raw(format!("{:>2}", count_label(counts[1]))));
-    bottom.push(Span::styled("└──┘", style));
-    bottom.push(Span::raw(format!("{:>2}", count_label(counts[2]))));
-}
-
-fn count_label(count: Option<u16>) -> String {
-    count
-        .map(|count| count.min(99).to_string())
-        .unwrap_or_else(|| " ".to_owned())
+    InlineBadge::new(vec![Span::styled("[?]", dev_card_style())]).push_to(spans);
 }
 
 fn dev_card_abbrev(card: UsableDevCard) -> &'static str {
@@ -1027,7 +951,7 @@ mod tests {
 
     use super::{
         adjust_drop_selection, bank_trade_menu_lines, dev_card_lines, drop_personal_lines,
-        public_model_lines, resource_card_lines, snapshot_state_lines,
+        personal_model_lines, public_model_lines, resource_card_lines, snapshot_state_lines,
     };
 
     #[test]
@@ -1058,6 +982,83 @@ mod tests {
         assert!(rendered_dev[1].contains("│YP│"));
         assert!(rendered_dev[1].contains("│ M│") || rendered_dev[1].contains("│M │"));
         assert!(rendered_dev[1].contains("│VP│"));
+    }
+
+    #[test]
+    fn personal_panel_places_dev_cards_right_of_resources_after_divider() {
+        let mut state = SetupGameState::default().finish();
+        state
+            .transfer_from_bank(
+                ResourceSet {
+                    brick: 2,
+                    wood: 1,
+                    ..ResourceSet::EMPTY
+                },
+                0,
+            )
+            .unwrap();
+        state
+            .players
+            .get_mut(0)
+            .dev_cards_add(DevCardKind::Usable(UsableDevCard::Knight));
+        state.players.get_mut(0).dev_cards_reset_queue();
+        let index = GameIndex::rebuild(&state);
+        let visibility = VisibilityConfig::default();
+        let factory = ContextFactory {
+            state: &state,
+            index: &index,
+            visibility: &visibility,
+        };
+        let model = UiModel::from_observer(
+            ObserverNotificationContext::Player {
+                public: factory.public_view(visibility.player_policy(PlayerId::new(0))),
+                private: factory.private_view(PlayerId::new(0)),
+            },
+            false,
+        );
+
+        let rendered = personal_model_lines(&model)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(!rendered.contains("|||"));
+        assert!(rendered.contains("│KN│"));
+    }
+
+    #[test]
+    fn personal_panel_uses_single_three_row_separator_without_dev_card_subscript() {
+        let mut state = SetupGameState::default().finish();
+        state
+            .players
+            .get_mut(0)
+            .dev_cards_add(DevCardKind::Usable(UsableDevCard::Knight));
+        state.players.get_mut(0).dev_cards_reset_queue();
+        let index = GameIndex::rebuild(&state);
+        let visibility = VisibilityConfig::default();
+        let factory = ContextFactory {
+            state: &state,
+            index: &index,
+            visibility: &visibility,
+        };
+        let model = UiModel::from_observer(
+            ObserverNotificationContext::Player {
+                public: factory.public_view(visibility.player_policy(PlayerId::new(0))),
+                private: factory.private_view(PlayerId::new(0)),
+            },
+            false,
+        );
+
+        let rendered = personal_model_lines(&model)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(!rendered.contains("|||"));
+        assert!(!rendered.contains(" KN     YP     M      RB     VP "));
+        assert_eq!(dev_card_lines(&DevCardData::default()).len(), 3);
     }
 
     #[test]
@@ -1221,5 +1222,33 @@ mod tests {
         assert!(!rendered.contains("ACTIONS"));
         assert!(!rendered.contains("roll | end | buy dev"));
         assert!(!rendered.contains("TRADE / DEV"));
+    }
+
+    #[test]
+    fn bank_panel_adds_fullness_legend_when_width_allows() {
+        let state = SetupGameState::default().finish();
+        let index = GameIndex::rebuild(&state);
+        let visibility = VisibilityConfig::default();
+        let factory = ContextFactory {
+            state: &state,
+            index: &index,
+            visibility: &visibility,
+        };
+        let model = UiModel::from_observer(
+            ObserverNotificationContext::Spectator {
+                public: factory.spectator_public_view(),
+            },
+            false,
+        );
+
+        let rendered = super::bank_panel_lines(&model, 80)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+
+        assert_eq!(rendered.len(), 3);
+        assert!(rendered.iter().any(|line| line.contains("?? 14+")));
+        assert!(rendered.iter().any(|line| line.contains("? 8-13")));
+        assert!(rendered.iter().any(|line| line.contains("?! 1-7 | ! 0")));
     }
 }

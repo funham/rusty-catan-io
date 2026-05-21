@@ -146,7 +146,7 @@ fn split_info_column(right: Rect) -> (Rect, Rect, Rect) {
         return (empty, empty, empty);
     }
 
-    let bank_height = right.height.clamp(1, 8);
+    let bank_height = right.height.clamp(1, 5);
     let remaining = right.height.saturating_sub(bank_height);
     let journal_height = if remaining == 0 {
         0

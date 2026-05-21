@@ -17,17 +17,15 @@ use catan_core::{
             input::{PlayerCommand, TradeCommand, TradeResponseCommand},
             view::{PlayerDecisionContext, PlayerNotificationContext},
         },
-        primitives::{
-            build::{Build, Establishment, EstablishmentType, Road},
-            player::PlayerId,
-            resource::{Resource, ResourceSet},
-            trade::{BankTrade, BankTradeKind},
-        },
+        primitives::{player::PlayerId, resource::ResourceSet},
     },
     topology::{Hex, HexIndex, Intersection, Path, repr::Dual},
 };
 
-use crate::bot::{BotPolicy, unsupported_decision_command};
+use crate::{
+    bot::{BotPolicy, unsupported_decision_command},
+    cli_command::{CliCommand, parse_cli_command},
+};
 
 #[derive(Debug, Default)]
 struct TerminalUi;
@@ -193,20 +191,11 @@ impl TerminalUi {
     }
 
     pub fn parse_regular_action(line: &str) -> Option<RegularCommand> {
-        let line = line.trim();
-        if line == "end" || line.is_empty() {
-            return Some(RegularCommand::EndMove);
+        match parse_cli_command(line).ok().flatten() {
+            None => Some(RegularCommand::EndMove),
+            Some(CliCommand::Regular(action)) => Some(action),
+            _ => None,
         }
-        if line == "buy dev" || line == "buy-dev" {
-            return Some(RegularCommand::BuyDevCard);
-        }
-        if let Some(build) = Self::parse_build(line) {
-            return Some(RegularCommand::Build(build));
-        }
-        if let Some(trade) = Self::parse_bank_trade(line) {
-            return Some(RegularCommand::TradeWithBank(trade));
-        }
-        None
     }
 
     fn read_regular_action() -> RegularCommand {
@@ -218,73 +207,6 @@ impl TerminalUi {
                 return action;
             }
             println!("could not parse action");
-        }
-    }
-
-    fn parse_build(line: &str) -> Option<Build> {
-        let parts = line.split_whitespace().collect::<Vec<_>>();
-        match parts.as_slice() {
-            ["build", "road", h1, h2] => {
-                let path = Path::try_from((
-                    HexIndex::spiral_to_hex(h1.parse().ok()?),
-                    HexIndex::spiral_to_hex(h2.parse().ok()?),
-                ))
-                .ok()?;
-                Some(Build::Road(Road { path }))
-            }
-            ["build", "settlement", h1, h2, h3] => {
-                let pos = Intersection::try_from([
-                    HexIndex::spiral_to_hex(h1.parse().ok()?),
-                    HexIndex::spiral_to_hex(h2.parse().ok()?),
-                    HexIndex::spiral_to_hex(h3.parse().ok()?),
-                ])
-                .ok()?;
-                Some(Build::Establishment(Establishment {
-                    vtx: pos,
-                    stage: EstablishmentType::Settlement,
-                }))
-            }
-            ["build", "city", h1, h2, h3] => {
-                let pos = Intersection::try_from([
-                    HexIndex::spiral_to_hex(h1.parse().ok()?),
-                    HexIndex::spiral_to_hex(h2.parse().ok()?),
-                    HexIndex::spiral_to_hex(h3.parse().ok()?),
-                ])
-                .ok()?;
-                Some(Build::Establishment(Establishment {
-                    vtx: pos,
-                    stage: EstablishmentType::City,
-                }))
-            }
-            _ => None,
-        }
-    }
-
-    fn parse_bank_trade(line: &str) -> Option<BankTrade> {
-        let parts = line.split_whitespace().collect::<Vec<_>>();
-        match parts.as_slice() {
-            ["bank-trade", give, take, kind] => Some(BankTrade {
-                give: Self::parse_resource(give)?,
-                take: Self::parse_resource(take)?,
-                kind: match *kind {
-                    "common" => BankTradeKind::BankGeneric,
-                    "port-3" => BankTradeKind::PortGeneric,
-                    "port-2" => BankTradeKind::PortSpecific,
-                    _ => return None,
-                },
-            }),
-            _ => None,
-        }
-    }
-
-    fn parse_resource(token: &str) -> Option<Resource> {
-        match token {
-            "brick" => Some(Resource::Brick),
-            "wood" => Some(Resource::Wood),
-            "wheat" => Some(Resource::Wheat),
-            "sheep" => Some(Resource::Sheep),
-            "ore" => Some(Resource::Ore),
-            _ => None,
         }
     }
 

@@ -80,7 +80,7 @@ pub mod builds {
     }
 
     /// Enum representing any build action.
-    #[derive(Debug, Clone, Copy, Serialize, Deserialize, strum::IntoStaticStr)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, strum::IntoStaticStr)]
     pub enum Build {
         Establishment(Establishment),
         Road(Road),

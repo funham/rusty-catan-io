@@ -76,11 +76,12 @@ pub enum PostDiceCommand {
     RegularCommand(RegularCommand),
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RegularCommand {
     OfferPublicTrade(PublicTradeOffer),
     OfferPersonalTrade(PersonalTradeOffer),
     TradeWithBank(BankTrade),
+    UseDevCard(DevCardUsage),
     Build(Build),
     BuyDevCard,
     EndMove,

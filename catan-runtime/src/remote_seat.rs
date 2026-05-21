@@ -50,7 +50,8 @@ impl Seat for RemoteCliSeat {
             return;
         }
 
-        let (output, view, legal) = player_frame(frame.output, &frame.view);
+        let (output, view, legal) =
+            player_frame(frame.output, &frame.view, frame.dev_card_used_this_turn);
         if write_frame(
             &mut self.stream,
             &HostToCli::Output {
@@ -236,6 +237,7 @@ impl RemoteCliOutputObserver {
 fn player_frame(
     output: &GameOutput,
     context: &PlayerDecisionContext<'_>,
+    dev_card_used_this_turn: bool,
 ) -> (GameOutput, UiModel, LegalDecisionOptions) {
     let robber_pos = match output {
         GameOutput::DecisionOpened(decision) => match decision.kind() {
@@ -244,11 +246,9 @@ fn player_frame(
         },
         _ => None,
     };
-    (
-        output.clone(),
-        UiModel::from_decision(context),
-        LegalDecisionOptions::from_context(context, robber_pos),
-    )
+    let mut legal = LegalDecisionOptions::from_context(context, robber_pos);
+    legal.dev_card_used_this_turn = dev_card_used_this_turn;
+    (output.clone(), UiModel::from_decision(context), legal)
 }
 
 fn observer_model(role: &CliRole, factory: &ContextFactory<'_>) -> UiModel {
@@ -368,6 +368,7 @@ mod tests {
                 player_id: P0,
                 output: &output,
                 view,
+                dev_card_used_this_turn: false,
             },
             &mut commands,
         );
@@ -419,6 +420,7 @@ mod tests {
                 player_id: P0,
                 output: &output,
                 view,
+                dev_card_used_this_turn: false,
             },
             &mut commands,
         );

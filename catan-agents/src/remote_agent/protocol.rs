@@ -173,6 +173,8 @@ pub struct LegalDecisionOptions {
     pub robber_hexes: Vec<Hex>,
     pub robber_pos: Option<Hex>,
     pub rob_targets: Vec<PlayerId>,
+    #[serde(default)]
+    pub dev_card_used_this_turn: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -245,6 +247,7 @@ impl LegalDecisionOptions {
             robber_hexes,
             robber_pos,
             rob_targets,
+            dev_card_used_this_turn: false,
         }
     }
 }

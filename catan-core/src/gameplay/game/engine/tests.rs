@@ -40,6 +40,25 @@ fn one_brick() -> ResourceSet {
     }
 }
 
+fn give_active_dev_card(
+    engine: &mut GameEngine,
+    player_id: impl Into<PlayerId>,
+    card: UsableDevCard,
+) {
+    let player_id = player_id.into();
+    let active = engine.playing_mut_for_tests();
+    active
+        .game
+        .players
+        .get_mut(player_id)
+        .dev_cards_add(DevCardKind::Usable(card));
+    active
+        .game
+        .players
+        .get_mut(player_id)
+        .dev_cards_reset_queue();
+}
+
 fn one_wood() -> ResourceSet {
     ResourceSet {
         wood: 1,
@@ -744,6 +763,225 @@ fn decider_use_dev_card_emits_usage_and_post_dev_card_decision() {
             }),
         ] if *decision_id == decision.id() && *emitted == usage && id.0 == 8
     ));
+}
+
+#[test]
+fn regular_phase_dev_card_can_be_used_after_bank_trade() {
+    let mut engine = GameEngine::from_init(SetupGameState::default(), RunOptions::default());
+    engine.force_playing_for_tests();
+    engine.test_give_resources(
+        P0,
+        ResourceSet {
+            ore: 4,
+            ..ResourceSet::EMPTY
+        },
+    );
+    give_active_dev_card(&mut engine, P0, UsableDevCard::Monopoly);
+
+    let trade_decision = engine.open_decision_for_test(P0, DecisionKind::RegularCommand);
+    let (_, trade_outputs) = apply_outputs(
+        &mut engine,
+        submit(
+            P0,
+            trade_decision.id(),
+            PlayerCommand::Regular(RegularCommand::TradeWithBank(BankTrade {
+                give: Resource::Ore,
+                take: Resource::Brick,
+                kind: BankTradeKind::BankGeneric,
+            })),
+        ),
+    );
+    let regular_decision = first_open_decision(&trade_outputs);
+
+    let usage = DevCardUsage::Monopoly(Resource::Brick);
+    let (_, outputs) = apply_outputs(
+        &mut engine,
+        submit(
+            P0,
+            regular_decision.id(),
+            PlayerCommand::Regular(RegularCommand::UseDevCard(usage)),
+        ),
+    );
+
+    assert!(output_events(&outputs).iter().any(|event| {
+        matches!(
+            event,
+            GameEvent::DevCardUsed {
+                player_id: P0,
+                usage: emitted,
+            } if *emitted == usage
+        )
+    }));
+    assert!(outputs.iter().any(|output| {
+        matches!(
+            output,
+            GameOutput::DecisionOpened(decision)
+                if decision.player_id() == P0
+                    && decision.kind() == DecisionKind::RegularCommand
+        )
+    }));
+}
+
+#[test]
+fn regular_phase_knight_steals_after_bank_trade() {
+    let mut engine = GameEngine::from_init(SetupGameState::default(), RunOptions::default());
+    let victim_hex = add_two_initial_settlements(&mut engine);
+    engine.test_give_resources(
+        P0,
+        ResourceSet {
+            ore: 4,
+            ..ResourceSet::EMPTY
+        },
+    );
+    engine.test_give_resources(P1, Resource::Brick.into());
+    give_active_dev_card(&mut engine, P0, UsableDevCard::Knight);
+
+    let trade_decision = engine.open_decision_for_test(P0, DecisionKind::RegularCommand);
+    let (_, trade_outputs) = apply_outputs(
+        &mut engine,
+        submit(
+            P0,
+            trade_decision.id(),
+            PlayerCommand::Regular(RegularCommand::TradeWithBank(BankTrade {
+                give: Resource::Ore,
+                take: Resource::Wood,
+                kind: BankTradeKind::BankGeneric,
+            })),
+        ),
+    );
+    let regular_decision = first_open_decision(&trade_outputs);
+
+    let usage = DevCardUsage::Knight {
+        rob_hex: victim_hex,
+        robbed_id: Some(P1),
+    };
+    let (_, outputs) = apply_outputs(
+        &mut engine,
+        submit(
+            P0,
+            regular_decision.id(),
+            PlayerCommand::Regular(RegularCommand::UseDevCard(usage)),
+        ),
+    );
+
+    assert!(output_events(&outputs).iter().any(|event| {
+        matches!(
+            event,
+            GameEvent::RobberMoved {
+                player_id: P0,
+                hex,
+                robbed_id: Some(P1),
+            } if *hex == victim_hex
+        )
+    }));
+    assert!(output_events(&outputs).iter().any(|event| {
+        matches!(
+            event,
+            GameEvent::ResourceStolen {
+                player_id: P0,
+                robbed_id: P1,
+                resource: Resource::Brick,
+            }
+        )
+    }));
+    assert_eq!(engine.state().board_state.robber_pos, victim_hex);
+}
+
+#[test]
+fn second_dev_card_in_same_turn_is_rejected_with_specific_reason() {
+    let mut engine = GameEngine::from_init(SetupGameState::default(), RunOptions::default());
+    engine.force_playing_for_tests();
+    give_active_dev_card(&mut engine, P0, UsableDevCard::Monopoly);
+    give_active_dev_card(&mut engine, P0, UsableDevCard::YearOfPlenty);
+
+    let first_decision = engine.open_decision_for_test(P0, DecisionKind::RegularCommand);
+    let (_, first_outputs) = apply_outputs(
+        &mut engine,
+        submit(
+            P0,
+            first_decision.id(),
+            PlayerCommand::Regular(RegularCommand::UseDevCard(DevCardUsage::Monopoly(
+                Resource::Brick,
+            ))),
+        ),
+    );
+    let second_decision = first_open_decision(&first_outputs);
+
+    let (_, outputs) = apply_outputs(
+        &mut engine,
+        submit(
+            P0,
+            second_decision.id(),
+            PlayerCommand::Regular(RegularCommand::UseDevCard(DevCardUsage::YearOfPlenty([
+                Resource::Brick,
+                Resource::Wood,
+            ]))),
+        ),
+    );
+
+    assert!(outputs.iter().any(|output| {
+        matches!(
+            output,
+            GameOutput::CommandRejected {
+                reason: CommandRejectionReason::IllegalCommand(reason),
+                ..
+            } if reason == "development card already used this turn"
+        )
+    }));
+}
+
+#[test]
+fn dev_card_use_resets_on_next_turn() {
+    let mut engine = GameEngine::from_init(SetupGameState::default(), RunOptions::default());
+    engine.force_playing_for_tests();
+    give_active_dev_card(&mut engine, P0, UsableDevCard::Monopoly);
+    give_active_dev_card(&mut engine, P0, UsableDevCard::YearOfPlenty);
+
+    let first_decision = engine.open_decision_for_test(P0, DecisionKind::RegularCommand);
+    let (_, first_outputs) = apply_outputs(
+        &mut engine,
+        submit(
+            P0,
+            first_decision.id(),
+            PlayerCommand::Regular(RegularCommand::UseDevCard(DevCardUsage::Monopoly(
+                Resource::Brick,
+            ))),
+        ),
+    );
+    assert!(first_open_decision(&first_outputs).kind() == DecisionKind::RegularCommand);
+    assert!(engine.dev_card_used_this_turn());
+    reducer::apply_event(
+        &mut engine.core,
+        &GameEvent::TurnStarted {
+            player_id: P0,
+            turn_no: 99,
+        },
+    )
+    .expect("turn start should reset per-turn dev-card state");
+    assert!(!engine.dev_card_used_this_turn());
+    let next_p0 = engine.open_decision_for_test(P0, DecisionKind::RegularCommand);
+
+    let (_, outputs) = apply_outputs(
+        &mut engine,
+        submit(
+            P0,
+            next_p0.id(),
+            PlayerCommand::Regular(RegularCommand::UseDevCard(DevCardUsage::YearOfPlenty([
+                Resource::Brick,
+                Resource::Wood,
+            ]))),
+        ),
+    );
+
+    assert!(output_events(&outputs).iter().any(|event| {
+        matches!(
+            event,
+            GameEvent::DevCardUsed {
+                player_id: P0,
+                usage: DevCardUsage::YearOfPlenty(_),
+            }
+        )
+    }));
 }
 
 #[test]

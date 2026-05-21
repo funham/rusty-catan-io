@@ -13,7 +13,7 @@ use catan_core::gameplay::game::command::{
     ChooseRobbedPlayerCommand, DropHalfCommand, InitialPlacementCommand, MoveRobberCommand,
     PostDevCardCommand, TradeAnswer,
 };
-use catan_core::gameplay::game::output::GameOutput;
+use catan_core::gameplay::game::output::{CommandRejectionReason, GameOutput};
 use catan_core::gameplay::game::{
     decision::DecisionKind,
     input::{PlayerCommand, TradeCommand, TradeResponseCommand},
@@ -166,7 +166,7 @@ fn run_player_session(
                     .map_err(|err| format!("failed to submit command: {err}"))?;
                 }
                 GameOutput::DecisionClosed { .. } | GameOutput::CommandRejected { .. } => {
-                    let message = player_engine_output_message(&output)
+                    let message = engine_output_status_message(&output)
                         .expect("status output should have a display message");
                     ui.show_model(&view, message)
                         .map_err(|err| format!("failed to draw TUI: {err}"))?;
@@ -198,12 +198,25 @@ fn run_player_session(
     }
 }
 
-fn player_engine_output_message(output: &GameOutput) -> Option<String> {
+fn engine_output_status_message(output: &GameOutput) -> Option<String> {
     match output {
-        GameOutput::DecisionClosed { .. } | GameOutput::CommandRejected { .. } => {
-            Some(format!("engine output: {output:?}"))
-        }
+        GameOutput::DecisionClosed { .. } => Some(format!("engine output: {output:?}")),
+        GameOutput::CommandRejected { reason, .. } => Some(command_rejection_message(reason)),
         GameOutput::Event(_) | GameOutput::DecisionOpened(_) => None,
+    }
+}
+
+fn command_rejection_message(reason: &CommandRejectionReason) -> String {
+    match reason {
+        CommandRejectionReason::IllegalCommand(reason) => {
+            format!("invalid command use: {reason}")
+        }
+        CommandRejectionReason::WrongPlayer { expected } => {
+            format!("invalid command use: waiting for p{expected}")
+        }
+        CommandRejectionReason::WrongPhase => "invalid command use: wrong phase".to_owned(),
+        CommandRejectionReason::StaleDecision => "invalid command use: stale decision".to_owned(),
+        CommandRejectionReason::GameEnded => "invalid command use: game already ended".to_owned(),
     }
 }
 
@@ -348,7 +361,9 @@ fn run_observer_session(mut stream: UnixStream, mut ui: CliUi) -> Result<(), Str
                             draw_latest_or_message(&mut ui, &state.latest, state.event_count)?;
                         }
                         GameOutput::DecisionClosed { .. } | GameOutput::CommandRejected { .. } => {
-                            state.latest = SessionViewState::view(*view, ui.current_message());
+                            let message = engine_output_status_message(&other)
+                                .unwrap_or_else(|| ui.current_message());
+                            state.latest = SessionViewState::view(*view, message);
                             draw_latest_or_message(&mut ui, &state.latest, state.event_count)?;
                         }
                         GameOutput::Event(_) => unreachable!("event output handled above"),
@@ -694,8 +709,26 @@ mod tests {
             decision_id: DecisionId(3),
         };
 
-        let message = super::player_engine_output_message(&output);
+        let message = super::engine_output_status_message(&output);
 
         assert!(message.is_some());
+    }
+
+    #[test]
+    fn command_rejections_are_status_messages() {
+        let output = catan_core::gameplay::game::output::GameOutput::CommandRejected {
+            token: catan_core::gameplay::game::input::DecisionToken {
+                id: DecisionId(3),
+                player_id: P0,
+            },
+            reason: catan_core::gameplay::game::output::CommandRejectionReason::IllegalCommand(
+                "not enough resources to buy development card".to_owned(),
+            ),
+        };
+
+        assert_eq!(
+            super::engine_output_status_message(&output).as_deref(),
+            Some("invalid command use: not enough resources to buy development card")
+        );
     }
 }

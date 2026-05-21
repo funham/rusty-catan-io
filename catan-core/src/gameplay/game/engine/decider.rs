@@ -341,6 +341,14 @@ fn decide_regular_command(
         RegularCommand::EndMove => decide_end_move(active, decision, context, events),
         RegularCommand::Build(build) => decide_build(active, decision, build, events),
         RegularCommand::BuyDevCard => decide_buy_dev_card(active, decision, events),
+        RegularCommand::UseDevCard(usage) => decide_use_dev_card(
+            active,
+            decision,
+            usage,
+            DecisionKind::RegularCommand,
+            context,
+            events,
+        ),
         RegularCommand::OfferPublicTrade(offer) => decide_open_trade(
             active,
             decision,
@@ -884,6 +892,10 @@ fn decide_use_dev_card(
     events: &mut EventBatch,
 ) {
     let player_id = decision.player_id;
+    if active.dev_card_used_this_turn {
+        reject_illegal(events, &decision, "development card already used this turn");
+        return;
+    }
     let mut candidate = active.game.clone();
     if candidate
         .use_dev_card(usage, player_id, context.stolen_resource)

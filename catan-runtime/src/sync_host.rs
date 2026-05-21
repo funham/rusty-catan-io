@@ -20,6 +20,7 @@ pub struct SeatFrame<'a> {
     pub player_id: PlayerId,
     pub output: &'a GameOutput,
     pub view: PlayerDecisionContext<'a>,
+    pub dev_card_used_this_turn: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -162,6 +163,7 @@ impl SyncGameHost {
                 self.stats.record_transaction(&transaction);
                 self.outputs
                     .extend(projector::project_transaction(&transaction));
+                self.enqueue_rejected_pending_decisions(&transaction);
                 continue;
             }
             return None;
@@ -197,10 +199,32 @@ impl SyncGameHost {
                 player_id,
                 output,
                 view: factory.player_decision_context(player_id, search),
+                dev_card_used_this_turn: self.engine.dev_card_used_this_turn(),
             };
             let mut buffer = SeatCommandBuffer::default();
             self.seats[index].on_frame(frame, &mut buffer);
             buffer.drain_into(&mut self.inputs);
+        }
+    }
+
+    fn enqueue_rejected_pending_decisions(
+        &mut self,
+        transaction: &catan_core::gameplay::game::event::EventTransaction,
+    ) {
+        for event in &transaction.events {
+            let catan_core::gameplay::game::event::GameEvent::CommandRejected { token, .. } = event
+            else {
+                continue;
+            };
+            if let Some(decision) = self
+                .engine
+                .pending_decisions()
+                .find(|decision| decision.id == token.id && decision.player_id == token.player_id)
+            {
+                self.outputs.push_back(GameOutput::DecisionOpened(
+                    DecisionRequest::from_open_decision(decision),
+                ));
+            }
         }
     }
 
@@ -218,7 +242,12 @@ mod tests {
     use super::*;
     use catan_agents::{bot::decline_trade_command, lazy::LazyAgent};
     use catan_core::gameplay::{
-        game::{decision::DecisionKind, event::GameEvent, input::DecisionRequest},
+        game::{
+            command::RegularCommand,
+            decision::DecisionKind,
+            event::GameEvent,
+            input::{DecisionRequest, DecisionResponse, PlayerCommand},
+        },
         random::GameRandom,
     };
 
@@ -285,6 +314,55 @@ mod tests {
 
         host.start();
         assert!(host.run_until_waiting().is_none());
+    }
+
+    struct InvalidOnceSeat {
+        id: PlayerId,
+        submitted: bool,
+        opened: std::rc::Rc<std::cell::Cell<usize>>,
+    }
+
+    impl Seat for InvalidOnceSeat {
+        fn player_id(&self) -> PlayerId {
+            self.id
+        }
+
+        fn on_frame(&mut self, frame: SeatFrame<'_>, commands: &mut SeatCommandBuffer) {
+            let GameOutput::DecisionOpened(decision) = frame.output else {
+                return;
+            };
+            if decision.player_id() != self.id {
+                return;
+            }
+
+            self.opened.set(self.opened.get() + 1);
+            if self.submitted {
+                return;
+            }
+            self.submitted = true;
+            commands.push(SeatCommand {
+                response: DecisionResponse {
+                    token: decision.token(),
+                    command: PlayerCommand::Regular(RegularCommand::EndMove),
+                },
+            });
+        }
+    }
+
+    #[test]
+    fn rejected_command_reopens_same_pending_decision() {
+        let opened = std::rc::Rc::new(std::cell::Cell::new(0));
+        let seats: Vec<Box<dyn Seat>> = vec![Box::new(InvalidOnceSeat {
+            id: P0,
+            submitted: false,
+            opened: opened.clone(),
+        })];
+        let mut host = SyncGameHost::new(SetupGameState::default(), seats, RunOptions::default());
+
+        host.start();
+        assert!(host.run_until_waiting().is_none());
+
+        assert_eq!(opened.get(), 2);
     }
 
     #[test]

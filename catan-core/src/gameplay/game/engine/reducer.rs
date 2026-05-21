@@ -319,6 +319,7 @@ fn resource_stolen(
 
 #[inline]
 fn turn_started(active: &mut PlayingEngine, player_id: PlayerId) {
+    active.dev_card_used_this_turn = false;
     active
         .game
         .players
@@ -383,6 +384,9 @@ fn dev_card_used(
     player_id: PlayerId,
     usage: &DevCardUsage,
 ) -> Result<(), EngineApplyError> {
+    if active.dev_card_used_this_turn {
+        return Err(EngineApplyError::InvalidDevCardUse);
+    }
     active
         .game
         .players
@@ -393,6 +397,7 @@ fn dev_card_used(
     active
         .index
         .refresh_after_dev_card(&active.game, player_id, usage);
+    active.dev_card_used_this_turn = true;
     Ok(())
 }
 

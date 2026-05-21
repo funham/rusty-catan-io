@@ -233,6 +233,10 @@ impl GameEngine {
             | (
                 DecisionKind::PostDiceCommand,
                 PlayerCommand::PostDice(command::PostDiceCommand::UseDevCard(usage)),
+            )
+            | (
+                DecisionKind::RegularCommand,
+                PlayerCommand::Regular(command::RegularCommand::UseDevCard(usage)),
             ) => usage,
             _ => {
                 let robbed_id = match (decision.kind, &command) {
@@ -299,6 +303,13 @@ impl GameEngine {
 
     pub fn index(&self) -> &GameIndex {
         self.core.index()
+    }
+
+    pub fn dev_card_used_this_turn(&self) -> bool {
+        match &self.core {
+            EngineState::Playing(active) => active.dev_card_used_this_turn,
+            EngineState::Unstarted(_) | EngineState::Setup(_) | EngineState::Finished(_) => false,
+        }
     }
 
     pub fn state(&self) -> &GameState {
