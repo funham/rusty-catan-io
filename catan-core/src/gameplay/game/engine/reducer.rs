@@ -153,12 +153,12 @@ fn apply_playing(active: &mut PlayingEngine, event: &GameEvent) -> Result<(), En
             player_id,
             offer_id,
             offer,
-        } => trade_offer_added(active, *session_id, *player_id, *offer_id, offer.clone())?,
+        } => trade_offer_added(active, *session_id, *player_id, *offer_id, *offer)?,
         GameEvent::TradeResponseUpdated {
             session_id,
             player_id,
             response,
-        } => trade_response_updated(active, *session_id, *player_id, response.clone())?,
+        } => trade_response_updated(active, *session_id, *player_id, *response)?,
         GameEvent::TradeCompleted {
             session_id,
             proposer_id,

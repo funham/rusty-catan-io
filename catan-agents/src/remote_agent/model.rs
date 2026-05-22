@@ -267,7 +267,7 @@ impl UiPublicGame {
                         .map(|offer| UiTradeOffer {
                             id: offer.id,
                             proposer: offer.proposer,
-                            trade: offer.trade.clone(),
+                            trade: offer.trade,
                         })
                         .collect(),
                     responses: session.responses.clone(),

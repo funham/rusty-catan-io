@@ -140,7 +140,7 @@ impl Index<TileNum> for HexesByNum {
         let num: u8 = index.into();
         let min = DiceRoll::MIN_VALUE;
         let index = num - min;
-        &self.arr[if num < DiceRoll::SEVEN_VALUE {
+        &self.arr[if num < 7 {
             index as usize
         } else {
             index as usize - 1
@@ -153,7 +153,7 @@ impl IndexMut<TileNum> for HexesByNum {
         let num: u8 = index.into();
         let min = DiceRoll::MIN_VALUE;
         let index = num - min;
-        &mut self.arr[if num < DiceRoll::SEVEN_VALUE {
+        &mut self.arr[if num < 7 {
             index as usize
         } else {
             index as usize - 1

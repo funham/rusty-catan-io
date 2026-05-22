@@ -1,5 +1,6 @@
 use super::GameEngine;
 use crate::{
+    dice_roll,
     gameplay::{
         game::{
             command::{InitCommand, RegularCommand},
@@ -23,7 +24,6 @@ use crate::{
             trade::{BankTrade, BankTradeKind, PlayerTrade},
         },
     },
-    math::dice::DiceRoll,
     topology::Hex,
 };
 
@@ -591,7 +591,7 @@ fn decider_roll_dice_harvest_emits_complete_facts() {
         decider::DecisionContext {
             max_turns: None,
             max_invalid_actions: None,
-            dice_roll: Some(DiceRoll::eight()),
+            dice_roll: Some(dice_roll!(8)),
             stolen_resource: None,
         },
     );
@@ -611,7 +611,7 @@ fn decider_roll_dice_harvest_emits_complete_facts() {
                 kind: DecisionKind::PostDiceCommand,
                 lifetime: DecisionLifetime::OneShot,
             }),
-        ] if *decision_id == decision.id() && *value == DiceRoll::eight() && id.0 == 8
+        ] if *decision_id == decision.id() && *value == dice_roll!(8) && id.0 == 8
     ));
 }
 
@@ -640,7 +640,7 @@ fn decider_roll_dice_seven_opens_discard_or_robber_decision() {
         decider::DecisionContext {
             max_turns: None,
             max_invalid_actions: None,
-            dice_roll: Some(DiceRoll::seven()),
+            dice_roll: Some(dice_roll!(7)),
             stolen_resource: None,
         },
     );
@@ -659,7 +659,7 @@ fn decider_roll_dice_seven_opens_discard_or_robber_decision() {
                 kind: DecisionKind::MoveRobber,
                 lifetime: DecisionLifetime::OneShot,
             }),
-        ] if *decision_id == decision.id() && *value == DiceRoll::seven() && id.0 == 8
+        ] if *decision_id == decision.id() && *value == dice_roll!(7) && id.0 == 8
     ));
 }
 

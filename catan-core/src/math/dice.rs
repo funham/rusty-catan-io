@@ -1,22 +1,84 @@
+use std::num::NonZeroU8;
+
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error};
 
 use crate::math::probability::{Probability, Probable};
 
-/// Value that can be produced by rolling two D6's
-/// `DiceRoll \in [2..12]` (11 possible states)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct DiceRoll(u8);
+/// Const-instantiates a [`crate::math::dice::DiceRoll`] from a const `u8` expression.
+///
+/// Invalid values fail at compile time.
+///
+/// ```ignore
+/// let roll = dice_roll!(7);
+/// let roll = dice_roll!(7u8);
+/// // let bad = dice_roll!(13); // compile-time error
+/// ```
+#[macro_export]
+macro_rules! dice_roll {
+    ($value:expr $(,)?) => {
+        const {
+            match $crate::math::dice::DiceRoll::new($value) {
+                Some(roll) => roll,
+                None => panic!("invalid DiceRoll value: expected value in 2..=12"),
+            }
+        }
+    };
+}
 
-pub type DiceVal = DiceRoll;
+/// Const-instantiates a [`crate::math::dice::DiceOutcome`] from a const `u8` expression.
+///
+/// Values in `2..=12` are valid. `7` becomes [`crate::math::dice::DiceOutcome::Seven`],
+/// and every other valid value becomes [`crate::math::dice::DiceOutcome::Harvest`].
+/// Invalid values fail at compile time.
+///
+/// ```ignore
+/// let outcome = dice_outcome!(8);
+/// let seven = dice_outcome!(7u8);
+/// // let bad = dice_outcome!(1); // compile-time error
+/// ```
+#[macro_export]
+macro_rules! dice_outcome {
+    ($value:expr $(,)?) => {
+        const {
+            match $crate::math::dice::DiceOutcome::new($value) {
+                Some(outcome) => outcome,
+                None => panic!("invalid DiceOutcome value: expected value in 2..=12, excluding 7"),
+            }
+        }
+    };
+}
+/// Value that can be produced by rolling two D6's.
+///
+/// Invariant: `DiceRoll \in [2..=12]`.
+///
+/// Internally this is backed by [`NonZeroU8`], so `Option<DiceRoll>` has the
+/// same size as `DiceRoll`/`u8`.
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DiceRoll(NonZeroU8);
 
 /// Number that can be assigned to a harvestable tile.
-/// `TileNum \in [2..12] \ {7}`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct TileNum(u8);
+///
+/// Invariant: `TileNum \in [2..=12] \ {7}`.
+///
+/// This is also backed by [`NonZeroU8`] for consistency with [`DiceRoll`].
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TileNum(NonZeroU8);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Resolved outcome of a dice roll.
+///
+/// This is a real enum so callers can match directly on
+/// `DiceOutcome::Harvest(num)` and `DiceOutcome::Seven`.
+///
+/// Because `TileNum` is backed by [`NonZeroU8`], the compiler can use `0` as
+/// the internal niche for the `Seven` variant, so `DiceOutcome` itself remains
+/// compact. The tradeoff is that `Option<DiceOutcome>` generally needs an extra
+/// discriminant, unlike the previous transparent-wrapper representation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub enum DiceOutcome {
     Harvest(TileNum),
+    #[default]
     Seven,
 }
 
@@ -34,114 +96,68 @@ pub enum TileNumError {
 impl DiceRoll {
     pub const MIN_VALUE: u8 = 2;
     pub const MAX_VALUE: u8 = 12;
-    pub const SEVEN_VALUE: u8 = 7;
-    pub const D6_SIDES: u8 = 6;
-    pub const PROBABILITY_DENOMINATOR: f32 = 36.0;
-    pub const ALL: [DiceRoll; 11] = [
-        Self(2),
-        Self(3),
-        Self(4),
-        Self(5),
-        Self(6),
-        Self(7),
-        Self(8),
-        Self(9),
-        Self(10),
-        Self(11),
-        Self(12),
-    ];
+    pub const COUNT: usize = (Self::MAX_VALUE - Self::MIN_VALUE + 1) as usize;
+    pub const ALL: [DiceRoll; 11] = Self::all();
 
-    /// # Safety
-    /// `val` should be in `2..=12`.
-    pub const unsafe fn new_unchecked(val: u8) -> Self {
-        Self(val)
+    const fn all() -> [DiceRoll; Self::COUNT] {
+        let mut result = [dice_roll!(2); Self::COUNT];
+
+        let mut i = 0;
+        while i < Self::COUNT {
+            result[i] = Self::new(Self::MIN_VALUE + i as u8)
+                .expect("invalid DiceRoll value while constructing DiceRoll::ALL");
+
+            i += 1;
+        }
+
+        result
     }
 
-    pub fn new(value: u8) -> Option<Self> {
-        if (Self::MIN_VALUE..=Self::MAX_VALUE).contains(&value) {
-            Some(Self(value))
+    const fn is_valid_dice_roll(value: u8) -> bool {
+        value >= Self::MIN_VALUE && value <= Self::MAX_VALUE
+    }
+
+    /// Creates a [`DiceRoll`] without checking the range invariant.
+    ///
+    /// # Safety
+    ///
+    /// `val` must be in `2..=12`.
+    pub const unsafe fn new_unchecked(value: u8) -> Self {
+        debug_assert!(Self::is_valid_dice_roll(value));
+
+        // SAFETY: upheld by the caller. Every valid dice roll is non-zero.
+        Self(unsafe { NonZeroU8::new_unchecked(value) })
+    }
+
+    pub const fn new(value: u8) -> Option<Self> {
+        if Self::is_valid_dice_roll(value) {
+            // SAFETY: checked above.
+            Some(unsafe { Self::new_unchecked(value) })
         } else {
             None
         }
     }
 
-    pub fn two() -> Self {
-        Self::new(2).expect("2 is a valid dice value")
+    pub const fn from_tile(tile: TileNum) -> Self {
+        // # Safety: TileNum is a subset of DiceRoll
+        unsafe { Self::new_unchecked(tile.get()) }
     }
 
-    pub fn three() -> Self {
-        Self::new(3).expect("3 is a valid dice value")
-    }
-
-    pub fn four() -> Self {
-        Self::new(4).expect("4 is a valid dice value")
-    }
-
-    pub fn five() -> Self {
-        Self::new(5).expect("5 is a valid dice value")
-    }
-
-    pub fn six() -> Self {
-        Self::new(6).expect("6 is a valid dice value")
-    }
-
-    pub fn seven() -> Self {
-        Self::new(7).expect("7 is a valid dice value")
-    }
-
-    pub fn eight() -> Self {
-        Self::new(8).expect("8 is a valid dice value")
-    }
-
-    pub fn nine() -> Self {
-        Self::new(9).expect("9 is a valid dice value")
-    }
-
-    pub fn ten() -> Self {
-        Self::new(10).expect("10 is a valid dice value")
-    }
-
-    pub fn eleven() -> Self {
-        Self::new(11).expect("11 is a valid dice value")
-    }
-
-    pub fn twelve() -> Self {
-        Self::new(12).expect("12 is a valid dice value")
-    }
-
-    pub fn max() -> Self {
-        Self::twelve()
-    }
-
-    pub fn min() -> Self {
-        Self::two()
-    }
-
-    pub fn list() -> impl Iterator<Item = DiceVal> {
+    pub fn iter() -> impl Iterator<Item = DiceRoll> {
         Self::ALL.into_iter()
     }
 
-    pub fn prob_pts(&self) -> u8 {
-        Self::D6_SIDES - i32::abs(self.0 as i32 - Self::SEVEN_VALUE as i32) as u8
+    pub const fn get(self) -> u8 {
+        self.0.get()
     }
 
-    pub fn resolve(self) -> DiceOutcome {
-        match self.as_u8() {
-            Self::SEVEN_VALUE => DiceOutcome::Seven,
-            other => DiceOutcome::Harvest(
-                TileNum::try_from(other).expect("non-seven dice roll should be a tile number"),
-            ),
-        }
+    pub const fn prob_pts(&self) -> u8 {
+        let delta = self.get() as i32 - 7;
+        6 - delta.unsigned_abs() as u8
     }
 
-    pub const fn as_u8(self) -> u8 {
-        self.0
-    }
-}
-
-impl Default for DiceRoll {
-    fn default() -> Self {
-        Self::seven()
+    pub const fn resolve(self) -> DiceOutcome {
+        DiceOutcome::from_dice_roll(self)
     }
 }
 
@@ -150,7 +166,7 @@ impl Serialize for DiceRoll {
     where
         S: Serializer,
     {
-        serializer.serialize_u8(self.0)
+        serializer.serialize_u8(self.get())
     }
 }
 
@@ -166,24 +182,23 @@ impl<'de> Deserialize<'de> for DiceRoll {
 
 impl Probable for DiceRoll {
     fn prob(&self) -> Probability {
-        let prob = self.prob_pts() as f32 / Self::PROBABILITY_DENOMINATOR;
+        const D6_SIDES: u32 = 6;
+        let prob = self.prob_pts() as f32 / (D6_SIDES * D6_SIDES) as f32;
         prob.try_into().expect("check math")
     }
 }
 
 impl TryFrom<u8> for DiceRoll {
     type Error = DiceRollError;
+
     fn try_from(value: u8) -> Result<Self, Self::Error> {
-        match Self::new(value) {
-            Some(x) => Ok(x),
-            None => Err(DiceRollError::OutOfRange),
-        }
+        Self::new(value).ok_or(DiceRollError::OutOfRange)
     }
 }
 
 impl From<DiceRoll> for u8 {
     fn from(value: DiceRoll) -> u8 {
-        value.0
+        value.get()
     }
 }
 
@@ -194,33 +209,41 @@ impl std::fmt::Display for DiceRollError {
 }
 
 impl TileNum {
-    pub const ALL: [TileNum; 10] = [
-        Self(2),
-        Self(3),
-        Self(4),
-        Self(5),
-        Self(6),
-        Self(8),
-        Self(9),
-        Self(10),
-        Self(11),
-        Self(12),
-    ];
+    /// Creates a [`TileNum`] without checking the range invariant.
+    ///
+    /// # Safety
+    ///
+    /// `val` must be in `2..=12` and must not be `7`.
+    pub const unsafe fn new_unchecked(val: u8) -> Self {
+        // SAFETY: upheld by the caller. Every valid tile number is non-zero.
+        Self(unsafe { NonZeroU8::new_unchecked(val) })
+    }
 
-    pub fn new(value: u8) -> Option<Self> {
-        Self::try_from(value).ok()
+    pub const fn new(value: u8) -> Option<Self> {
+        match DiceRoll::new(value) {
+            Some(roll) => Self::from_dice_roll(roll),
+            _ => None,
+        }
+    }
+
+    pub const fn from_dice_roll(roll: DiceRoll) -> Option<Self> {
+        match roll.get() {
+            7 => None,
+            // SAFETY: upheld by the caller. Every valid tile number is non-zero.
+            value => unsafe { Some(Self::new_unchecked(value)) },
+        }
     }
 
     pub fn iter() -> impl Iterator<Item = TileNum> {
-        Self::ALL.into_iter()
+        DiceRoll::iter().flat_map(Self::from_dice_roll)
     }
 
-    pub const fn as_u8(self) -> u8 {
-        self.0
+    pub const fn get(self) -> u8 {
+        self.0.get()
     }
 
-    pub fn prob_pts(&self) -> u8 {
-        DiceRoll::from(*self).prob_pts()
+    pub const fn as_roll(self) -> DiceRoll {
+        DiceRoll::from_tile(self)
     }
 }
 
@@ -228,23 +251,37 @@ impl TryFrom<u8> for TileNum {
     type Error = TileNumError;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
-        match value {
-            DiceRoll::SEVEN_VALUE => Err(TileNumError::Seven),
-            DiceRoll::MIN_VALUE..=DiceRoll::MAX_VALUE => Ok(Self(value)),
-            _ => Err(TileNumError::OutOfRange),
+        match DiceRoll::try_from(value) {
+            Ok(roll) => Self::try_from(roll),
+            Err(_) => Err(TileNumError::OutOfRange),
+        }
+    }
+}
+
+impl TryFrom<DiceRoll> for TileNum {
+    type Error = TileNumError;
+
+    fn try_from(value: DiceRoll) -> Result<Self, Self::Error> {
+        match value.get() {
+            7 => Err(TileNumError::Seven),
+            value => {
+                // SAFETY: values of diceroll are enforced, and
+                // the previous arm excluded 7.
+                Ok(unsafe { Self::new_unchecked(value) })
+            }
         }
     }
 }
 
 impl From<TileNum> for u8 {
     fn from(value: TileNum) -> Self {
-        value.0
+        value.get()
     }
 }
 
 impl From<TileNum> for DiceRoll {
     fn from(value: TileNum) -> Self {
-        Self(value.0)
+        Self::from_tile(value)
     }
 }
 
@@ -253,7 +290,7 @@ impl Serialize for TileNum {
     where
         S: Serializer,
     {
-        serializer.serialize_u8(self.0)
+        serializer.serialize_u8(self.get())
     }
 }
 
@@ -273,21 +310,119 @@ impl std::fmt::Display for TileNumError {
     }
 }
 
+impl DiceOutcome {
+    pub const fn new(value: u8) -> Option<Self> {
+        match DiceRoll::new(value) {
+            Some(roll) => Some(Self::from_dice_roll(roll)),
+            None => None,
+        }
+    }
+
+    pub const fn from_dice_roll(roll: DiceRoll) -> Self {
+        match roll.get() {
+            7 => Self::Seven,
+            value => {
+                // SAFETY: `roll` is valid and this branch excludes 7, so this
+                // value is a valid TileNum.
+                Self::Harvest(unsafe { TileNum::new_unchecked(value) })
+            }
+        }
+    }
+
+    pub const fn harvest(tile_num: TileNum) -> Self {
+        Self::Harvest(tile_num)
+    }
+
+    pub const fn seven() -> Self {
+        Self::Seven
+    }
+
+    pub const fn as_roll(self) -> DiceRoll {
+        match self {
+            Self::Harvest(tile_num) => {
+                // SAFETY: every valid TileNum is also a valid DiceRoll.
+                unsafe { DiceRoll::new_unchecked(tile_num.get()) }
+            }
+            Self::Seven => dice_roll!(7),
+        }
+    }
+
+    pub const fn as_u8(self) -> u8 {
+        self.as_roll().get()
+    }
+
+    pub const fn is_seven(self) -> bool {
+        matches!(self, Self::Seven)
+    }
+
+    pub const fn tile_num(self) -> Option<TileNum> {
+        match self {
+            Self::Harvest(tile_num) => Some(tile_num),
+            Self::Seven => None,
+        }
+    }
+}
+
+impl From<DiceRoll> for DiceOutcome {
+    fn from(value: DiceRoll) -> Self {
+        Self::from_dice_roll(value)
+    }
+}
+
+impl From<TileNum> for DiceOutcome {
+    fn from(value: TileNum) -> Self {
+        Self::harvest(value)
+    }
+}
+
+impl From<DiceOutcome> for DiceRoll {
+    fn from(value: DiceOutcome) -> Self {
+        value.as_roll()
+    }
+}
+
+impl From<DiceOutcome> for u8 {
+    fn from(value: DiceOutcome) -> Self {
+        value.as_u8()
+    }
+}
+
+impl Serialize for DiceOutcome {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_u8(self.as_u8())
+    }
+}
+
+impl<'de> Deserialize<'de> for DiceOutcome {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = u8::deserialize(deserializer)?;
+        DiceRoll::try_from(value)
+            .map(Self::from_dice_roll)
+            .map_err(D::Error::custom)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::math::probability::{Sequence, Variant};
+    use std::mem::size_of;
 
     #[test]
     fn dice_roll_resolves_seven_separately_from_harvest_numbers() {
-        assert_eq!(DiceRoll::seven().resolve(), DiceOutcome::Seven);
+        assert_eq!(dice_roll!(7).resolve(), DiceOutcome::Seven);
 
         for value in [2, 3, 4, 5, 6, 8, 9, 10, 11, 12] {
             let roll = DiceRoll::try_from(value).unwrap();
-            assert_eq!(
-                roll.resolve(),
-                DiceOutcome::Harvest(TileNum::try_from(value).unwrap())
-            );
+            let tile = TileNum::try_from(value).unwrap();
+
+            assert_eq!(roll.resolve(), DiceOutcome::Harvest(tile));
         }
     }
 
@@ -303,13 +438,29 @@ mod tests {
     }
 
     #[test]
+    fn nonzero_layout_advantage_is_preserved() {
+        assert_eq!(size_of::<DiceRoll>(), 1);
+        assert_eq!(size_of::<Option<DiceRoll>>(), 1);
+
+        assert_eq!(size_of::<TileNum>(), 1);
+        assert_eq!(size_of::<Option<TileNum>>(), 1);
+
+        assert_eq!(size_of::<DiceOutcome>(), 1);
+        // Direct enum matching costs us the transparent-wrapper niche for
+        // Option<DiceOutcome>. DiceOutcome itself is still compact.
+    }
+
+    #[test]
     fn complete_workflow() {
         // Create some dice values
-        let low_values = vec![DiceVal::try_from(2).unwrap(), DiceVal::try_from(3).unwrap()];
+        let low_values = vec![
+            DiceRoll::try_from(2).unwrap(),
+            DiceRoll::try_from(3).unwrap(),
+        ];
 
         let high_values = vec![
-            DiceVal::try_from(11).unwrap(),
-            DiceVal::try_from(12).unwrap(),
+            DiceRoll::try_from(11).unwrap(),
+            DiceRoll::try_from(12).unwrap(),
         ];
 
         // Create variants

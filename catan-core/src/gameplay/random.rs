@@ -137,9 +137,13 @@ impl Default for GameRandomBuilder {
 #[derive(Debug, Default)]
 pub struct TwoD6Dice;
 
+impl TwoD6Dice {
+    const D6_SIDES: u8 = 6;
+}
+
 impl DiceProvider for TwoD6Dice {
     fn roll(&mut self, rng: &mut dyn Rng) -> DiceRoll {
-        (rng.random_range(1..=DiceRoll::D6_SIDES) + rng.random_range(1..=DiceRoll::D6_SIDES))
+        (rng.random_range(1..=Self::D6_SIDES) + rng.random_range(1..=Self::D6_SIDES))
             .try_into()
             .expect("two d6 rolls should always produce a valid dice roll")
     }
@@ -259,12 +263,12 @@ fn resource_at_offset(resources: &ResourceSet, offset: u16) -> Option<Resource> 
 mod tests {
     use super::*;
     use crate::{
+        dice_roll,
         gameplay::primitives::{
             bank::Bank,
             dev_card::{DevCardKind, UsableDevCard},
             resource::{Resource, ResourceSet},
         },
-        math::dice::DiceRoll,
     };
     use rand::{SeedableRng, rngs::SmallRng};
 
@@ -320,11 +324,11 @@ mod tests {
     #[test]
     fn builder_accepts_fixed_dice_provider() {
         let mut random = GameRandomBuilder::from_rng(SmallRng::seed_from_u64(1))
-            .dice(FixedDice::new(DiceRoll::six()))
+            .dice(FixedDice::new(dice_roll!(6)))
             .build();
 
         for _ in 0..10 {
-            assert_eq!(random.roll_dice(), DiceRoll::six());
+            assert_eq!(random.roll_dice(), dice_roll!(6));
         }
     }
 

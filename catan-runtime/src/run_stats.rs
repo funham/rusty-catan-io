@@ -117,23 +117,23 @@ impl RunStatsCollector {
 
 #[cfg(test)]
 mod tests {
-    use catan_core::gameplay::{
-        game::{
-            decision::{DecisionId, DecisionKind, DecisionLifetime, OpenDecision},
-            event::{EventTransaction, GameEvent},
-            input::DecisionToken,
-            output::CommandRejectionReason,
-            run::GameResult,
-        },
-        primitives::{
-            build::{Build, Road},
-            player::PlayerId,
-            resource::ResourceSet,
-        },
-    };
+    use catan_core::topology::{Hex, Path};
     use catan_core::{
-        math::dice::DiceRoll,
-        topology::{Hex, Path},
+        dice_roll,
+        gameplay::{
+            game::{
+                decision::{DecisionId, DecisionKind, DecisionLifetime, OpenDecision},
+                event::{EventTransaction, GameEvent},
+                input::DecisionToken,
+                output::CommandRejectionReason,
+                run::GameResult,
+            },
+            primitives::{
+                build::{Build, Road},
+                player::PlayerId,
+                resource::ResourceSet,
+            },
+        },
     };
 
     use super::*;
@@ -163,7 +163,7 @@ mod tests {
         tx.events.push(GameEvent::DevCardBought { player_id: P0 });
         tx.events.push(GameEvent::DiceRolled {
             player_id: P0,
-            value: DiceRoll::eight(),
+            value: dice_roll!(8),
         });
         let mut by_player = catan_core::gameplay::game::event::ResourceDistribution::new();
         by_player.push((P0, ResourceSet::EMPTY));

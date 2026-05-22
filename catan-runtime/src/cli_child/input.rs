@@ -205,21 +205,19 @@ pub(crate) fn read_trade_response_action(
     model: &UiModel,
     session_id: TradeSessionId,
 ) -> io::Result<TradeResponseCommand> {
-    loop {
-        match ui.select_trade_response_action(model, session_id)? {
-            Some(super::tui::TradeResponseMenuAction::Accept(offer_id)) => {
-                return Ok(TradeResponseCommand::Accept { offer_id });
-            }
-            Some(super::tui::TradeResponseMenuAction::Reject) | None => {
-                return Ok(TradeResponseCommand::Reject);
-            }
-            Some(super::tui::TradeResponseMenuAction::Counter) => {
-                let give = read_resource_collection(ui, model, "counter give counts: ")?;
-                let take = read_resource_collection(ui, model, "counter take counts: ")?;
-                return Ok(TradeResponseCommand::Counter {
-                    offer: PlayerTrade { give, take },
-                });
-            }
+    match ui.select_trade_response_action(model, session_id)? {
+        Some(super::tui::TradeResponseMenuAction::Accept(offer_id)) => {
+            Ok(TradeResponseCommand::Accept { offer_id })
+        }
+        Some(super::tui::TradeResponseMenuAction::Reject) | None => {
+            Ok(TradeResponseCommand::Reject)
+        }
+        Some(super::tui::TradeResponseMenuAction::Counter) => {
+            let give = read_resource_collection(ui, model, "counter give counts: ")?;
+            let take = read_resource_collection(ui, model, "counter take counts: ")?;
+            Ok(TradeResponseCommand::Counter {
+                offer: PlayerTrade { give, take },
+            })
         }
     }
 }

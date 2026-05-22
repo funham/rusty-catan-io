@@ -132,7 +132,7 @@ pub(crate) fn meaningful_event_line(event: &GameEvent) -> Option<String> {
             resource_set_label(resources)
         ),
         GameEvent::DiceRolled { player_id, value } => {
-            format!("p{player_id} rolled {}", value.as_u8())
+            format!("p{player_id} rolled {}", value.get())
         }
         GameEvent::ResourcesDistributed { by_player } => {
             let grants = by_player
@@ -337,6 +337,7 @@ fn path_label(path: catan_core::topology::Path) -> String {
 #[cfg(test)]
 mod tests {
     use catan_core::{
+        dice_roll,
         gameplay::{
             game::{
                 decision::{DecisionId, DecisionKind, DecisionLifetime, OpenDecision},
@@ -344,7 +345,6 @@ mod tests {
             },
             primitives::{dev_card::UsableDevCard, player::PlayerId},
         },
-        math::dice::DiceRoll,
     };
 
     use crate::cli_child::journal::JournalEntry;
@@ -358,7 +358,7 @@ mod tests {
     fn journal_formats_meaningful_player_events() {
         let dice = GameEvent::DiceRolled {
             player_id: P1,
-            value: DiceRoll::seven(),
+            value: dice_roll!(7),
         };
         let bought = GameEvent::DevCardBought { player_id: P0 };
         let used = GameEvent::DevCardUsed {
@@ -444,12 +444,12 @@ mod tests {
         let mut journal = EventJournal::new(8);
         journal.push_event(&GameEvent::DiceRolled {
             player_id: P0,
-            value: DiceRoll::seven(),
+            value: dice_roll!(7),
         });
         journal.push_event(&GameEvent::DevCardBought { player_id: P0 });
         journal.push_event(&GameEvent::DiceRolled {
             player_id: P1,
-            value: DiceRoll::eight(),
+            value: dice_roll!(8),
         });
 
         let entries = journal.entries().collect::<Vec<_>>();

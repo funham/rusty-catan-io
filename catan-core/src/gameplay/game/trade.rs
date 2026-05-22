@@ -25,7 +25,7 @@ pub struct TradeOffer {
     pub trade: PlayerTrade,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TradeResponseState {
     Waiting,
     Accepted { offer_id: TradeOfferId },

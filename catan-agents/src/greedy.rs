@@ -231,8 +231,8 @@ pub fn most_occupied_producing_tile(context: PlayerDecisionContext<'_>) -> Hex {
                     .filter(|&id| id != context.actor)
                     .count(),
                 match context.public.board.arrangement[hex] {
-                    Tile::Resource { number, .. } => number.prob_pts(),
-                    Tile::River { number } => number.prob_pts() + 3, /* some random *magic* */
+                    Tile::Resource { number, .. } => number.as_roll().prob_pts(),
+                    Tile::River { number } => number.as_roll().prob_pts() + 3, /* some random *magic* */
                     Tile::Desert => 0,
                 },
             );
@@ -698,8 +698,8 @@ fn move_robber_score(
 
 fn robber_hex_score(context: &PlayerDecisionContext<'_>, hex: Hex) -> (usize, u16) {
     let tile_score = match context.public.board.arrangement[hex] {
-        Tile::Resource { number, .. } => u16::from(number.prob_pts()),
-        Tile::River { number } => u16::from(number.prob_pts()) + 3,
+        Tile::Resource { number, .. } => u16::from(number.as_roll().prob_pts()),
+        Tile::River { number } => u16::from(number.as_roll().prob_pts()) + 3,
         Tile::Desert => 0,
     };
     let mut opponent_count = 0;
@@ -771,7 +771,9 @@ fn intersection_resource_scores(
         .into_iter()
         .filter(|hex| hex.norm() <= board.arrangement.radius() as usize)
         .filter_map(|hex| match board.arrangement[hex] {
-            Tile::Resource { resource, number } => Some((resource, number.prob_pts() as u16)),
+            Tile::Resource { resource, number } => {
+                Some((resource, number.as_roll().prob_pts() as u16))
+            }
             Tile::River { .. } | Tile::Desert => None,
         })
         .collect()
