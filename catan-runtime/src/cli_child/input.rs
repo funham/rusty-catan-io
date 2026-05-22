@@ -14,14 +14,14 @@ use catan_core::{
     gameplay::game::command::{InitCommand, PostDiceCommand, RegularCommand},
     gameplay::game::{
         input::{TradeCommand, TradeResponseCommand},
-        trade::{TradeOfferId, TradeScope, TradeSessionId},
+        trade::TradeSessionId,
     },
     gameplay::primitives::{
         build::{Build, EstablishmentType, Road},
         dev_card::{DevCardUsage, UsableDevCard},
         player::PlayerId,
         resource::ResourceSet,
-        trade::{PersonalTradeOffer, PlayerTrade, PublicTradeOffer},
+        trade::PlayerTrade,
     },
     topology::{Hex, Intersection},
 };
@@ -183,21 +183,8 @@ fn handle_regular_command(
             })
         }
         CliCommand::InteractivePlayerTrade => select_interactive_player_trade(ui, envelope),
-        CliCommand::PlayerTradeProposal { scope, offer } => {
-            let action = match scope {
-                TradeScope::Public => RegularCommand::OfferPublicTrade(PublicTradeOffer {
-                    give: offer.give,
-                    take: offer.take,
-                }),
-                TradeScope::Targeted(peer_id) => {
-                    RegularCommand::OfferPersonalTrade(PersonalTradeOffer {
-                        give: offer.give,
-                        take: offer.take,
-                        peer_id,
-                    })
-                }
-            };
-            Ok(CommandOutcome::Accepted(action))
+        CliCommand::PlayerTradeProposal { offer } => {
+            Ok(CommandOutcome::Accepted(RegularCommand::OfferTrade(offer)))
         }
         CliCommand::RollDice | CliCommand::DevCard(_) => Ok(CommandOutcome::NotMatched),
     }
@@ -207,53 +194,10 @@ fn select_interactive_player_trade(
     ui: &mut CliUi,
     envelope: &DecisionRequestEnvelope,
 ) -> io::Result<CommandOutcome<RegularCommand>> {
-    let Some(scope) = read_trade_scope(ui, &envelope.view)? else {
-        return Ok(CommandOutcome::Handled);
-    };
-    let give = read_resource_collection(ui, &envelope.view, "trade give counts: ")?;
-    let take = read_resource_collection(ui, &envelope.view, "trade take counts: ")?;
-    let action = match scope {
-        TradeScope::Public => RegularCommand::OfferPublicTrade(PublicTradeOffer { give, take }),
-        TradeScope::Targeted(peer_id) => RegularCommand::OfferPersonalTrade(PersonalTradeOffer {
-            give,
-            take,
-            peer_id,
-        }),
-    };
-    Ok(CommandOutcome::Accepted(action))
-}
-
-fn read_trade_scope(ui: &mut CliUi, model: &UiModel) -> io::Result<Option<TradeScope>> {
-    loop {
-        let line = ui.prompt(model, "trade peer [public/pN/select]: ")?;
-        match line.as_str() {
-            "public" | "open" | "all" => return Ok(Some(TradeScope::Public)),
-            "select" | "s" => {
-                let candidates = trade_peer_candidates(model);
-                return Ok(ui
-                    .select_player(model, &candidates, "trade peer: ")?
-                    .map(TradeScope::Targeted));
-            }
-            _ => {
-                if let Some(raw) = line.strip_prefix('p')
-                    && let Ok(peer_id) = raw.parse::<PlayerId>()
-                {
-                    return Ok(Some(TradeScope::Targeted(peer_id)));
-                }
-                ui.set_message("expected public, pN, or select".to_owned())?;
-            }
-        }
-    }
-}
-
-fn trade_peer_candidates(model: &UiModel) -> Vec<PlayerId> {
-    model
-        .public
-        .players
-        .iter()
-        .map(|player| player.player_id)
-        .filter(|player_id| Some(*player_id) != model.actor)
-        .collect()
+    Ok(match ui.select_player_trade_offer(&envelope.view)? {
+        Some(offer) => CommandOutcome::Accepted(RegularCommand::OfferTrade(offer)),
+        None => CommandOutcome::Handled,
+    })
 }
 
 pub(crate) fn read_trade_response_action(
@@ -262,25 +206,20 @@ pub(crate) fn read_trade_response_action(
     session_id: TradeSessionId,
 ) -> io::Result<TradeResponseCommand> {
     loop {
-        let line = ui.prompt(model, "trade [accept <id>|reject|counter]: ")?;
-        let parts = line.split_whitespace().collect::<Vec<_>>();
-        match parts.as_slice() {
-            ["a" | "accept", offer_id] => match parse_offer_id(offer_id) {
-                Some(offer_id) => return Ok(TradeResponseCommand::Accept { offer_id }),
-                None => ui.set_message("expected unsigned offer id".to_owned())?,
-            },
-            ["r" | "reject" | "decline"] | [] => return Ok(TradeResponseCommand::Reject),
-            ["c" | "counter"] => {
+        match ui.select_trade_response_action(model, session_id)? {
+            Some(super::tui::TradeResponseMenuAction::Accept(offer_id)) => {
+                return Ok(TradeResponseCommand::Accept { offer_id });
+            }
+            Some(super::tui::TradeResponseMenuAction::Reject) | None => {
+                return Ok(TradeResponseCommand::Reject);
+            }
+            Some(super::tui::TradeResponseMenuAction::Counter) => {
                 let give = read_resource_collection(ui, model, "counter give counts: ")?;
                 let take = read_resource_collection(ui, model, "counter take counts: ")?;
                 return Ok(TradeResponseCommand::Counter {
                     offer: PlayerTrade { give, take },
                 });
             }
-            _ => ui.set_message(format!(
-                "trade session {}: expected accept <id>, reject, or counter",
-                session_id.0
-            ))?,
         }
     }
 }
@@ -290,25 +229,9 @@ pub(crate) fn read_trade_owner_action(
     model: &UiModel,
     session_id: TradeSessionId,
 ) -> io::Result<TradeCommand> {
-    loop {
-        let line = ui.prompt(model, "trade owner [commit <id>|cancel]: ")?;
-        let parts = line.split_whitespace().collect::<Vec<_>>();
-        match parts.as_slice() {
-            ["c" | "commit", offer_id] => match parse_offer_id(offer_id) {
-                Some(offer_id) => return Ok(TradeCommand::Commit { offer_id }),
-                None => ui.set_message("expected unsigned offer id".to_owned())?,
-            },
-            ["x" | "cancel"] | [] => return Ok(TradeCommand::Cancel),
-            _ => ui.set_message(format!(
-                "trade session {}: expected commit <id> or cancel",
-                session_id.0
-            ))?,
-        }
-    }
-}
-
-fn parse_offer_id(token: &str) -> Option<TradeOfferId> {
-    token.parse::<u64>().ok().map(TradeOfferId)
+    Ok(ui
+        .select_trade_owner_action(model, session_id)?
+        .unwrap_or(TradeCommand::Cancel))
 }
 
 fn select_interactive_build(
@@ -656,8 +579,7 @@ fn command_label(command: CliCommand) -> &'static str {
         | CliCommand::InteractiveBankTrade => "bank-trade",
         CliCommand::InteractivePlayerTrade
         | CliCommand::PlayerTradeProposal { .. }
-        | CliCommand::Regular(RegularCommand::OfferPublicTrade(_))
-        | CliCommand::Regular(RegularCommand::OfferPersonalTrade(_)) => "player-trade",
+        | CliCommand::Regular(RegularCommand::OfferTrade(_)) => "player-trade",
         CliCommand::Regular(RegularCommand::UseDevCard(_)) | CliCommand::DevCard(_) => "dev-card",
     }
 }

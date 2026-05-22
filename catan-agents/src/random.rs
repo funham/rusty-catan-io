@@ -8,12 +8,12 @@ use catan_core::{
             },
             decision::DecisionKind,
             input::{DecisionRequest, PlayerCommand, TradeCommand, TradeResponseCommand},
-            trade::{TradeScope, TradeSessionId},
+            trade::TradeSessionId,
             view::PlayerDecisionContext,
         },
         primitives::{
             dev_card::{DevCardUsage, UsableDevCard},
-            player::PlayerId,
+            player::{PlayerId, player_ids},
             resource::{Resource, ResourceSet},
             trade::{BankTrade, BankTradeKind},
         },
@@ -30,7 +30,7 @@ use rand::{
 pub struct RandomAgent<R = SmallRng> {
     id: PlayerId,
     rng: R,
-    attempted_trades: Vec<(PlayerId, ResourceSet, ResourceSet)>,
+    attempted_trades: Vec<(ResourceSet, ResourceSet)>,
 }
 
 impl Default for RandomAgent {
@@ -204,7 +204,7 @@ pub fn rand_regular_action(
 fn rand_regular_action_with_trades(
     context: PlayerDecisionContext<'_>,
     rng: &mut impl Rng,
-    attempted_trades: &mut Vec<(PlayerId, ResourceSet, ResourceSet)>,
+    attempted_trades: &mut Vec<(ResourceSet, ResourceSet)>,
 ) -> RegularCommand {
     let categories = [
         RandomRegularCommandCategory::EndMove,
@@ -272,7 +272,7 @@ fn rand_regular_action_in_category(
     context: &PlayerDecisionContext<'_>,
     category: RandomRegularCommandCategory,
     rng: &mut impl Rng,
-    attempted_trades: &mut Vec<(PlayerId, ResourceSet, ResourceSet)>,
+    attempted_trades: &mut Vec<(ResourceSet, ResourceSet)>,
 ) -> Option<RegularCommand> {
     match category {
         RandomRegularCommandCategory::EndMove => Some(RegularCommand::EndMove),
@@ -306,32 +306,25 @@ fn rand_regular_action_in_category(
 fn rand_player_trade(
     context: &PlayerDecisionContext<'_>,
     rng: &mut impl Rng,
-    attempted_trades: &mut Vec<(PlayerId, ResourceSet, ResourceSet)>,
+    attempted_trades: &mut Vec<(ResourceSet, ResourceSet)>,
 ) -> Option<RegularCommand> {
     let candidates = trade::one_card_trade_candidates(context)
         .into_iter()
-        .filter_map(|(scope, offer)| {
-            let TradeScope::Targeted(peer_id) = scope else {
-                return None;
-            };
-            if attempted_trades.contains(&(peer_id, offer.give, offer.take)) {
-                return None;
+        .filter(|offer| {
+            if attempted_trades.contains(&(offer.give, offer.take)) {
+                return false;
             }
-            if !trade::exact_resources(context, peer_id)?.has_enough(&offer.take) {
-                return None;
-            }
-            Some((peer_id, offer))
+            player_ids(context.public.players.len())
+                .filter(|peer| *peer != context.actor)
+                .any(|peer| {
+                    trade::exact_resources(context, peer)
+                        .is_some_and(|resources| resources.has_enough(&offer.take))
+                })
         })
         .collect::<Vec<_>>();
-    let (peer_id, offer) = candidates.choose(rng).cloned()?;
-    attempted_trades.push((peer_id, offer.give, offer.take));
-    Some(RegularCommand::OfferPersonalTrade(
-        catan_core::gameplay::primitives::trade::PersonalTradeOffer {
-            give: offer.give,
-            take: offer.take,
-            peer_id,
-        },
-    ))
+    let offer = candidates.choose(rng).copied()?;
+    attempted_trades.push((offer.give, offer.take));
+    Some(RegularCommand::OfferTrade(offer))
 }
 
 pub fn rand_trade_response(
@@ -345,7 +338,7 @@ pub fn rand_trade_response(
     let funded = session
         .offers
         .iter()
-        .filter(|offer| offer.peer.is_none() || offer.peer == Some(context.actor))
+        .filter(|offer| offer.proposer == session.proposer)
         .filter(|offer| trade::offer_is_funded(&context, session, offer.id, context.actor))
         .map(|offer| offer.id)
         .collect::<Vec<_>>();

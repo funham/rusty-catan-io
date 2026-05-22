@@ -209,25 +209,9 @@ impl TerminalUi {
         match parse_cli_command(line).ok().flatten() {
             None => Some(RegularCommand::EndMove),
             Some(CliCommand::Regular(action)) => Some(action),
-            Some(CliCommand::PlayerTradeProposal { scope, offer }) => match scope {
-                catan_core::gameplay::game::trade::TradeScope::Public => {
-                    Some(RegularCommand::OfferPublicTrade(
-                        catan_core::gameplay::primitives::trade::PublicTradeOffer {
-                            give: offer.give,
-                            take: offer.take,
-                        },
-                    ))
-                }
-                catan_core::gameplay::game::trade::TradeScope::Targeted(peer_id) => {
-                    Some(RegularCommand::OfferPersonalTrade(
-                        catan_core::gameplay::primitives::trade::PersonalTradeOffer {
-                            give: offer.give,
-                            take: offer.take,
-                            peer_id,
-                        },
-                    ))
-                }
-            },
+            Some(CliCommand::PlayerTradeProposal { offer }) => {
+                Some(RegularCommand::OfferTrade(offer))
+            }
             _ => None,
         }
     }

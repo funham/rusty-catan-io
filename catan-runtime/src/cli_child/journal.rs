@@ -3,11 +3,7 @@
 use std::collections::VecDeque;
 
 use catan_core::gameplay::{
-    game::{
-        event::GameEvent,
-        run::GameResult,
-        trade::{TradeResponseState, TradeScope},
-    },
+    game::{event::GameEvent, run::GameResult, trade::TradeResponseState},
     primitives::{
         PlayerId,
         build::{Build, EstablishmentType},
@@ -168,13 +164,9 @@ pub(crate) fn meaningful_event_line(event: &GameEvent) -> Option<String> {
             )
         }
         GameEvent::TradeOpened {
-            proposer_id,
-            scope,
-            offer,
-            ..
+            proposer_id, offer, ..
         } => format!(
-            "p{proposer_id} opened {} trade: {}",
-            trade_scope_label(scope),
+            "p{proposer_id} opened public trade: {}",
             player_trade_label(offer)
         ),
         GameEvent::TradeOfferAdded {
@@ -309,13 +301,6 @@ fn player_trade_label(trade: &PlayerTrade) -> String {
         resource_set_label(&trade.give),
         resource_set_label(&trade.take)
     )
-}
-
-fn trade_scope_label(scope: &TradeScope) -> String {
-    match scope {
-        TradeScope::Public => "open".to_owned(),
-        TradeScope::Targeted(player_id) => format!("targeted p{player_id}"),
-    }
 }
 
 fn resource_set_label(resources: &ResourceSet) -> String {

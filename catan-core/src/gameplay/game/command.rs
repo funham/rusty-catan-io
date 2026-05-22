@@ -2,11 +2,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     gameplay::primitives::{
+        PlayerTrade,
         build::{Build, Establishment, EstablishmentType, Road},
         dev_card::DevCardUsage,
         player::PlayerId,
         resource::ResourceSet,
-        trade::{BankTrade, PersonalTradeOffer, PublicTradeOffer},
+        trade::BankTrade,
     },
     topology::{Hex, Intersection, Path},
 };
@@ -78,8 +79,7 @@ pub enum PostDiceCommand {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RegularCommand {
-    OfferPublicTrade(PublicTradeOffer),
-    OfferPersonalTrade(PersonalTradeOffer),
+    OfferTrade(PlayerTrade),
     TradeWithBank(BankTrade),
     UseDevCard(DevCardUsage),
     Build(Build),

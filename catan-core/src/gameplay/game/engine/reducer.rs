@@ -6,7 +6,7 @@ use crate::gameplay::{
         event::GameEvent,
         index::GameIndex,
         run::GameResult,
-        trade::{TradeOfferId, TradeResponseState, TradeScope, TradeSession, TradeSessionId},
+        trade::{TradeOfferId, TradeResponseState, TradeSession, TradeSessionId},
     },
     primitives::{
         build::{Build, Establishment, EstablishmentType, Road},
@@ -145,10 +145,9 @@ fn apply_playing(active: &mut PlayingEngine, event: &GameEvent) -> Result<(), En
         GameEvent::TradeOpened {
             session_id,
             proposer_id,
-            scope,
             offer,
             ..
-        } => trade_opened(active, *session_id, *proposer_id, *scope, offer.clone())?,
+        } => trade_opened(active, *session_id, *proposer_id, *offer)?,
         GameEvent::TradeOfferAdded {
             session_id,
             player_id,
@@ -466,7 +465,6 @@ fn trade_opened(
     active: &mut PlayingEngine,
     session_id: TradeSessionId,
     proposer_id: PlayerId,
-    scope: TradeScope,
     offer: PlayerTrade,
 ) -> Result<(), EngineApplyError> {
     if active.trade_sessions.len() != session_id.0 as usize {
@@ -475,7 +473,6 @@ fn trade_opened(
     active.trade_sessions.push(TradeSession::new(
         session_id,
         proposer_id,
-        scope,
         offer,
         active.game.players.count(),
     ));
@@ -532,7 +529,11 @@ fn trade_completed(
         let offer = session
             .offer(offer_id)
             .ok_or(EngineApplyError::InvalidTradeSession)?;
-        let resources = (offer.trade.give, offer.trade.take);
+        let resources = if offer.proposer == proposer_id {
+            (offer.trade.give, offer.trade.take)
+        } else {
+            (offer.trade.take, offer.trade.give)
+        };
         session.open = false;
         resources
     };

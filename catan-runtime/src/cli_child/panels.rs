@@ -212,15 +212,18 @@ pub(crate) fn trade_panel_lines(model: &UiModel, width: usize) -> Vec<Line<'stat
                 format!("#{} ", offer.id.0),
                 Style::default().fg(Color::Yellow),
             ),
-            Span::raw(format!("p{} ", offer.proposer)),
-            Span::raw(player_trade_label(&offer.trade)),
+            Span::styled(
+                format!("p{} ", offer.proposer),
+                player_style(offer.proposer),
+            ),
         ]));
+        lines.extend(player_trade_glyph_lines(&offer.trade));
     }
     lines.push(trade_responses_line(session));
     let hint = if Some(session.proposer) == model.actor {
-        "owner: Enter commits accepted offer, c cancels"
+        "owner: choose confirm, reject counter, or cancel"
     } else {
-        "peer: a accepts, r rejects, c counters"
+        "peer: choose accept, reject, or counter"
     };
     lines.push(Line::from(Span::styled(
         truncate_display(hint, width),
@@ -229,17 +232,68 @@ pub(crate) fn trade_panel_lines(model: &UiModel, width: usize) -> Vec<Line<'stat
     lines
 }
 
+pub(crate) fn trade_action_menu_lines(
+    title: &str,
+    items: &[(String, Option<PlayerTrade>)],
+    selected: usize,
+) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        Line::from(title.to_owned()),
+        Line::from("up/down select; enter confirms; esc cancels"),
+    ];
+    let visible_rows = 6;
+    let half_window = visible_rows / 2;
+    let start = selected.saturating_sub(half_window);
+    let end = (start + visible_rows).min(items.len());
+
+    for (idx, (label, trade)) in items.iter().enumerate().skip(start).take(end - start) {
+        let marker = if idx == selected { "> " } else { "  " };
+        lines.push(Line::from(vec![
+            Span::raw(marker.to_owned()),
+            Span::raw(label.clone()),
+        ]));
+        if let Some(trade) = trade {
+            lines.extend(player_trade_glyph_lines(trade));
+        }
+    }
+    lines
+}
+
+pub(crate) fn player_trade_builder_lines(
+    available: &ResourceSet,
+    give: &ResourceSet,
+    take: &ResourceSet,
+    selected_resource: usize,
+    editing_give: bool,
+) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        Line::from("player trade"),
+        Line::from(
+            "left/right resource; tab switches side; up/down count; enter offers; esc cancels",
+        ),
+        Line::from(if editing_give {
+            "editing: give"
+        } else {
+            "editing: take"
+        }),
+        Line::from("available"),
+    ];
+    lines.extend(resource_card_lines(available, None));
+    lines.push(resource_selector_line(selected_resource));
+    lines.push(Line::from(if editing_give { "> give" } else { "  give" }));
+    lines.extend(resource_card_lines(give, None));
+    lines.push(Line::from(if editing_give { "  take" } else { "> take" }));
+    lines.extend(resource_card_lines(take, None));
+    lines
+}
+
 fn trade_session_summary_line(session: &UiTradeSession) -> Line<'static> {
-    let scope = match session.scope {
-        catan_core::gameplay::game::trade::TradeScope::Public => "public".to_owned(),
-        catan_core::gameplay::game::trade::TradeScope::Targeted(peer) => format!("p{peer}"),
-    };
     Line::from(vec![
         Span::styled(
             format!("s{} ", session.id.0),
             Style::default().fg(Color::Cyan),
         ),
-        Span::raw(format!("p{} -> {}  ", session.proposer, scope)),
+        Span::raw(format!("p{} public  ", session.proposer)),
         Span::raw(format!("offers {}", session.offers.len())),
     ])
 }
@@ -272,26 +326,43 @@ fn trade_responses_line(session: &UiTradeSession) -> Line<'static> {
     }
 }
 
-fn player_trade_label(trade: &PlayerTrade) -> String {
-    format!(
-        "{} -> {}",
-        compact_resource_set_label(&trade.give),
-        compact_resource_set_label(&trade.take)
-    )
+pub(crate) fn player_trade_glyph_lines(trade: &PlayerTrade) -> Vec<Line<'static>> {
+    let give = resource_set_glyph_rows(&trade.give);
+    let take = resource_set_glyph_rows(&trade.take);
+    give.into_iter()
+        .zip(take)
+        .enumerate()
+        .map(|(idx, (mut left, right))| {
+            let separator = if idx == 1 { " -> " } else { "    " };
+            left.spans.push(Span::styled(separator, subtle_box_style()));
+            left.spans.extend(right.spans);
+            left
+        })
+        .collect()
 }
 
-fn compact_resource_set_label(resources: &ResourceSet) -> String {
-    let parts = Resource::iter()
-        .filter_map(|resource| {
-            let count = resources[resource];
-            (count > 0).then(|| format!("{count}{:?}", resource))
-        })
-        .collect::<Vec<_>>();
-    if parts.is_empty() {
-        "-".to_owned()
-    } else {
-        parts.join(",")
+fn resource_set_glyph_rows(resources: &ResourceSet) -> Vec<Line<'static>> {
+    let mut rows = [Vec::new(), Vec::new(), Vec::new()];
+    let mut added = false;
+    for resource in Resource::iter() {
+        let count = resources[resource];
+        if count == 0 {
+            continue;
+        }
+        if added {
+            append_gap(&mut rows, " ");
+        }
+        CardGlyph::new(resource_abbrev(resource), resource_style(resource))
+            .indices([None, Some(count), None])
+            .push_to_rows(&mut rows);
+        added = true;
     }
+    if !added {
+        for row in &mut rows {
+            row.push(Span::styled("-", subtle_box_style()));
+        }
+    }
+    rows.into_iter().map(Line::from).collect()
 }
 
 pub(crate) fn snapshot_state_lines(
@@ -1017,6 +1088,16 @@ fn fullness_symbol(level: DeckFullnessLevel) -> &'static str {
     }
 }
 
+fn resource_abbrev(resource: Resource) -> &'static str {
+    match resource {
+        Resource::Brick => "Br",
+        Resource::Wood => "Wo",
+        Resource::Wheat => "Wh",
+        Resource::Sheep => "Sh",
+        Resource::Ore => "Or",
+    }
+}
+
 fn resource_style(resource: Resource) -> Style {
     Style::default().fg(ratatui_color(FieldRenderer::resource_color(resource)))
 }
@@ -1035,7 +1116,7 @@ mod tests {
     use catan_core::gameplay::primitives::{
         dev_card::DevCardData,
         resource::{Resource, ResourceSet},
-        trade::{BankTrade, BankTradeKind},
+        trade::{BankTrade, BankTradeKind, PlayerTrade},
     };
     use catan_core::gameplay::{
         game::{
@@ -1049,7 +1130,8 @@ mod tests {
 
     use super::{
         adjust_drop_selection, bank_trade_menu_lines, dev_card_lines, drop_personal_lines,
-        personal_model_lines, public_model_lines, resource_card_lines, snapshot_state_lines,
+        personal_model_lines, player_trade_builder_lines, player_trade_glyph_lines,
+        public_model_lines, resource_card_lines, snapshot_state_lines,
     };
 
     #[test]
@@ -1080,6 +1162,46 @@ mod tests {
         assert!(rendered_dev[1].contains("│YP│"));
         assert!(rendered_dev[1].contains("│ M│") || rendered_dev[1].contains("│M │"));
         assert!(rendered_dev[1].contains("│VP│"));
+    }
+
+    #[test]
+    fn player_trade_glyph_lines_put_arrow_only_on_middle_row() {
+        let trade = PlayerTrade {
+            give: ResourceSet::from(Resource::Ore),
+            take: ResourceSet::from(Resource::Wood),
+        };
+        let rendered = player_trade_glyph_lines(&trade)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+
+        assert_eq!(rendered.len(), 3);
+        assert!(!rendered[0].contains("->"));
+        assert!(rendered[1].contains("->"));
+        assert!(!rendered[2].contains("->"));
+    }
+
+    #[test]
+    fn player_trade_builder_lines_show_available_cards_and_cancel_hint() {
+        let available = ResourceSet {
+            ore: 2,
+            wood: 1,
+            ..ResourceSet::EMPTY
+        };
+        let give = ResourceSet::from(Resource::Ore);
+        let take = ResourceSet::from(Resource::Wood);
+        let rendered = player_trade_builder_lines(&available, &give, &take, 4, true)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("player trade"));
+        assert!(rendered.contains("esc cancels"));
+        assert!(rendered.contains("available"));
+        assert!(rendered.contains("give"));
+        assert!(rendered.contains("take"));
+        assert!(rendered.contains("^^"));
     }
 
     #[test]

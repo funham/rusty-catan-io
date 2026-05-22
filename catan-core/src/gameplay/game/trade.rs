@@ -18,17 +18,10 @@ impl From<usize> for TradeOfferId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum TradeScope {
-    Public,
-    Targeted(PlayerId),
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TradeOffer {
     pub id: TradeOfferId,
     pub proposer: PlayerId,
-    pub peer: Option<PlayerId>,
     pub trade: PlayerTrade,
 }
 
@@ -44,7 +37,6 @@ pub enum TradeResponseState {
 pub struct TradeSession {
     pub id: TradeSessionId,
     pub proposer: PlayerId,
-    pub scope: TradeScope,
     pub offers: Vec<TradeOffer>,
     pub responses: Vec<Option<TradeResponseState>>,
     pub version: u64,
@@ -55,13 +47,12 @@ impl TradeSession {
     pub fn new(
         id: TradeSessionId,
         proposer: PlayerId,
-        scope: TradeScope,
         trade: PlayerTrade,
         player_count: usize,
     ) -> Self {
         let mut responses = vec![None; player_count];
         for player_id in player_ids(player_count) {
-            if player_id == proposer || !scope.includes(player_id) {
+            if player_id == proposer {
                 continue;
             }
             responses[player_id.index()] = Some(TradeResponseState::Waiting);
@@ -70,11 +61,9 @@ impl TradeSession {
         Self {
             id,
             proposer,
-            scope,
             offers: vec![TradeOffer {
                 id: TradeOfferId(0),
                 proposer,
-                peer: None,
                 trade,
             }],
             responses,
@@ -91,12 +80,11 @@ impl TradeSession {
         self.offers.iter().find(|offer| offer.id == id)
     }
 
-    pub fn add_counter_offer(&mut self, player_id: PlayerId, trade: PlayerTrade) -> TradeOfferId {
+    pub fn add_counter_offer(&mut self, proposer: PlayerId, trade: PlayerTrade) -> TradeOfferId {
         let id = TradeOfferId(self.offers.len() as u64);
         self.offers.push(TradeOffer {
             id,
-            proposer: self.proposer,
-            peer: Some(player_id),
+            proposer,
             trade,
         });
         self.version += 1;
@@ -124,38 +112,8 @@ impl TradeSession {
     }
 }
 
-impl TradeScope {
-    pub fn includes(self, player_id: PlayerId) -> bool {
-        match self {
-            Self::Public => true,
-            Self::Targeted(target) => target == player_id,
-        }
-    }
-}
-
 pub fn trade_has_overlapping_resources(trade: &PlayerTrade) -> bool {
     Resource::iter().any(|resource| trade.give[resource] > 0 && trade.take[resource] > 0)
-}
-
-pub fn trade_from_public_offer(
-    offer: crate::gameplay::primitives::trade::PublicTradeOffer,
-) -> PlayerTrade {
-    PlayerTrade {
-        give: offer.give,
-        take: offer.take,
-    }
-}
-
-pub fn trade_from_personal_offer(
-    offer: crate::gameplay::primitives::trade::PersonalTradeOffer,
-) -> (TradeScope, PlayerTrade) {
-    (
-        TradeScope::Targeted(offer.peer_id),
-        PlayerTrade {
-            give: offer.give,
-            take: offer.take,
-        },
-    )
 }
 
 pub fn trade_is_funded(

@@ -128,7 +128,13 @@ fn split_left_column(left: Rect, preferred_field_height: u16) -> (Rect, Rect, Re
     }
 
     let personal_min = if left.height >= 8 { 5 } else { 1 };
-    let trade_height = if left.height >= 14 { 5 } else { 0 };
+    let trade_height = if left.height >= 18 {
+        9
+    } else if left.height >= 14 {
+        5
+    } else {
+        0
+    };
     let max_field_height = left
         .height
         .saturating_sub(personal_min)
@@ -224,7 +230,7 @@ mod tests {
         }
 
         assert!(layout.field.width > 0);
-        assert!(layout.trade.height > 0);
+        assert!(layout.trade.height >= 9);
         assert!(layout.journal.width > 0);
         assert!(layout.command.height >= 3);
     }

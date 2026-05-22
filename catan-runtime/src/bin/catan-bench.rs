@@ -550,16 +550,16 @@ mod tests {
         assert!(matches!(outcome.result, GameResult::Win(_)));
         assert_eq!(outcome.stats.turns_started, 100);
         assert_eq!(outcome.stats.turns_ended, 99);
-        assert_eq!(outcome.stats.decision_requests, 745);
-        assert_eq!(outcome.stats.regular_actions, 205);
+        assert_eq!(outcome.stats.decision_requests, 790);
+        assert_eq!(outcome.stats.regular_actions, 209);
         assert_eq!(outcome.stats.builds, 53);
-        assert_eq!(outcome.stats.bank_trades, 28);
+        assert_eq!(outcome.stats.bank_trades, 32);
         assert_eq!(outcome.stats.dev_cards_bought, 25);
         assert_eq!(outcome.stats.dev_cards_used, 20);
         assert_eq!(outcome.stats.dice_rolls, 100);
-        assert_eq!(outcome.stats.resources_distributed, 91);
-        assert_eq!(outcome.stats.player_discards, 5);
-        assert_eq!(outcome.stats.robber_moves, 23);
+        assert_eq!(outcome.stats.resources_distributed, 87);
+        assert_eq!(outcome.stats.player_discards, 8);
+        assert_eq!(outcome.stats.robber_moves, 27);
         assert_eq!(outcome.stats.action_rejections, 0);
     }
 

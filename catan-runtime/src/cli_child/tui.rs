@@ -8,14 +8,18 @@ use std::{
     time::Duration,
 };
 
-use catan_agents::remote_agent::{LegalDecisionOptions, UiModel, ui_model_summary};
+use catan_agents::remote_agent::{LegalDecisionOptions, UiModel, UiTradeSession, ui_model_summary};
 use catan_core::gameplay::{
-    game::event::GameEndPlayerStats,
+    game::{
+        event::{GameEndPlayerStats, GameEvent},
+        input::TradeCommand,
+        trade::{TradeOfferId, TradeResponseState, TradeSessionId},
+    },
     primitives::{
         build::{Build, Establishment, EstablishmentType, Road},
         player::PlayerId,
         resource::{Resource, ResourceSet},
-        trade::BankTrade,
+        trade::{BankTrade, PlayerTrade},
     },
 };
 use catan_core::topology::{Hex, Intersection};
@@ -40,8 +44,9 @@ use super::{
     layout::{NormalLayoutAreas, SnapshotLayoutAreas, normal_layout_areas, snapshot_layout_areas},
     panels::{
         adjust_drop_selection, bank_panel_lines, bank_trade_menu_lines, drop_personal_lines,
-        game_ended_lines, personal_model_lines, player_menu_lines, public_player_lines,
-        resource_picker_lines, snapshot_state_lines, trade_panel_lines,
+        game_ended_lines, personal_model_lines, player_menu_lines, player_trade_builder_lines,
+        public_player_lines, resource_picker_lines, snapshot_state_lines, trade_action_menu_lines,
+        trade_panel_lines,
     },
     render::{field_lines, field_lines_cropped_left, field_size},
     selectors::{
@@ -74,6 +79,13 @@ pub(crate) enum CliViewMode {
 pub(crate) enum ControlInput {
     SaveSnapshot,
     Redraw,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TradeResponseMenuAction {
+    Accept(TradeOfferId),
+    Reject,
+    Counter,
 }
 
 #[derive(Debug, Clone)]
@@ -253,15 +265,12 @@ impl CliUi {
         self.show_model(model, message)
     }
 
-    pub(crate) fn record_game_event(
-        &mut self,
-        event: &catan_core::gameplay::game::event::GameEvent,
-    ) -> Option<String> {
+    pub(crate) fn record_game_event(&mut self, event: &GameEvent) -> Option<String> {
         match event {
-            catan_core::gameplay::game::event::GameEvent::TurnStarted { player_id, .. } => {
+            GameEvent::TurnStarted { player_id, .. } => {
                 self.active_player = Some(*player_id);
             }
-            catan_core::gameplay::game::event::GameEvent::GameFinished { .. } => {
+            GameEvent::GameFinished { .. } => {
                 self.active_player = None;
             }
             _ => {}
@@ -733,6 +742,229 @@ impl CliUi {
         }
     }
 
+    pub(crate) fn select_trade_response_action(
+        &mut self,
+        model: &UiModel,
+        session_id: TradeSessionId,
+    ) -> io::Result<Option<TradeResponseMenuAction>> {
+        let Some(session) = model
+            .public
+            .trade_sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .or_else(|| model.public.trade_sessions.last())
+        else {
+            self.message = "no active trade session".to_owned();
+            return Ok(None);
+        };
+
+        let mut options = session
+            .offers
+            .iter()
+            .filter(|offer| offer.proposer == session.proposer)
+            .map(|offer| {
+                (
+                    format!("accept #{} from p{}", offer.id.0, offer.proposer),
+                    Some(offer.trade),
+                    TradeResponseMenuAction::Accept(offer.id),
+                )
+            })
+            .collect::<Vec<_>>();
+        options.push((
+            "counter with new offer".to_owned(),
+            None,
+            TradeResponseMenuAction::Counter,
+        ));
+        options.push((
+            "reject trade".to_owned(),
+            None,
+            TradeResponseMenuAction::Reject,
+        ));
+
+        self.select_trade_menu(model, "trade response", options)
+    }
+
+    pub(crate) fn select_trade_owner_action(
+        &mut self,
+        model: &UiModel,
+        session_id: TradeSessionId,
+    ) -> io::Result<Option<TradeCommand>> {
+        let Some(session) = model
+            .public
+            .trade_sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .or_else(|| model.public.trade_sessions.last())
+        else {
+            self.message = "no active trade session".to_owned();
+            return Ok(None);
+        };
+
+        let mut options = Vec::new();
+        for offer in &session.offers {
+            if offer.proposer == session.proposer {
+                if trade_offer_is_accepted(session, offer.id) {
+                    options.push((
+                        format!("confirm #{} with accepted peer", offer.id.0),
+                        Some(offer.trade),
+                        TradeCommand::Commit { offer_id: offer.id },
+                    ));
+                }
+            } else {
+                options.push((
+                    format!("confirm counter #{} from p{}", offer.id.0, offer.proposer),
+                    Some(offer.trade),
+                    TradeCommand::Commit { offer_id: offer.id },
+                ));
+                options.push((
+                    format!("reject counter #{} from p{}", offer.id.0, offer.proposer),
+                    Some(offer.trade),
+                    TradeCommand::Reject { offer_id: offer.id },
+                ));
+            }
+        }
+        options.push((
+            "cancel original offer".to_owned(),
+            None,
+            TradeCommand::Cancel,
+        ));
+
+        self.select_trade_menu(model, "trade owner", options)
+    }
+
+    pub(crate) fn select_player_trade_offer(
+        &mut self,
+        model: &UiModel,
+    ) -> io::Result<Option<PlayerTrade>> {
+        let Some(private) = &model.private else {
+            self.message = "no private resources".to_owned();
+            return Ok(None);
+        };
+
+        let available = private.resources;
+        let mut give = ResourceSet::EMPTY;
+        let mut take = ResourceSet::EMPTY;
+        let mut selected_resource = 0;
+        let mut editing_give = true;
+        self.message = "build trade with arrows/tab; enter offers; esc cancels".to_owned();
+
+        loop {
+            self.personal_override = Some(player_trade_builder_lines(
+                &available,
+                &give,
+                &take,
+                selected_resource,
+                editing_give,
+            ));
+            self.draw(
+                Some(model),
+                "player-trade: ",
+                &player_trade_builder_summary(&give, &take, selected_resource, editing_give),
+            )?;
+            if let CrosstermEvent::Key(key) = event::read()?
+                && key.kind == KeyEventKind::Press
+            {
+                let resource = Resource::ALL[selected_resource];
+                match key.code {
+                    KeyCode::Enter => {
+                        if give.is_empty() || take.is_empty() {
+                            self.message =
+                                "trade needs at least one give and one take card".to_owned();
+                            continue;
+                        }
+                        if catan_core::gameplay::game::trade::trade_has_overlapping_resources(
+                            &PlayerTrade { give, take },
+                        ) {
+                            self.message =
+                                "same resource cannot appear on both trade sides".to_owned();
+                            continue;
+                        }
+                        self.personal_override = None;
+                        return Ok(Some(PlayerTrade { give, take }));
+                    }
+                    KeyCode::Esc => {
+                        self.personal_override = None;
+                        self.message = "player trade cancelled".to_owned();
+                        return Ok(None);
+                    }
+                    KeyCode::Left => {
+                        selected_resource = selected_resource
+                            .checked_sub(1)
+                            .unwrap_or(Resource::ALL.len() - 1);
+                    }
+                    KeyCode::Right => {
+                        selected_resource = (selected_resource + 1) % Resource::ALL.len();
+                    }
+                    KeyCode::Tab | KeyCode::BackTab => {
+                        editing_give = !editing_give;
+                    }
+                    KeyCode::Up => {
+                        adjust_player_trade_selection(
+                            &available,
+                            &mut give,
+                            &mut take,
+                            resource,
+                            editing_give,
+                            1,
+                        );
+                    }
+                    KeyCode::Down => {
+                        adjust_player_trade_selection(
+                            &available,
+                            &mut give,
+                            &mut take,
+                            resource,
+                            editing_give,
+                            -1,
+                        );
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    fn select_trade_menu<T: Clone>(
+        &mut self,
+        model: &UiModel,
+        title: &str,
+        options: Vec<(String, Option<PlayerTrade>, T)>,
+    ) -> io::Result<Option<T>> {
+        if options.is_empty() {
+            self.message = "no trade actions available".to_owned();
+            return Ok(None);
+        }
+
+        let mut selected = 0;
+        self.message = "select trade action with up/down; enter confirms; esc cancels".to_owned();
+        loop {
+            let lines = options
+                .iter()
+                .map(|(label, trade, _)| (label.clone(), *trade))
+                .collect::<Vec<_>>();
+            self.personal_override = Some(trade_action_menu_lines(title, &lines, selected));
+            self.draw(Some(model), "trade: ", &options[selected].0)?;
+            if let CrosstermEvent::Key(key) = event::read()?
+                && key.kind == KeyEventKind::Press
+            {
+                match key.code {
+                    KeyCode::Enter => {
+                        self.personal_override = None;
+                        return Ok(Some(options[selected].2.clone()));
+                    }
+                    KeyCode::Esc => {
+                        self.personal_override = None;
+                        self.message = "trade action cancelled".to_owned();
+                        return Ok(None);
+                    }
+                    KeyCode::Up => selected = selected.checked_sub(1).unwrap_or(options.len() - 1),
+                    KeyCode::Down => selected = (selected + 1) % options.len(),
+                    _ => {}
+                }
+            }
+        }
+    }
+
     pub(crate) fn select_resource(
         &mut self,
         model: &UiModel,
@@ -903,6 +1135,62 @@ impl CliUi {
         })?;
         Ok(())
     }
+}
+
+fn trade_offer_is_accepted(session: &UiTradeSession, offer_id: TradeOfferId) -> bool {
+    session.responses.iter().flatten().any(|response| {
+        matches!(
+            response,
+            TradeResponseState::Accepted { offer_id: accepted } if *accepted == offer_id
+        )
+    })
+}
+
+fn adjust_player_trade_selection(
+    available: &ResourceSet,
+    give: &mut ResourceSet,
+    take: &mut ResourceSet,
+    resource: Resource,
+    editing_give: bool,
+    delta: i16,
+) {
+    let max = if editing_give {
+        available[resource]
+    } else {
+        19
+    };
+    let current = if editing_give {
+        give[resource]
+    } else {
+        take[resource]
+    } as i16;
+    let next = (current + delta).clamp(0, max as i16) as u16;
+    if editing_give {
+        give[resource] = next;
+        if next > 0 {
+            take[resource] = 0;
+        }
+    } else {
+        take[resource] = next;
+        if next > 0 {
+            give[resource] = 0;
+        }
+    }
+}
+
+fn player_trade_builder_summary(
+    give: &ResourceSet,
+    take: &ResourceSet,
+    selected_resource: usize,
+    editing_give: bool,
+) -> String {
+    let side = if editing_give { "give" } else { "take" };
+    let resource = Resource::ALL[selected_resource];
+    format!(
+        "{side} {resource:?}; give {} take {}",
+        give.total(),
+        take.total()
+    )
 }
 
 fn render_status(
@@ -1289,7 +1577,7 @@ fn command_help_lines(view_mode: CliViewMode, width: usize) -> Vec<Line<'static>
             "roll/r, end/e, buy dev/bd",
             "build: br, bs, bc or build road|settlement|city ...",
             "bank-trade: bt or bank-trade give take G4|G3|S2",
-            "player-trade: pt or trade public|pN give take",
+            "player-trade: pt or trade give take",
             "dev: kn, yp, m, rb or use knight|yop|monopoly|roadbuild ...",
             "drop: five resource counts or drop",
         ]
@@ -1341,9 +1629,10 @@ fn observer_status_suffix(event_count: u64, summary: Option<&str>) -> String {
 
 #[cfg(test)]
 mod tests {
+    use catan_core::gameplay::primitives::resource::{Resource, ResourceSet};
     use ratatui::style::{Color, Style};
 
-    use super::{CardGlyph, CliViewMode, command_panel_lines};
+    use super::{CardGlyph, CliViewMode, adjust_player_trade_selection, command_panel_lines};
 
     #[test]
     fn command_panel_shows_short_hints_when_empty() {
@@ -1378,5 +1667,24 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(lines, vec!["┌──┐ 1", "│KN│ 2", "└──┘  "]);
+    }
+
+    #[test]
+    fn player_trade_adjustment_caps_give_and_clears_opposite_side() {
+        let available = ResourceSet {
+            ore: 1,
+            ..ResourceSet::EMPTY
+        };
+        let mut give = ResourceSet::EMPTY;
+        let mut take = ResourceSet {
+            ore: 2,
+            ..ResourceSet::EMPTY
+        };
+
+        adjust_player_trade_selection(&available, &mut give, &mut take, Resource::Ore, true, 1);
+        adjust_player_trade_selection(&available, &mut give, &mut take, Resource::Ore, true, 1);
+
+        assert_eq!(give.ore, 1);
+        assert_eq!(take.ore, 0);
     }
 }

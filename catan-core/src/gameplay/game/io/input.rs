@@ -7,12 +7,9 @@ use crate::gameplay::{
             MoveRobberCommand, PostDevCardCommand, PostDiceCommand, RegularCommand,
         },
         decision::{DecisionId, DecisionKind, OpenDecision},
-        trade::{TradeOfferId, TradeScope},
+        trade::TradeOfferId,
     },
-    primitives::{
-        player::PlayerId,
-        trade::{PlayerTrade, PublicTradeOffer},
-    },
+    primitives::{player::PlayerId, trade::PlayerTrade},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -184,14 +181,10 @@ impl From<&OpenDecision> for DecisionToken {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TradeCommand {
-    Propose {
-        scope: TradeScope,
-        offer: PublicTradeOffer,
-    },
+    Propose { offer: PlayerTrade },
     Respond(TradeResponseCommand),
-    Commit {
-        offer_id: TradeOfferId,
-    },
+    Commit { offer_id: TradeOfferId },
+    Reject { offer_id: TradeOfferId },
     Cancel,
 }
 

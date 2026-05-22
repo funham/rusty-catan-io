@@ -1,12 +1,12 @@
 use catan_core::gameplay::{
     game::{
-        trade::{TradeOfferId, TradeScope, TradeSession},
+        trade::{TradeOfferId, TradeSession},
         view::PlayerDecisionContext,
     },
     primitives::{
-        player::{PlayerId, player_ids},
+        player::PlayerId,
         resource::{Resource, ResourceSet},
-        trade::{PlayerTrade, PublicTradeOffer},
+        trade::PlayerTrade,
     },
 };
 
@@ -49,7 +49,13 @@ pub fn offer_is_funded(
     let Some(peer) = exact_resources(context, peer_id) else {
         return false;
     };
-    proposer.has_enough(&offer.trade.give) && peer.has_enough(&offer.trade.take)
+    if offer.proposer == session.proposer {
+        proposer.has_enough(&offer.trade.give) && peer.has_enough(&offer.trade.take)
+    } else {
+        peer_id == offer.proposer
+            && peer.has_enough(&offer.trade.give)
+            && proposer.has_enough(&offer.trade.take)
+    }
 }
 
 pub fn first_funded_offer_for_peer(
@@ -60,7 +66,7 @@ pub fn first_funded_offer_for_peer(
     session
         .offers
         .iter()
-        .filter(|offer| offer.peer.is_none() || offer.peer == Some(peer_id))
+        .filter(|offer| offer.proposer == session.proposer)
         .find(|offer| offer_is_funded(context, session, offer.id, peer_id))
         .map(|offer| offer.id)
 }
@@ -73,9 +79,11 @@ pub fn committable_offers(
         .offers
         .iter()
         .filter_map(move |offer| {
-            let peer_id = offer
-                .peer
-                .or_else(|| session.accepted_peer_for_offer(offer.id))?;
+            let peer_id = if offer.proposer == session.proposer {
+                session.accepted_peer_for_offer(offer.id)?
+            } else {
+                offer.proposer
+            };
             offer_is_funded(context, session, offer.id, peer_id).then_some((offer.id, peer_id))
         })
         .collect()
@@ -106,27 +114,13 @@ pub fn one_card_trade(give: Resource, take: Resource) -> PlayerTrade {
     }
 }
 
-pub fn one_card_public_offer(give: Resource, take: Resource) -> PublicTradeOffer {
-    PublicTradeOffer {
-        give: give.into(),
-        take: take.into(),
-    }
-}
-
-pub fn one_card_trade_candidates(
-    context: &PlayerDecisionContext<'_>,
-) -> Vec<(TradeScope, PlayerTrade)> {
-    let player_count = context.public.players.len();
+pub fn one_card_trade_candidates(context: &PlayerDecisionContext<'_>) -> Vec<PlayerTrade> {
     Resource::iter()
         .filter(|give| context.private.resources[*give] > 0)
         .flat_map(move |give| {
             Resource::iter()
                 .filter(move |take| *take != give)
-                .flat_map(move |take| {
-                    player_ids(player_count)
-                        .filter(move |peer| *peer != context.actor)
-                        .map(move |peer| (TradeScope::Targeted(peer), one_card_trade(give, take)))
-                })
+                .map(move |take| one_card_trade(give, take))
         })
         .collect()
 }

@@ -6,7 +6,7 @@ use catan_core::gameplay::{
     game::{
         event::ObserverNotificationContext,
         state::TableState,
-        trade::{TradeOfferId, TradeResponseState, TradeScope, TradeSessionId},
+        trade::{TradeOfferId, TradeResponseState, TradeSessionId},
         view::{
             OmniscientGameView, PlayerDecisionContext, PlayerNotificationContext,
             PrivatePlayerView, PublicBankDevCards, PublicBankResources, PublicGameView,
@@ -50,7 +50,6 @@ pub struct UiPublicGame {
 pub struct UiTradeSession {
     pub id: TradeSessionId,
     pub proposer: PlayerId,
-    pub scope: TradeScope,
     pub offers: Vec<UiTradeOffer>,
     pub responses: Vec<Option<TradeResponseState>>,
     pub version: u64,
@@ -61,7 +60,6 @@ pub struct UiTradeSession {
 pub struct UiTradeOffer {
     pub id: TradeOfferId,
     pub proposer: PlayerId,
-    pub peer: Option<PlayerId>,
     pub trade: PlayerTrade,
 }
 
@@ -263,14 +261,12 @@ impl UiPublicGame {
                 .map(|session| UiTradeSession {
                     id: session.id,
                     proposer: session.proposer,
-                    scope: session.scope,
                     offers: session
                         .offers
                         .iter()
                         .map(|offer| UiTradeOffer {
                             id: offer.id,
                             proposer: offer.proposer,
-                            peer: offer.peer,
                             trade: offer.trade.clone(),
                         })
                         .collect(),

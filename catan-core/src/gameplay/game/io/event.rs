@@ -12,7 +12,7 @@ use crate::{
             input::DecisionToken,
             output::CommandRejectionReason,
             run::GameResult,
-            trade::{TradeOfferId, TradeResponseState, TradeScope, TradeSessionId},
+            trade::{TradeOfferId, TradeResponseState, TradeSessionId},
             view::{
                 OmniscientGameView, PlayerNotificationContext, PrivatePlayerView, PublicGameView,
             },
@@ -192,7 +192,6 @@ pub enum GameEvent {
     TradeOpened {
         session_id: TradeSessionId,
         proposer_id: PlayerId,
-        scope: TradeScope,
         offer_id: TradeOfferId,
         offer: PlayerTrade,
     },

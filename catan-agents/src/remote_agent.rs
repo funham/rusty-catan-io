@@ -27,7 +27,7 @@ mod tests {
                 event::{GameEvent, GameObserver, ObserverKind, ObserverNotificationContext},
                 index::GameIndex,
                 state::SetupGameState,
-                trade::{TradeScope, TradeSession},
+                trade::TradeSession,
                 view::{ContextFactory, SearchFactory, VisibilityConfig},
             },
             primitives::{
@@ -146,7 +146,6 @@ mod tests {
         let sessions = vec![TradeSession::new(
             catan_core::gameplay::game::trade::TradeSessionId(7),
             P0,
-            TradeScope::Targeted(P1),
             PlayerTrade {
                 give: ResourceSet::from(Resource::Brick),
                 take: ResourceSet::from(Resource::Ore),

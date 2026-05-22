@@ -14,14 +14,13 @@ use crate::{
             projector,
             run::{GameResult, RunOptions},
             state::SetupGameState,
-            trade::TradeScope,
         },
         primitives::{
             build::{Build, Road},
             dev_card::{DevCardKind, DevCardUsage, UsableDevCard},
             player::PlayerId,
             resource::{Resource, ResourceSet},
-            trade::{BankTrade, BankTradeKind, PlayerTrade, PublicTradeOffer},
+            trade::{BankTrade, BankTradeKind, PlayerTrade},
         },
     },
     math::dice::DiceRoll,
@@ -31,8 +30,6 @@ use crate::{
 const P0: PlayerId = PlayerId::new(0);
 const P1: PlayerId = PlayerId::new(1);
 const P2: PlayerId = PlayerId::new(2);
-const P99: PlayerId = PlayerId::new(99);
-
 fn one_brick() -> ResourceSet {
     ResourceSet {
         brick: 1,
@@ -1113,7 +1110,6 @@ fn characterization_trade_commit_event_order_closes_session_then_reopens_regular
     engine.test_give_resources(1, one_wood());
     let session = engine.test_open_trade_session(
         0,
-        TradeScope::Public,
         PlayerTrade {
             give: one_brick(),
             take: one_wood(),
@@ -1344,8 +1340,7 @@ fn reusable_trade_response_decision_can_be_updated_until_session_closes() {
             P0,
             owner_decision.id(),
             PlayerCommand::Trade(TradeCommand::Propose {
-                scope: TradeScope::Public,
-                offer: PublicTradeOffer {
+                offer: PlayerTrade {
                     give: one_brick(),
                     take: one_wood(),
                 },
@@ -1410,7 +1405,6 @@ fn trade_commit_revalidates_resources_and_rejects_missing_resources() {
     engine.test_give_resources(1, one_wood());
     let session = engine.test_open_trade_session(
         0,
-        TradeScope::Public,
         PlayerTrade {
             give: one_brick(),
             take: one_wood(),
@@ -1457,8 +1451,7 @@ fn same_resource_on_both_sides_is_rejected() {
             P0,
             owner.id,
             PlayerCommand::Trade(TradeCommand::Propose {
-                scope: TradeScope::Public,
-                offer: PublicTradeOffer {
+                offer: PlayerTrade {
                     give: one_brick(),
                     take: one_brick(),
                 },
@@ -1484,7 +1477,6 @@ fn player_can_reject_trade() {
     engine.test_force_regular_action_phase(0);
     let session = engine.test_open_trade_session(
         0,
-        TradeScope::Public,
         PlayerTrade {
             give: one_brick(),
             take: one_wood(),
@@ -1519,9 +1511,9 @@ fn player_can_reject_trade() {
 fn player_can_counter_trade() {
     let (mut engine, _outputs) = started_engine();
     engine.test_force_regular_action_phase(0);
+    engine.test_give_resources(1, one_wood());
     let session = engine.test_open_trade_session(
         0,
-        TradeScope::Public,
         PlayerTrade {
             give: one_brick(),
             take: one_wood(),
@@ -1569,6 +1561,130 @@ fn player_can_counter_trade() {
 }
 
 #[test]
+fn active_player_can_commit_counter_offer() {
+    let (mut engine, _outputs) = started_engine();
+    engine.test_force_regular_action_phase(0);
+    engine.test_give_resources(0, one_brick());
+    engine.test_give_resources(1, one_wood());
+    let session = engine.test_open_trade_session(
+        0,
+        PlayerTrade {
+            give: one_brick(),
+            take: ResourceSet::from(Resource::Ore),
+        },
+    );
+    let response = engine.open_decision_for_test(1, DecisionKind::TradeResponse { session });
+    let mut counter_sink = Vec::new();
+
+    apply_to_sink(
+        &mut engine,
+        submit(
+            P1,
+            response.id,
+            PlayerCommand::Trade(TradeCommand::Respond(TradeResponseCommand::Counter {
+                offer: PlayerTrade {
+                    give: one_wood(),
+                    take: one_brick(),
+                },
+            })),
+        ),
+        &mut counter_sink,
+    );
+    let counter_offer = counter_sink
+        .iter()
+        .find_map(|output| match output_event(output) {
+            Some(GameEvent::TradeOfferAdded { offer_id, .. }) => Some(*offer_id),
+            _ => None,
+        })
+        .expect("countering should add offer");
+    let owner = engine.open_decision_for_test(0, DecisionKind::TradeOwnerAction { session });
+
+    apply_to_sink(
+        &mut engine,
+        submit(
+            P0,
+            owner.id,
+            PlayerCommand::Trade(TradeCommand::Commit {
+                offer_id: counter_offer,
+            }),
+        ),
+        &mut Vec::new(),
+    );
+
+    assert_eq!(*engine.state().players.get(0).resources(), one_wood());
+    assert_eq!(*engine.state().players.get(1).resources(), one_brick());
+}
+
+#[test]
+fn active_player_can_reject_counter_offer_and_close_trade() {
+    let (mut engine, _outputs) = started_engine();
+    engine.test_force_regular_action_phase(0);
+    engine.test_give_resources(1, one_wood());
+    let session = engine.test_open_trade_session(
+        0,
+        PlayerTrade {
+            give: one_brick(),
+            take: ResourceSet::from(Resource::Ore),
+        },
+    );
+    let response = engine.open_decision_for_test(1, DecisionKind::TradeResponse { session });
+    let mut counter_sink = Vec::new();
+
+    apply_to_sink(
+        &mut engine,
+        submit(
+            P1,
+            response.id,
+            PlayerCommand::Trade(TradeCommand::Respond(TradeResponseCommand::Counter {
+                offer: PlayerTrade {
+                    give: one_wood(),
+                    take: one_brick(),
+                },
+            })),
+        ),
+        &mut counter_sink,
+    );
+    let counter_offer = counter_sink
+        .iter()
+        .find_map(|output| match output_event(output) {
+            Some(GameEvent::TradeOfferAdded { offer_id, .. }) => Some(*offer_id),
+            _ => None,
+        })
+        .expect("countering should add offer");
+    let owner = engine.open_decision_for_test(0, DecisionKind::TradeOwnerAction { session });
+    let mut sink = Vec::new();
+
+    apply_to_sink(
+        &mut engine,
+        submit(
+            P0,
+            owner.id,
+            PlayerCommand::Trade(TradeCommand::Reject {
+                offer_id: counter_offer,
+            }),
+        ),
+        &mut sink,
+    );
+
+    assert!(sink.iter().any(|output| {
+        matches!(
+            output_event(output),
+            Some(GameEvent::TradeResponseUpdated {
+                session_id,
+                player_id: P1,
+                response: crate::gameplay::game::trade::TradeResponseState::Rejected,
+            }) if *session_id == session
+        )
+    }));
+    assert!(sink.iter().any(|output| {
+        matches!(
+            output_event(output),
+            Some(GameEvent::TradeCancelled { session_id, .. }) if *session_id == session
+        )
+    }));
+}
+
+#[test]
 fn active_player_can_commit_accepted_offer() {
     let (mut engine, _outputs) = started_engine();
     engine.test_force_regular_action_phase(0);
@@ -1576,7 +1692,6 @@ fn active_player_can_commit_accepted_offer() {
     engine.test_give_resources(1, one_wood());
     let session = engine.test_open_trade_session(
         0,
-        TradeScope::Public,
         PlayerTrade {
             give: one_brick(),
             take: one_wood(),
@@ -1618,7 +1733,6 @@ fn active_player_can_cancel_trade_and_close_trade_decisions() {
     engine.test_force_regular_action_phase(0);
     let session = engine.test_open_trade_session(
         0,
-        TradeScope::Public,
         PlayerTrade {
             give: one_brick(),
             take: one_wood(),
@@ -1662,9 +1776,9 @@ fn active_player_can_cancel_trade_and_close_trade_decisions() {
 fn player_cannot_accept_another_players_counteroffer() {
     let (mut engine, _outputs) = started_engine();
     engine.test_force_regular_action_phase(0);
+    engine.test_give_resources(1, one_wood());
     let session = engine.test_open_trade_session(
         0,
-        TradeScope::Public,
         PlayerTrade {
             give: one_brick(),
             take: one_wood(),
@@ -1727,20 +1841,20 @@ fn player_cannot_accept_another_players_counteroffer() {
 }
 
 #[test]
-fn targeted_trade_rejects_invalid_target() {
+fn inactive_player_cannot_open_trade_session() {
     let (mut engine, _outputs) = started_engine();
     engine.test_force_regular_action_phase(0);
-    let owner = engine.open_decision_for_test(0, DecisionKind::RegularCommand);
+    engine.test_give_resources(1, one_brick());
+    let owner = engine.open_decision_for_test(1, DecisionKind::RegularCommand);
     let mut sink = Vec::new();
 
     apply_to_sink(
         &mut engine,
         submit(
-            P0,
+            P1,
             owner.id,
             PlayerCommand::Trade(TradeCommand::Propose {
-                scope: TradeScope::Targeted(P99),
-                offer: PublicTradeOffer {
+                offer: PlayerTrade {
                     give: one_brick(),
                     take: one_wood(),
                 },
@@ -1756,7 +1870,7 @@ fn targeted_trade_rejects_invalid_target() {
                 token,
                 reason: CommandRejectionReason::IllegalCommand(_),
                 ..
-            } if token.player_id == P0
+            } if token.player_id == P1
         )
     }));
 }

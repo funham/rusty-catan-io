@@ -365,7 +365,7 @@ impl GameEngine {
 #[cfg(test)]
 use super::{
     decision::{DecisionId, DecisionLifetime, PendingDecisions},
-    trade::{TradeOfferId, TradeResponseState, TradeScope, TradeSessionId},
+    trade::{TradeOfferId, TradeResponseState, TradeSessionId},
 };
 
 #[cfg(test)]
@@ -454,7 +454,6 @@ impl GameEngine {
     pub fn test_open_trade_session(
         &mut self,
         proposer: impl Into<PlayerId>,
-        scope: TradeScope,
         trade: PlayerTrade,
     ) -> TradeSessionId {
         let proposer = proposer.into();
@@ -463,7 +462,7 @@ impl GameEngine {
         let player_count = active.game.players.count();
         active
             .trade_sessions
-            .push(TradeSession::new(id, proposer, scope, trade, player_count));
+            .push(TradeSession::new(id, proposer, trade, player_count));
         id
     }
 

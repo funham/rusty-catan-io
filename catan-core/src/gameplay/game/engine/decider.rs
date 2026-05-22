@@ -11,7 +11,7 @@ use crate::gameplay::{
         dev_card::{DevCardUsage, UsableDevCard},
         player::player_ids,
         resource::ResourceSet,
-        trade::{BankTrade, BankTradeKind, PersonalTradeOffer, PlayerTrade, PublicTradeOffer},
+        trade::{BankTrade, BankTradeKind, PlayerTrade},
     },
 };
 use crate::{
@@ -153,8 +153,8 @@ fn decide_playing_submit(
         Some(DecisionCommand::Regular(command)) => {
             decide_regular_command(active, decision, command, context, &mut events);
         }
-        Some(DecisionCommand::OpenTrade { scope, trade }) => {
-            decide_open_trade(active, decision, scope, trade, &mut events);
+        Some(DecisionCommand::OpenTrade { trade }) => {
+            decide_open_trade(active, decision, trade, &mut events);
         }
         Some(DecisionCommand::RollDice { next_kind }) => {
             decide_roll_dice(active, decision, next_kind, context, &mut events);
@@ -233,7 +233,6 @@ enum DecisionCommand {
     InitialPlacement(crate::gameplay::game::command::InitialPlacementCommand),
     Regular(RegularCommand),
     OpenTrade {
-        scope: crate::gameplay::game::trade::TradeScope,
         trade: PlayerTrade,
     },
     RollDice {
@@ -272,13 +271,9 @@ fn command_for_decision(kind: DecisionKind, command: PlayerCommand) -> Option<De
             DecisionKind::PostDiceCommand,
             PlayerCommand::PostDice(PostDiceCommand::RegularCommand(command)),
         ) => Some(DecisionCommand::Regular(command)),
-        (
-            DecisionKind::RegularCommand,
-            PlayerCommand::Trade(TradeCommand::Propose { scope, offer }),
-        ) => Some(DecisionCommand::OpenTrade {
-            scope,
-            trade: trade_from_public_offer(offer),
-        }),
+        (DecisionKind::RegularCommand, PlayerCommand::Trade(TradeCommand::Propose { offer })) => {
+            Some(DecisionCommand::OpenTrade { trade: offer })
+        }
         (DecisionKind::InitCommand, PlayerCommand::InitCommand(InitCommand::RollDice)) => {
             Some(DecisionCommand::RollDice {
                 next_kind: DecisionKind::PostDiceCommand,
@@ -349,17 +344,7 @@ fn decide_regular_command(
             context,
             events,
         ),
-        RegularCommand::OfferPublicTrade(offer) => decide_open_trade(
-            active,
-            decision,
-            crate::gameplay::game::trade::TradeScope::Public,
-            trade_from_public_offer(offer),
-            events,
-        ),
-        RegularCommand::OfferPersonalTrade(offer) => {
-            let (scope, trade) = trade_from_personal_offer(offer);
-            decide_open_trade(active, decision, scope, trade, events);
-        }
+        RegularCommand::OfferTrade(offer) => decide_open_trade(active, decision, offer, events),
         RegularCommand::TradeWithBank(trade) => decide_bank_trade(active, decision, trade, events),
     }
 }
@@ -437,13 +422,20 @@ fn open_decision(
 fn decide_open_trade(
     active: &PlayingEngine,
     decision: OpenDecision,
-    scope: crate::gameplay::game::trade::TradeScope,
-    trade: crate::gameplay::primitives::trade::PlayerTrade,
+    trade: PlayerTrade,
     events: &mut EventBatch,
 ) {
+    if decision.player_id != active.game.turn.get_turn_index() {
+        reject_illegal(events, &decision, "only the active player can offer trades");
+        return;
+    }
     if crate::gameplay::game::trade::trade_has_overlapping_resources(&trade)
-        || invalid_trade_scope_reason(scope, decision.player_id, active.game.players.count())
-            .is_some()
+        || !active
+            .game
+            .players
+            .get(decision.player_id)
+            .resources()
+            .has_enough(&trade.give)
     {
         reject_illegal(events, &decision, "invalid player trade proposal");
         return;
@@ -457,13 +449,12 @@ fn decide_open_trade(
     events.push(GameEvent::TradeOpened {
         session_id,
         proposer_id: decision.player_id,
-        scope,
         offer_id,
         offer: trade,
     });
     let mut decisions = active.decisions();
     for player_id in player_ids(active.game.players.count()) {
-        if player_id != decision.player_id && scope.includes(player_id) {
+        if player_id != decision.player_id {
             open_decision(
                 events,
                 &mut decisions,
@@ -486,46 +477,6 @@ fn decide_open_trade(
     );
 }
 
-fn trade_from_public_offer(
-    offer: PublicTradeOffer,
-) -> crate::gameplay::primitives::trade::PlayerTrade {
-    crate::gameplay::primitives::trade::PlayerTrade {
-        give: offer.give,
-        take: offer.take,
-    }
-}
-
-fn trade_from_personal_offer(
-    offer: PersonalTradeOffer,
-) -> (
-    crate::gameplay::game::trade::TradeScope,
-    crate::gameplay::primitives::trade::PlayerTrade,
-) {
-    (
-        crate::gameplay::game::trade::TradeScope::Targeted(offer.peer_id),
-        crate::gameplay::primitives::trade::PlayerTrade {
-            give: offer.give,
-            take: offer.take,
-        },
-    )
-}
-
-fn invalid_trade_scope_reason(
-    scope: crate::gameplay::game::trade::TradeScope,
-    proposer: PlayerId,
-    player_count: usize,
-) -> Option<()> {
-    match scope {
-        crate::gameplay::game::trade::TradeScope::Public => None,
-        crate::gameplay::game::trade::TradeScope::Targeted(peer)
-            if peer.index() >= player_count || peer == proposer =>
-        {
-            Some(())
-        }
-        crate::gameplay::game::trade::TradeScope::Targeted(_) => None,
-    }
-}
-
 fn decide_trade_response(
     active: &PlayingEngine,
     decision: OpenDecision,
@@ -542,7 +493,7 @@ fn decide_trade_response(
         );
         return;
     };
-    if !session.open || !session.scope.includes(decision.player_id) {
+    if !session.open || decision.player_id == session.proposer {
         reject(
             events,
             DecisionToken::from(&decision),
@@ -557,13 +508,11 @@ fn decide_trade_response(
                 reject_illegal(events, &decision, "unknown trade offer");
                 return;
             };
-            if let Some(peer) = offer.peer
-                && peer != decision.player_id
-            {
+            if offer.proposer != session.proposer {
                 reject_illegal(
                     events,
                     &decision,
-                    "only the counteroffer owner can accept that counteroffer",
+                    "only the active player can confirm counter offers",
                 );
                 return;
             }
@@ -581,7 +530,14 @@ fn decide_trade_response(
             });
         }
         TradeCommand::Respond(TradeResponseCommand::Counter { offer }) => {
-            if crate::gameplay::game::trade::trade_has_overlapping_resources(&offer) {
+            if crate::gameplay::game::trade::trade_has_overlapping_resources(&offer)
+                || !active
+                    .game
+                    .players
+                    .get(decision.player_id)
+                    .resources()
+                    .has_enough(&offer.give)
+            {
                 reject_illegal(events, &decision, "invalid counter offer");
                 return;
             }
@@ -614,9 +570,30 @@ fn decide_trade_owner(
     command: TradeCommand,
     events: &mut EventBatch,
 ) {
+    let Some(session) = active.trade_sessions.get(session_id.0 as usize) else {
+        reject(
+            events,
+            DecisionToken::from(&decision),
+            CommandRejectionReason::StaleDecision,
+            false,
+        );
+        return;
+    };
+    if !session.open || decision.player_id != session.proposer {
+        reject(
+            events,
+            DecisionToken::from(&decision),
+            CommandRejectionReason::WrongPhase,
+            false,
+        );
+        return;
+    }
     match command {
         TradeCommand::Commit { offer_id } => {
             decide_commit_trade(active, decision, session_id, offer_id, events);
+        }
+        TradeCommand::Reject { offer_id } => {
+            decide_reject_counter_offer(active, decision, session_id, offer_id, events);
         }
         TradeCommand::Cancel => {
             close_session_decisions(active, session_id, events);
@@ -655,10 +632,12 @@ fn decide_commit_trade(
         reject_illegal(events, &decision, "unknown trade offer");
         return;
     };
-    let Some(peer_id) = offer
-        .peer
-        .or_else(|| session.accepted_peer_for_offer(offer_id))
-    else {
+    let peer_id = if offer.proposer == session.proposer {
+        session.accepted_peer_for_offer(offer_id)
+    } else {
+        Some(offer.proposer)
+    };
+    let Some(peer_id) = peer_id else {
         reject_illegal(
             events,
             &decision,
@@ -666,11 +645,20 @@ fn decide_commit_trade(
         );
         return;
     };
-    if !crate::gameplay::game::trade::trade_is_funded(
-        active.game.players.get(session.proposer).resources(),
-        active.game.players.get(peer_id).resources(),
-        &offer.trade,
-    ) {
+    let funded = if offer.proposer == session.proposer {
+        crate::gameplay::game::trade::trade_is_funded(
+            active.game.players.get(session.proposer).resources(),
+            active.game.players.get(peer_id).resources(),
+            &offer.trade,
+        )
+    } else {
+        crate::gameplay::game::trade::trade_is_funded(
+            active.game.players.get(peer_id).resources(),
+            active.game.players.get(session.proposer).resources(),
+            &offer.trade,
+        )
+    };
+    if !funded {
         reject_illegal(events, &decision, "trade resources are no longer available");
         return;
     }
@@ -680,6 +668,44 @@ fn decide_commit_trade(
         proposer_id: session.proposer,
         peer_id,
         offer_id,
+    });
+    reopen_regular(active, session.proposer, events);
+}
+
+fn decide_reject_counter_offer(
+    active: &PlayingEngine,
+    decision: OpenDecision,
+    session_id: crate::gameplay::game::trade::TradeSessionId,
+    offer_id: crate::gameplay::game::trade::TradeOfferId,
+    events: &mut EventBatch,
+) {
+    let Some(session) = active.trade_sessions.get(session_id.0 as usize) else {
+        reject(
+            events,
+            DecisionToken::from(&decision),
+            CommandRejectionReason::StaleDecision,
+            false,
+        );
+        return;
+    };
+    let Some(offer) = session.offer(offer_id) else {
+        reject_illegal(events, &decision, "unknown trade offer");
+        return;
+    };
+    if offer.proposer == session.proposer {
+        reject_illegal(events, &decision, "cancel the original offer instead");
+        return;
+    }
+
+    events.push(GameEvent::TradeResponseUpdated {
+        session_id,
+        player_id: offer.proposer,
+        response: crate::gameplay::game::trade::TradeResponseState::Rejected,
+    });
+    close_session_decisions(active, session_id, events);
+    events.push(GameEvent::TradeCancelled {
+        session_id,
+        proposer_id: session.proposer,
     });
     reopen_regular(active, session.proposer, events);
 }
