@@ -595,6 +595,9 @@ fn decide_trade_owner(
         TradeCommand::Reject { offer_id } => {
             decide_reject_counter_offer(active, decision, session_id, offer_id, events);
         }
+        TradeCommand::Propose { offer } => {
+            decide_add_prime_trade_offer(active, decision, session_id, offer, events);
+        }
         TradeCommand::Cancel => {
             close_session_decisions(active, session_id, events);
             events.push(GameEvent::TradeCancelled {
@@ -609,6 +612,53 @@ fn decide_trade_owner(
             CommandRejectionReason::WrongPhase,
             false,
         ),
+    }
+}
+
+fn decide_add_prime_trade_offer(
+    active: &PlayingEngine,
+    decision: OpenDecision,
+    session_id: crate::gameplay::game::trade::TradeSessionId,
+    offer: PlayerTrade,
+    events: &mut EventBatch,
+) {
+    if crate::gameplay::game::trade::trade_has_overlapping_resources(&offer)
+        || !active
+            .game
+            .players
+            .get(decision.player_id)
+            .resources()
+            .has_enough(&offer.give)
+    {
+        reject_illegal(events, &decision, "invalid trade offer");
+        return;
+    }
+
+    let Some(session) = active.trade_sessions.get(session_id.0 as usize) else {
+        reject(
+            events,
+            DecisionToken::from(&decision),
+            CommandRejectionReason::StaleDecision,
+            false,
+        );
+        return;
+    };
+    let offer_id = crate::gameplay::game::trade::TradeOfferId(session.offers.len() as u64);
+    events.push(GameEvent::TradeOfferAdded {
+        session_id,
+        player_id: decision.player_id,
+        offer_id,
+        offer,
+    });
+    for player_id in player_ids(active.game.players.count()) {
+        if player_id == decision.player_id {
+            continue;
+        }
+        events.push(GameEvent::TradeResponseUpdated {
+            session_id,
+            player_id,
+            response: crate::gameplay::game::trade::TradeResponseState::Waiting,
+        });
     }
 }
 

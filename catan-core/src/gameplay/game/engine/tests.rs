@@ -15,6 +15,7 @@ use crate::{
             projector,
             run::{GameResult, RunOptions},
             state::SetupGameState,
+            trade::TradeResponseState,
         },
         primitives::{
             build::{Build, Road},
@@ -1767,6 +1768,60 @@ fn active_player_can_cancel_trade_and_close_trade_decisions() {
             Some(GameEvent::TradeCancelled {
                 session_id,
                 proposer_id: P0,
+            }) if *session_id == session
+        )
+    }));
+}
+
+#[test]
+fn active_player_can_add_another_prime_offer_to_open_trade() {
+    let (mut engine, _outputs) = started_engine();
+    engine.test_force_regular_action_phase(0);
+    engine.test_give_resources(0, one_brick());
+    engine.test_give_resources(1, one_wood());
+    let session = engine.test_open_trade_session(
+        0,
+        PlayerTrade {
+            give: one_brick(),
+            take: one_wood(),
+        },
+    );
+    let owner = engine.open_decision_for_test(0, DecisionKind::TradeOwnerAction { session });
+    let mut sink = Vec::new();
+
+    apply_to_sink(
+        &mut engine,
+        submit(
+            P0,
+            owner.id,
+            PlayerCommand::Trade(TradeCommand::Propose {
+                offer: PlayerTrade {
+                    give: one_brick(),
+                    take: one_wood(),
+                },
+            }),
+        ),
+        &mut sink,
+    );
+
+    assert!(sink.iter().any(|output| {
+        matches!(
+            output_event(output),
+            Some(GameEvent::TradeOfferAdded {
+                session_id,
+                player_id: P0,
+                offer_id,
+                ..
+            }) if *session_id == session && offer_id.0 == 1
+        )
+    }));
+    assert!(sink.iter().any(|output| {
+        matches!(
+            output_event(output),
+            Some(GameEvent::TradeResponseUpdated {
+                session_id,
+                player_id: P1,
+                response: TradeResponseState::Waiting,
             }) if *session_id == session
         )
     }));

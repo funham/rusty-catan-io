@@ -18,11 +18,11 @@ use catan_core::gameplay::{
 };
 use catan_render::{adapters::ratatui::color as ratatui_color, field::FieldRenderer};
 use ratatui::{
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
 };
 
-use super::tui::{CardGlyph, InlineBadge, append_gap, join_lines_horizontal};
+use super::tui::{CardGlyph, InlineBadge, MiniCardGlyph, append_gap, join_lines_horizontal};
 
 #[cfg(test)]
 pub(crate) fn public_model_lines(model: &UiModel) -> Vec<Line<'static>> {
@@ -206,20 +206,7 @@ pub(crate) fn trade_panel_lines(model: &UiModel, width: usize) -> Vec<Line<'stat
 
     let mut lines = Vec::new();
     lines.push(trade_session_summary_line(session));
-    if let Some(offer) = session.offers.last() {
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!("#{} ", offer.id.0),
-                Style::default().fg(Color::Yellow),
-            ),
-            Span::styled(
-                format!("p{} ", offer.proposer),
-                player_style(offer.proposer),
-            ),
-        ]));
-        lines.extend(player_trade_glyph_lines(&offer.trade));
-    }
-    lines.push(trade_responses_line(session));
+    lines.extend(trade_tree_lines(session, None));
     let hint = if Some(session.proposer) == model.actor {
         "owner: choose confirm, reject counter, or cancel"
     } else {
@@ -232,31 +219,105 @@ pub(crate) fn trade_panel_lines(model: &UiModel, width: usize) -> Vec<Line<'stat
     lines
 }
 
-pub(crate) fn trade_action_menu_lines(
-    title: &str,
-    items: &[(String, Option<PlayerTrade>)],
-    selected: usize,
+pub(crate) fn trade_tree_lines(
+    session: &UiTradeSession,
+    selected_offer_index: Option<usize>,
 ) -> Vec<Line<'static>> {
-    let mut lines = vec![
-        Line::from(title.to_owned()),
-        Line::from("up/down select; enter confirms; esc cancels"),
-    ];
-    let visible_rows = 6;
-    let half_window = visible_rows / 2;
-    let start = selected.saturating_sub(half_window);
-    let end = (start + visible_rows).min(items.len());
-
-    for (idx, (label, trade)) in items.iter().enumerate().skip(start).take(end - start) {
-        let marker = if idx == selected { "> " } else { "  " };
-        lines.push(Line::from(vec![
-            Span::raw(marker.to_owned()),
-            Span::raw(label.clone()),
-        ]));
-        if let Some(trade) = trade {
-            lines.extend(player_trade_glyph_lines(trade));
+    let mut lines = Vec::new();
+    for (idx, offer) in session.offers.iter().enumerate() {
+        let is_counter = offer.proposer != session.proposer;
+        let mut spans = Vec::new();
+        if selected_offer_index == Some(idx) {
+            spans.push(Span::styled("> ", Style::default().fg(Color::Yellow)));
+        } else if is_counter {
+            spans.push(Span::raw("  "));
+        } else {
+            spans.push(Span::raw("  "));
         }
+        if is_counter {
+            spans.push(Span::styled(">>> ", subtle_box_style()));
+        }
+        spans.push(Span::styled(
+            format!("p{}", offer.proposer),
+            player_style(offer.proposer),
+        ));
+        spans.push(Span::raw(" offers: "));
+        push_resource_set_mini_cards(&mut spans, &offer.trade.give);
+        spans.push(Span::raw(format!("; p{} accepts: ", offer.proposer)));
+        push_resource_set_mini_cards(&mut spans, &offer.trade.take);
+        spans.push(Span::raw("."));
+        if !is_counter {
+            spans.push(Span::raw(" "));
+            push_trade_response_slots(&mut spans, session, offer.id);
+        }
+        lines.push(Line::from(spans));
+    }
+    if lines.is_empty() {
+        lines.push(Line::from(Span::styled("no offers", subtle_box_style())));
     }
     lines
+}
+
+fn push_trade_response_slots(
+    spans: &mut Vec<Span<'static>>,
+    session: &UiTradeSession,
+    offer_id: catan_core::gameplay::game::trade::TradeOfferId,
+) {
+    let mut first = true;
+    for response in session.responses.iter().flatten() {
+        if !first {
+            spans.push(Span::raw(" "));
+        }
+        first = false;
+        let symbol = match response {
+            catan_core::gameplay::game::trade::TradeResponseState::Waiting => "-",
+            catan_core::gameplay::game::trade::TradeResponseState::Rejected => "x",
+            catan_core::gameplay::game::trade::TradeResponseState::Accepted {
+                offer_id: accepted,
+            } if *accepted == offer_id => "v",
+            catan_core::gameplay::game::trade::TradeResponseState::Countered { .. } => "!",
+            catan_core::gameplay::game::trade::TradeResponseState::Accepted { .. } => "-",
+        };
+        spans.push(Span::styled(
+            format!("({symbol})"),
+            trade_response_style(symbol),
+        ));
+    }
+}
+
+fn trade_response_style(symbol: &str) -> Style {
+    match symbol {
+        "v" => Style::default().fg(Color::Green),
+        "x" => Style::default().fg(Color::Red),
+        "!" => Style::default().fg(Color::Yellow),
+        _ => subtle_box_style(),
+    }
+}
+
+fn push_resource_set_mini_cards(spans: &mut Vec<Span<'static>>, resources: &ResourceSet) {
+    let mut any = false;
+    for resource in Resource::iter() {
+        for _ in 0..resources[resource] {
+            MiniCardGlyph::new(resource_mini_symbol(resource))
+                .face_style(resource_style(resource))
+                .bracket_style(resource_style(resource))
+                .push_to(spans);
+            any = true;
+        }
+    }
+    if !any {
+        spans.push(Span::styled("-", subtle_box_style()));
+    }
+}
+
+fn resource_mini_symbol(resource: Resource) -> &'static str {
+    match resource {
+        Resource::Brick => "0",
+        Resource::Wood => "1",
+        Resource::Wheat => "2",
+        Resource::Sheep => "3",
+        Resource::Ore => "4",
+    }
 }
 
 pub(crate) fn player_trade_builder_lines(
@@ -296,34 +357,6 @@ fn trade_session_summary_line(session: &UiTradeSession) -> Line<'static> {
         Span::raw(format!("p{} public  ", session.proposer)),
         Span::raw(format!("offers {}", session.offers.len())),
     ])
-}
-
-fn trade_responses_line(session: &UiTradeSession) -> Line<'static> {
-    let mut spans = Vec::new();
-    for (idx, response) in session.responses.iter().enumerate() {
-        let Some(response) = response else {
-            continue;
-        };
-        if !spans.is_empty() {
-            spans.push(Span::raw(" "));
-        }
-        let label = match response {
-            catan_core::gameplay::game::trade::TradeResponseState::Waiting => "?",
-            catan_core::gameplay::game::trade::TradeResponseState::Accepted { offer_id } => {
-                return Line::from(format!("p{idx}: accepted #{}", offer_id.0));
-            }
-            catan_core::gameplay::game::trade::TradeResponseState::Rejected => "x",
-            catan_core::gameplay::game::trade::TradeResponseState::Countered { offer_id } => {
-                return Line::from(format!("p{idx}: countered #{}", offer_id.0));
-            }
-        };
-        spans.push(Span::raw(format!("p{idx}:{label}")));
-    }
-    if spans.is_empty() {
-        Line::from("responses: -")
-    } else {
-        Line::from(spans)
-    }
 }
 
 pub(crate) fn player_trade_glyph_lines(trade: &PlayerTrade) -> Vec<Line<'static>> {
@@ -894,17 +927,15 @@ fn dev_card_compact_lines(dev_cards: &DevCardData) -> Vec<Line<'static>> {
             append_gap(&mut rows, " ");
         }
         CardGlyph::new(dev_card_abbrev(card), dev_card_style())
-            .indices([
-                Some(dev_cards.used[card]),
-                Some(dev_cards.active[card]),
-                Some(dev_cards.queued[card]),
-            ])
+            .index_top(dev_cards.used[card], used_dev_card_count_style())
+            .index_mid(dev_cards.active[card], active_dev_card_count_style())
+            .index_bottom(dev_cards.queued[card], queued_dev_card_count_style())
             .push_to_rows(&mut rows);
     }
 
     append_gap(&mut rows, " ");
     CardGlyph::new("VP", dev_card_style())
-        .indices([None, Some(dev_cards.victory_pts), None])
+        .index_mid(dev_cards.victory_pts, active_dev_card_count_style())
         .push_to_rows(&mut rows);
 
     rows.into_iter().map(Line::from).collect()
@@ -995,18 +1026,47 @@ fn bank_trade_menu_line(marker: &str, trade: BankTrade) -> Line<'static> {
     ])
 }
 
-pub(crate) fn resource_picker_lines(selected_resource: usize) -> Vec<Line<'static>> {
-    let resources = ResourceSet {
-        brick: 1,
-        wood: 1,
-        wheat: 1,
-        sheep: 1,
-        ore: 1,
-    };
-    let mut lines = vec![Line::from("left/right select; enter confirms; esc cancels")];
-    lines.extend(resource_card_lines(&resources, None));
+pub(crate) fn resource_choice_lines(
+    title: &str,
+    selected_resource: usize,
+    locked_resource: Option<Resource>,
+) -> Vec<Line<'static>> {
+    let mut rows = [Vec::new(), Vec::new(), Vec::new()];
+    for (idx, resource) in Resource::iter().enumerate() {
+        if idx > 0 {
+            append_gap(&mut rows, " ");
+        }
+        let style = resource_choice_style(resource, idx == selected_resource, locked_resource);
+        CardGlyph::new(resource_abbrev(resource), style).push_to_rows(&mut rows);
+    }
+
+    let mut lines = vec![
+        Line::from(title.to_owned()),
+        Line::from("left/right select; enter locks; esc cancels or clears first pick"),
+    ];
+    if let Some(resource) = locked_resource {
+        lines.push(Line::from(vec![
+            Span::raw("first: "),
+            Span::styled(format!("{resource:?}"), resource_secondary_style(resource)),
+        ]));
+    }
+    lines.extend(rows.into_iter().map(Line::from));
     lines.push(resource_selector_line(selected_resource));
     lines
+}
+
+fn resource_choice_style(resource: Resource, hovered: bool, locked: Option<Resource>) -> Style {
+    if hovered {
+        resource_style(resource)
+    } else if locked == Some(resource) {
+        resource_secondary_style(resource)
+    } else {
+        subtle_box_style()
+    }
+}
+
+fn resource_secondary_style(resource: Resource) -> Style {
+    resource_style(resource).add_modifier(Modifier::DIM)
 }
 
 fn resource_selector_line(selected_resource: usize) -> Line<'static> {
@@ -1051,16 +1111,26 @@ pub(crate) fn adjust_drop_selection(
 }
 
 fn push_unknown_resource_card_inline(spans: &mut Vec<Span<'static>>) {
-    InlineBadge::new(vec![
-        Span::styled("[", resource_style(Resource::Brick)),
-        Span::styled("?", resource_style(Resource::Wheat)),
-        Span::styled("]", resource_style(Resource::Wood)),
-    ])
+    InlineBadge::new(
+        MiniCardGlyph::new("?")
+            .face_style(resource_style(Resource::Wheat))
+            .bracket_styles(
+                resource_style(Resource::Brick),
+                resource_style(Resource::Wood),
+            )
+            .spans(),
+    )
     .push_to(spans);
 }
 
 fn push_dev_card_inline(spans: &mut Vec<Span<'static>>) {
-    InlineBadge::new(vec![Span::styled("[?]", dev_card_style())]).push_to(spans);
+    InlineBadge::new(
+        MiniCardGlyph::new("?")
+            .face_style(dev_card_style())
+            .bracket_style(dev_card_style())
+            .spans(),
+    )
+    .push_to(spans);
 }
 
 fn dev_card_abbrev(card: UsableDevCard) -> &'static str {
@@ -1110,6 +1180,18 @@ fn dev_card_style() -> Style {
     Style::default().fg(Color::Magenta)
 }
 
+fn used_dev_card_count_style() -> Style {
+    Style::default().fg(Color::White)
+}
+
+fn active_dev_card_count_style() -> Style {
+    active_box_style()
+}
+
+fn queued_dev_card_count_style() -> Style {
+    subtle_box_style()
+}
+
 #[cfg(test)]
 mod tests {
     use catan_agents::remote_agent::UiModel;
@@ -1127,6 +1209,7 @@ mod tests {
         },
         primitives::{dev_card::DevCardKind, dev_card::UsableDevCard, player::PlayerId},
     };
+    use ratatui::style::{Color, Style};
 
     use super::{
         adjust_drop_selection, bank_trade_menu_lines, dev_card_lines, drop_personal_lines,
@@ -1165,6 +1248,44 @@ mod tests {
     }
 
     #[test]
+    fn dev_card_counts_use_state_specific_styles() {
+        let mut dev_cards = DevCardData::default();
+        dev_cards.used[UsableDevCard::Knight] = 1;
+        dev_cards.active[UsableDevCard::Knight] = 2;
+        dev_cards.queued[UsableDevCard::Knight] = 3;
+
+        let lines = dev_card_lines(&dev_cards);
+        assert!(lines[0].spans.iter().any(|span| {
+            span.content.as_ref().trim() == "1" && span.style.fg == Some(Color::White)
+        }));
+        assert!(lines[1].spans.iter().any(|span| {
+            span.content.as_ref().trim() == "2" && span.style.fg == Some(Color::Indexed(39))
+        }));
+        assert!(lines[2].spans.iter().any(|span| {
+            span.content.as_ref().trim() == "3" && span.style.fg == Some(Color::Indexed(244))
+        }));
+    }
+
+    #[test]
+    fn mini_card_glyph_allows_independent_face_and_bracket_styles() {
+        let glyph = super::MiniCardGlyph::new("4")
+            .face_style(Style::default().fg(Color::Blue))
+            .bracket_style(Style::default().fg(Color::White));
+        let spans = glyph.spans();
+
+        assert_eq!(
+            spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>(),
+            "[4]"
+        );
+        assert_eq!(spans[0].style.fg, Some(Color::White));
+        assert_eq!(spans[1].style.fg, Some(Color::Blue));
+        assert_eq!(spans[2].style.fg, Some(Color::White));
+    }
+
+    #[test]
     fn player_trade_glyph_lines_put_arrow_only_on_middle_row() {
         let trade = PlayerTrade {
             give: ResourceSet::from(Resource::Ore),
@@ -1179,6 +1300,61 @@ mod tests {
         assert!(!rendered[0].contains("->"));
         assert!(rendered[1].contains("->"));
         assert!(!rendered[2].contains("->"));
+    }
+
+    #[test]
+    fn trade_tree_lines_render_prime_offers_counters_and_response_slots() {
+        let session = catan_agents::remote_agent::UiTradeSession {
+            id: catan_core::gameplay::game::trade::TradeSessionId(0),
+            proposer: PlayerId::new(0),
+            offers: vec![
+                catan_agents::remote_agent::UiTradeOffer {
+                    id: catan_core::gameplay::game::trade::TradeOfferId(0),
+                    proposer: PlayerId::new(0),
+                    trade: PlayerTrade {
+                        give: ResourceSet::from(Resource::Ore),
+                        take: ResourceSet::from(Resource::Wood),
+                    },
+                },
+                catan_agents::remote_agent::UiTradeOffer {
+                    id: catan_core::gameplay::game::trade::TradeOfferId(1),
+                    proposer: PlayerId::new(3),
+                    trade: PlayerTrade {
+                        give: ResourceSet::from(Resource::Brick),
+                        take: ResourceSet::from(Resource::Wheat),
+                    },
+                },
+            ],
+            responses: vec![
+                None,
+                Some(catan_core::gameplay::game::trade::TradeResponseState::Waiting),
+                Some(
+                    catan_core::gameplay::game::trade::TradeResponseState::Accepted {
+                        offer_id: catan_core::gameplay::game::trade::TradeOfferId(0),
+                    },
+                ),
+                Some(
+                    catan_core::gameplay::game::trade::TradeResponseState::Countered {
+                        offer_id: catan_core::gameplay::game::trade::TradeOfferId(1),
+                    },
+                ),
+            ],
+            version: 0,
+            open: true,
+        };
+
+        let rendered = super::trade_tree_lines(&session, Some(0))
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("p0 offers:"));
+        assert!(rendered.contains("p0 accepts:"));
+        assert!(rendered.contains("(-)"));
+        assert!(rendered.contains("(v)"));
+        assert!(rendered.contains("(!)"));
+        assert!(rendered.contains(">>> p3 offers:"));
     }
 
     #[test]

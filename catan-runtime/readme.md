@@ -7,14 +7,70 @@
 Use one of the runtime configurations that includes a CLI player:
 
 ```sh
-cargo run -p catan-runtime
+cargo run --bin catan-runtime
 ```
 
 If a different configuration is needed, pass a JSON file under `catan-runtime/data/configurations/`:
 
 ```sh
-cargo run -p catan-runtime -- catan-runtime/data/configurations/observer_debug.json
+cargo run --bin catan-runtime -- catan-runtime/data/configurations/observer_debug.json
 ```
+
+## Logging
+
+Both the host runtime and the spawned CLI child use `env_logger`, so log verbosity is controlled with `RUST_LOG`.
+
+The CLI child runs in its own terminal window, but its logs are sent back to the host over a dedicated log socket. The host then re-emits those child log lines with the `catan_cli_child` target and includes the child role plus the original child target in the message:
+
+```text
+[player-0][catan_runtime::cli_child::session] selected road
+```
+
+To see trace logs from the CLI child and debug logs from `catan-runtime`, run:
+
+```sh
+RUST_LOG=warn,catan_runtime=debug,catan_runtime::cli_child=trace,catan_cli_child=trace \
+  cargo run --bin catan-runtime
+```
+
+For a specific configuration:
+
+```sh
+RUST_LOG=warn,catan_runtime=debug,catan_runtime::cli_child=trace,catan_cli_child=trace \
+  cargo run --bin catan-runtime -- \
+  catan-runtime/data/configurations/observer_debug.json
+```
+
+Useful variants:
+
+```sh
+# Only CLI child trace logs.
+RUST_LOG=warn,catan_runtime::cli_child=trace,catan_cli_child=trace \
+  cargo run --bin catan-runtime
+
+# Runtime debug logs plus all warnings from dependencies.
+RUST_LOG=warn,catan_runtime=debug cargo run --bin catan-runtime
+
+# Very verbose: trace everything in this crate, including the child before forwarding.
+RUST_LOG=catan_runtime=trace,catan_cli_child=trace cargo run --bin catan-runtime
+```
+
+The child log filter has two required parts:
+
+- `catan_runtime::cli_child=trace` lets the child process emit its own trace records.
+- `catan_cli_child=trace` lets the host print the forwarded child records.
+
+If either half is missing, child trace logs will not appear in the host terminal.
+
+Look for forwarded child logs in the terminal where the host command was run, not in the child TUI terminal. `catan-runtime` currently emits few host-side debug records, so `catan_runtime=debug` may be active without printing many runtime debug lines on a normal game path. To include debug records from core game-rule helpers too, add `catan_core=debug`.
+
+Runtime logs are also written to timestamped files by default under `target/catan-logs/`. The runtime prints the exact file path at startup:
+
+```text
+writing runtime logs to target/catan-logs/rusty-catan-YYYY-MM-DDTHH-MM-SSZ.log
+```
+
+Because the child logs are forwarded into the host logger, they appear in both stderr and that log file when runtime logging is enabled.
 
 ## Screen Layout
 

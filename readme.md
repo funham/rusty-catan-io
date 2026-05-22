@@ -9,14 +9,14 @@ cargo run -p catan-server -- \
   --port 8080
 
 # default local game
-cargo run -p catan-runtime --bin catan-runtime
+cargo run --bin catan-runtime
 
 # bot benchmark
-cargo run --release -p catan-runtime --bin catan-bench -- \
+cargo run --release --bin catan-bench -- \
   --games 1000 \
   --no-log
 
 # bot benchmark with legal-move counters
-cargo run --release -p catan-runtime --features bench-counters --bin catan-bench -- \
+cargo run --release --features bench-counters --bin catan-bench -- \
   --games 1000 \
   --no-log

@@ -22,8 +22,8 @@ use catan_core::gameplay::game::{
 use super::{
     input::{
         read_hex, read_init_action, read_initial_road, read_initial_settlement,
-        read_post_dice_action, read_regular_action, read_resource_collection, read_robbed_player,
-        read_trade_owner_action, read_trade_response_action,
+        read_post_dice_action, read_regular_action, read_robbed_player, read_trade_owner_action,
+        read_trade_response_action,
     },
     logging::init_socket_logger,
     tui::{CliUi, CliViewMode, ControlInput},
@@ -676,8 +676,11 @@ fn handle_decision(
                 "processing DropHalf decision id={}",
                 envelope.request_id
             );
-            let resources =
-                read_resource_collection(ui, &envelope.view, "drop brick wood wheat sheep ore: ")?;
+            let resources = loop {
+                if let Some(resources) = ui.select_drop_cards(&envelope.view)? {
+                    break resources;
+                }
+            };
             log::trace!("Resources to drop: {:?}", resources);
             Ok(DecisionResponseFrame::DropHalf(DropHalfCommand(resources)))
         }

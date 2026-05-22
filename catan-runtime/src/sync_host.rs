@@ -148,23 +148,22 @@ impl SyncGameHost {
 
     pub fn run_until_waiting(&mut self) -> Option<GameResult> {
         loop {
-            if let Some(output) = self.outputs.pop_front() {
-                self.deliver_output(&output);
-                continue;
-            }
-            if let Some(result) = self.engine.result().cloned() {
-                return Some(result);
-            }
             if let Some(input) = self.inputs.pop_front() {
                 let transaction = self
                     .engine
                     .submit(input.response)
                     .expect("engine submit should reduce");
                 self.stats.record_transaction(&transaction);
-                self.outputs
-                    .extend(projector::project_transaction(&transaction));
+                self.prepend_outputs(projector::project_transaction(&transaction));
                 self.enqueue_rejected_pending_decisions(&transaction);
                 continue;
+            }
+            if let Some(output) = self.outputs.pop_front() {
+                self.deliver_output(&output);
+                continue;
+            }
+            if let Some(result) = self.engine.result().cloned() {
+                return Some(result);
             }
             return None;
         }
@@ -208,6 +207,12 @@ impl SyncGameHost {
         }
     }
 
+    fn prepend_outputs(&mut self, outputs: Vec<GameOutput>) {
+        for output in outputs.into_iter().rev() {
+            self.outputs.push_front(output);
+        }
+    }
+
     fn enqueue_rejected_pending_decisions(
         &mut self,
         transaction: &catan_core::gameplay::game::event::EventTransaction,
@@ -245,10 +250,11 @@ mod tests {
     use catan_core::gameplay::{
         game::{
             command::RegularCommand,
-            decision::DecisionKind,
+            decision::{DecisionId, DecisionKind, DecisionLifetime, OpenDecision},
             event::GameEvent,
             input::{DecisionRequest, DecisionResponse, PlayerCommand},
         },
+        primitives::{resource::Resource, trade::PlayerTrade},
         random::GameRandom,
     };
 
@@ -459,6 +465,110 @@ mod tests {
             event,
             GameEvent::TradeCompleted { .. } | GameEvent::TradeCancelled { .. }
         )));
+    }
+
+    struct TradeOpeningSeat {
+        id: PlayerId,
+        opened_trade: bool,
+        owner_action_saw_responses: std::rc::Rc<std::cell::Cell<usize>>,
+    }
+
+    impl Seat for TradeOpeningSeat {
+        fn player_id(&self) -> PlayerId {
+            self.id
+        }
+
+        fn on_frame(&mut self, frame: SeatFrame<'_>, commands: &mut SeatCommandBuffer) {
+            let GameOutput::DecisionOpened(decision) = frame.output else {
+                return;
+            };
+            if decision.player_id() != self.id {
+                return;
+            }
+
+            match decision.kind() {
+                DecisionKind::RegularCommand if !self.opened_trade => {
+                    self.opened_trade = true;
+                    let command = PlayerCommand::Regular(RegularCommand::OfferTrade(PlayerTrade {
+                        give: Resource::Brick.into(),
+                        take: Resource::Ore.into(),
+                    }));
+                    let response = decision
+                        .respond_command(command)
+                        .expect("regular trade command should match regular decision");
+                    commands.push(SeatCommand { response });
+                }
+                DecisionKind::RegularCommand => {
+                    let response = decision
+                        .respond_command(PlayerCommand::Regular(RegularCommand::EndMove))
+                        .expect("end move should match regular decision");
+                    commands.push(SeatCommand { response });
+                }
+                DecisionKind::TradeOwnerAction { .. } => {
+                    let response_count = frame
+                        .view
+                        .public
+                        .trade_sessions
+                        .last()
+                        .map(|session| {
+                            session
+                                .responses
+                                .iter()
+                                .filter(|response| {
+                                    !matches!(
+                                        response,
+                                        Some(
+                                            catan_core::gameplay::game::trade::TradeResponseState::Waiting
+                                        ) | None
+                                    )
+                                })
+                                .count()
+                        })
+                        .unwrap_or_default();
+                    self.owner_action_saw_responses.set(response_count);
+                    let response = decision
+                        .respond_command(PlayerCommand::Trade(
+                            catan_core::gameplay::game::input::TradeCommand::Cancel,
+                        ))
+                        .expect("cancel should match trade owner decision");
+                    commands.push(SeatCommand { response });
+                }
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn queued_bot_trade_responses_are_applied_before_owner_prompt() {
+        let mut state = SetupGameState::default().finish();
+        *state.players.get_mut(P0).resources() += Resource::Brick.into();
+        let mut engine = GameEngine::new(state);
+        engine
+            .apply_event(&GameEvent::DecisionOpened(OpenDecision {
+                id: DecisionId(0),
+                player_id: P0,
+                kind: DecisionKind::RegularCommand,
+                lifetime: DecisionLifetime::OneShot,
+            }))
+            .expect("test decision should apply");
+
+        let owner_action_saw_responses = std::rc::Rc::new(std::cell::Cell::new(0));
+        let seats: Vec<Box<dyn Seat>> = vec![
+            Box::new(TradeOpeningSeat {
+                id: P0,
+                opened_trade: false,
+                owner_action_saw_responses: owner_action_saw_responses.clone(),
+            }),
+            bot_seat(Box::new(LazyAgent::new(PlayerId::new(1)))),
+            bot_seat(Box::new(LazyAgent::new(PlayerId::new(2)))),
+            bot_seat(Box::new(LazyAgent::new(PlayerId::new(3)))),
+        ];
+        let mut host = SyncGameHost::from_engine(engine, seats);
+
+        host.start();
+        let _ = host.run_until_waiting();
+
+        assert_eq!(owner_action_saw_responses.get(), 3);
     }
 
     struct EventRecordingObserver {

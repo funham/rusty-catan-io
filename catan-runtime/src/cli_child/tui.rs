@@ -45,8 +45,8 @@ use super::{
     panels::{
         adjust_drop_selection, bank_panel_lines, bank_trade_menu_lines, drop_personal_lines,
         game_ended_lines, personal_model_lines, player_menu_lines, player_trade_builder_lines,
-        public_player_lines, resource_picker_lines, snapshot_state_lines, trade_action_menu_lines,
-        trade_panel_lines,
+        public_player_lines, resource_choice_lines, snapshot_state_lines, trade_panel_lines,
+        trade_tree_lines,
     },
     render::{field_lines, field_lines_cropped_left, field_size},
     selectors::{
@@ -62,6 +62,7 @@ pub(crate) struct CliUi {
     overlay: FieldOverlay,
     public_override: Option<Vec<Line<'static>>>,
     personal_override: Option<Vec<Line<'static>>>,
+    interactive_override: Option<Vec<Line<'static>>>,
     observer_event_count: u64,
     observer_summary: Option<String>,
     journal: EventJournal,
@@ -85,27 +86,74 @@ pub(crate) enum ControlInput {
 pub(crate) enum TradeResponseMenuAction {
     Accept(TradeOfferId),
     Reject,
-    Counter,
+    Counter(PlayerTrade),
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct CardGlyph {
     label: String,
+    style: CardGlyphStyle,
+    indices: [Option<CardGlyphIndex>; 3],
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CardGlyphStyle {
+    border: Style,
+    face: Style,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CardGlyphIndex {
+    value: u16,
     style: Style,
-    indices: [Option<u16>; 3],
 }
 
 impl CardGlyph {
     pub(crate) fn new(label: impl Into<String>, style: Style) -> Self {
         Self {
             label: label.into(),
-            style,
+            style: CardGlyphStyle {
+                border: style,
+                face: style,
+            },
             indices: [None, None, None],
         }
     }
 
+    #[allow(dead_code)]
+    pub(crate) fn border_style(mut self, style: Style) -> Self {
+        self.style.border = style;
+        self
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn face_style(mut self, style: Style) -> Self {
+        self.style.face = style;
+        self
+    }
+
     pub(crate) fn indices(mut self, indices: [Option<u16>; 3]) -> Self {
-        self.indices = indices;
+        self.indices = indices.map(|index| {
+            index.map(|value| CardGlyphIndex {
+                value,
+                style: Style::default(),
+            })
+        });
+        self
+    }
+
+    pub(crate) fn index_top(mut self, value: u16, style: Style) -> Self {
+        self.indices[0] = Some(CardGlyphIndex { value, style });
+        self
+    }
+
+    pub(crate) fn index_mid(mut self, value: u16, style: Style) -> Self {
+        self.indices[1] = Some(CardGlyphIndex { value, style });
+        self
+    }
+
+    pub(crate) fn index_bottom(mut self, value: u16, style: Style) -> Self {
+        self.indices[2] = Some(CardGlyphIndex { value, style });
         self
     }
 
@@ -115,10 +163,9 @@ impl CardGlyph {
         rows.into_iter()
             .zip(self.indices)
             .map(|(row, index)| {
-                Line::from(vec![
-                    Span::styled(row, self.style),
-                    Span::raw(format!(" {:>1}", count_label(index))),
-                ])
+                let mut spans = row;
+                push_index(&mut spans, index);
+                Line::from(spans)
             })
             .collect()
     }
@@ -126,19 +173,85 @@ impl CardGlyph {
     pub(crate) fn push_to_rows(&self, rows: &mut [Vec<Span<'static>>; 3]) {
         let row_texts = self.row_texts();
         for (idx, row) in row_texts.into_iter().enumerate() {
-            rows[idx].push(Span::styled(row, self.style));
+            rows[idx].extend(row);
             if self.indices.iter().any(Option::is_some) {
-                rows[idx].push(Span::raw(format!(" {:>1}", count_label(self.indices[idx]))));
+                push_index(&mut rows[idx], self.indices[idx]);
             }
         }
     }
 
-    fn row_texts(&self) -> [String; 3] {
+    fn row_texts(&self) -> [Vec<Span<'static>>; 3] {
         [
-            "┌──┐".to_owned(),
-            format!("│{:^2}│", truncate_cell_text(&self.label, 2)),
-            "└──┘".to_owned(),
+            vec![Span::styled("┌──┐", self.style.border)],
+            vec![
+                Span::styled("│", self.style.border),
+                Span::styled(
+                    format!("{:^2}", truncate_cell_text(&self.label, 2)),
+                    self.style.face,
+                ),
+                Span::styled("│", self.style.border),
+            ],
+            vec![Span::styled("└──┘", self.style.border)],
         ]
+    }
+}
+
+fn push_index(spans: &mut Vec<Span<'static>>, index: Option<CardGlyphIndex>) {
+    spans.push(Span::raw(" "));
+    match index {
+        Some(index) => spans.push(Span::styled(
+            format!("{:>1}", count_label(Some(index.value))),
+            index.style,
+        )),
+        None => spans.push(Span::raw(count_label(None))),
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct MiniCardGlyph {
+    face: String,
+    face_style: Style,
+    left_bracket_style: Style,
+    right_bracket_style: Style,
+}
+
+impl MiniCardGlyph {
+    pub(crate) fn new(face: impl Into<String>) -> Self {
+        Self {
+            face: face.into(),
+            face_style: Style::default(),
+            left_bracket_style: Style::default(),
+            right_bracket_style: Style::default(),
+        }
+    }
+
+    pub(crate) fn face_style(mut self, style: Style) -> Self {
+        self.face_style = style;
+        self
+    }
+
+    pub(crate) fn bracket_style(mut self, style: Style) -> Self {
+        self.left_bracket_style = style;
+        self.right_bracket_style = style;
+        self
+    }
+
+    pub(crate) fn bracket_styles(mut self, left: Style, right: Style) -> Self {
+        self.left_bracket_style = left;
+        self.right_bracket_style = right;
+        self
+    }
+
+    pub(crate) fn spans(&self) -> Vec<Span<'static>> {
+        vec![
+            Span::styled("[", self.left_bracket_style),
+            Span::styled(truncate_cell_text(&self.face, 1), self.face_style),
+            Span::styled("]", self.right_bracket_style),
+        ]
+    }
+
+    pub(crate) fn push_to(&self, target: &mut Vec<Span<'static>>) {
+        target.extend(self.spans());
     }
 }
 
@@ -218,6 +331,7 @@ impl CliUi {
             overlay: FieldOverlay::default(),
             public_override: None,
             personal_override: None,
+            interactive_override: None,
             observer_event_count: 0,
             observer_summary: None,
             journal: EventJournal::new(64),
@@ -234,6 +348,7 @@ impl CliUi {
         self.overlay.preview.clear();
         self.public_override = None;
         self.personal_override = None;
+        self.interactive_override = None;
         self.show_command_help = false;
         self.draw(None, "", "")
     }
@@ -250,6 +365,7 @@ impl CliUi {
         self.overlay.preview.clear();
         self.public_override = None;
         self.personal_override = None;
+        self.interactive_override = None;
         self.show_command_help = false;
         self.draw(Some(model), "", "")
     }
@@ -299,6 +415,7 @@ impl CliUi {
         self.overlay.preview.clear();
         self.public_override = Some(game_ended_lines(model, winner_id, turn_no, stats));
         self.personal_override = None;
+        self.interactive_override = None;
         self.show_command_help = false;
         loop {
             self.draw(Some(model), "[press esc to quit]", "")?;
@@ -321,6 +438,7 @@ impl CliUi {
         self.overlay.preview.clear();
         self.public_override = None;
         self.personal_override = None;
+        self.interactive_override = None;
         self.show_command_help = false;
         loop {
             self.draw(Some(model), prompt, &input)?;
@@ -543,7 +661,7 @@ impl CliUi {
         }];
         self.message = "cycle adjacent initial roads with arrows/tab; enter confirms".to_owned();
 
-        let mut selected = 0;
+        let mut selected: usize = 0;
         loop {
             let road = roads[selected];
             self.overlay.selected = Some(FieldSelection::Path(road.path));
@@ -578,13 +696,23 @@ impl CliUi {
         builds: Vec<Build>,
         prompt: &str,
     ) -> io::Result<Option<Build>> {
+        self.select_build_with_preview(model, builds, prompt, Vec::new())
+    }
+
+    pub(crate) fn select_build_with_preview(
+        &mut self,
+        model: &UiModel,
+        builds: Vec<Build>,
+        prompt: &str,
+        fixed_preview: Vec<FieldPreview>,
+    ) -> io::Result<Option<Build>> {
         if builds.is_empty() {
             self.message = "no legal placements".to_owned();
             return Ok(None);
         }
 
         let actor = model.actor.unwrap_or_default();
-        let mut selected = 0;
+        let mut selected: usize = 0;
         self.message = "cycle placements with arrows/tab; enter confirms; esc cancels".to_owned();
         loop {
             let build = builds[selected];
@@ -595,7 +723,8 @@ impl CliUi {
                 }
             });
             self.overlay.status = SelectionStatus::Available;
-            self.overlay.preview = vec![match build {
+            self.overlay.preview = fixed_preview.clone();
+            self.overlay.preview.push(match build {
                 Build::Road(road) => FieldPreview::Road {
                     player_id: actor,
                     road,
@@ -604,7 +733,7 @@ impl CliUi {
                     player_id: actor,
                     establishment,
                 },
-            }];
+            });
             self.draw(Some(model), prompt, &build_label(build))?;
 
             if let CrosstermEvent::Key(key) = event::read()?
@@ -649,7 +778,7 @@ impl CliUi {
             format!("select exactly {required} cards to drop; enter confirms; esc cancels");
 
         loop {
-            self.personal_override = Some(drop_personal_lines(
+            self.interactive_override = Some(drop_personal_lines(
                 private.player_id,
                 &private.resources,
                 &private.dev_cards,
@@ -670,14 +799,14 @@ impl CliUi {
                 match key.code {
                     KeyCode::Enter => {
                         if selected.total() == required {
-                            self.personal_override = None;
+                            self.interactive_override = None;
                             return Ok(Some(selected));
                         }
                         self.message =
                             format!("selected {} cards; expected {}", selected.total(), required);
                     }
                     KeyCode::Esc => {
-                        self.personal_override = None;
+                        self.interactive_override = None;
                         self.message = "drop cancelled".to_owned();
                         return Ok(None);
                     }
@@ -715,7 +844,7 @@ impl CliUi {
         let mut selected = 0;
         self.message = "select bank trade with up/down; enter confirms; esc cancels".to_owned();
         loop {
-            self.personal_override = Some(bank_trade_menu_lines(&options, selected));
+            self.interactive_override = Some(bank_trade_menu_lines(&options, selected));
             self.draw(
                 Some(model),
                 "bank-trade: ",
@@ -726,11 +855,11 @@ impl CliUi {
             {
                 match key.code {
                     KeyCode::Enter => {
-                        self.personal_override = None;
+                        self.interactive_override = None;
                         return Ok(Some(options[selected]));
                     }
                     KeyCode::Esc => {
-                        self.personal_override = None;
+                        self.interactive_override = None;
                         self.message = "bank trade cancelled".to_owned();
                         return Ok(None);
                     }
@@ -758,30 +887,68 @@ impl CliUi {
             return Ok(None);
         };
 
-        let mut options = session
+        let offer_indices = session
             .offers
             .iter()
-            .filter(|offer| offer.proposer == session.proposer)
-            .map(|offer| {
-                (
-                    format!("accept #{} from p{}", offer.id.0, offer.proposer),
-                    Some(offer.trade),
-                    TradeResponseMenuAction::Accept(offer.id),
-                )
-            })
+            .enumerate()
+            .filter_map(|(idx, offer)| (offer.proposer == session.proposer).then_some(idx))
             .collect::<Vec<_>>();
-        options.push((
-            "counter with new offer".to_owned(),
-            None,
-            TradeResponseMenuAction::Counter,
-        ));
-        options.push((
-            "reject trade".to_owned(),
-            None,
-            TradeResponseMenuAction::Reject,
-        ));
+        if offer_indices.is_empty() {
+            self.message = "no active trade offers".to_owned();
+            return Ok(None);
+        }
 
-        self.select_trade_menu(model, "trade response", options)
+        let mut selected = 0;
+        self.message = "select trade with up/down; enter decides; esc rejects trade".to_owned();
+        loop {
+            let offer_idx = offer_indices[selected];
+            self.interactive_override = Some(trade_browser_lines(session, Some(offer_idx), None));
+            self.draw(
+                Some(model),
+                "trade: ",
+                &format!("offer #{}", session.offers[offer_idx].id.0),
+            )?;
+            if let CrosstermEvent::Key(key) = event::read()?
+                && key.kind == KeyEventKind::Press
+            {
+                match key.code {
+                    KeyCode::Enter => {
+                        let offer = &session.offers[offer_idx];
+                        match self.select_trade_decision(
+                            model,
+                            session,
+                            Some(offer_idx),
+                            &["accept", "reject", "counter"],
+                        )? {
+                            Some("accept") => {
+                                self.interactive_override = None;
+                                return Ok(Some(TradeResponseMenuAction::Accept(offer.id)));
+                            }
+                            Some("reject") => {
+                                self.interactive_override = None;
+                                return Ok(Some(TradeResponseMenuAction::Reject));
+                            }
+                            Some("counter") => {
+                                if let Some(offer) = self.select_player_trade_offer(model)? {
+                                    return Ok(Some(TradeResponseMenuAction::Counter(offer)));
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    KeyCode::Esc => {
+                        self.interactive_override = None;
+                        self.message = "trade rejected".to_owned();
+                        return Ok(Some(TradeResponseMenuAction::Reject));
+                    }
+                    KeyCode::Up => {
+                        selected = selected.checked_sub(1).unwrap_or(offer_indices.len() - 1)
+                    }
+                    KeyCode::Down => selected = (selected + 1) % offer_indices.len(),
+                    _ => {}
+                }
+            }
+        }
     }
 
     pub(crate) fn select_trade_owner_action(
@@ -800,36 +967,78 @@ impl CliUi {
             return Ok(None);
         };
 
-        let mut options = Vec::new();
-        for offer in &session.offers {
-            if offer.proposer == session.proposer {
-                if trade_offer_is_accepted(session, offer.id) {
-                    options.push((
-                        format!("confirm #{} with accepted peer", offer.id.0),
-                        Some(offer.trade),
-                        TradeCommand::Commit { offer_id: offer.id },
-                    ));
+        let mut selected: usize = 0;
+        let row_count = session.offers.len() + 1;
+        self.message = "select trade with up/down; enter decides; esc cancels trade".to_owned();
+        loop {
+            let selected_offer = selected.checked_sub(1);
+            self.interactive_override = Some(trade_browser_lines(
+                session,
+                selected_offer,
+                Some(selected == 0),
+            ));
+            self.draw(
+                Some(model),
+                "trade: ",
+                if selected == 0 {
+                    "+ new offer"
+                } else {
+                    "selected offer"
+                },
+            )?;
+            if let CrosstermEvent::Key(key) = event::read()?
+                && key.kind == KeyEventKind::Press
+            {
+                match key.code {
+                    KeyCode::Enter if selected == 0 => {
+                        if let Some(offer) = self.select_player_trade_offer(model)? {
+                            return Ok(Some(TradeCommand::Propose { offer }));
+                        }
+                    }
+                    KeyCode::Enter => {
+                        let offer_idx = selected - 1;
+                        let offer = &session.offers[offer_idx];
+                        let actions: &[&str] = if offer.proposer == session.proposer {
+                            if trade_offer_is_accepted(session, offer.id) {
+                                &["commit", "cancel"]
+                            } else {
+                                &["cancel"]
+                            }
+                        } else {
+                            &["commit", "reject"]
+                        };
+                        match self.select_trade_decision(
+                            model,
+                            session,
+                            Some(offer_idx),
+                            actions,
+                        )? {
+                            Some("commit") => {
+                                self.interactive_override = None;
+                                return Ok(Some(TradeCommand::Commit { offer_id: offer.id }));
+                            }
+                            Some("reject") => {
+                                self.interactive_override = None;
+                                return Ok(Some(TradeCommand::Reject { offer_id: offer.id }));
+                            }
+                            Some("cancel") => {
+                                self.interactive_override = None;
+                                return Ok(Some(TradeCommand::Cancel));
+                            }
+                            _ => {}
+                        }
+                    }
+                    KeyCode::Esc => {
+                        self.interactive_override = None;
+                        self.message = "trade cancelled".to_owned();
+                        return Ok(Some(TradeCommand::Cancel));
+                    }
+                    KeyCode::Up => selected = selected.checked_sub(1).unwrap_or(row_count - 1),
+                    KeyCode::Down => selected = (selected + 1) % row_count,
+                    _ => {}
                 }
-            } else {
-                options.push((
-                    format!("confirm counter #{} from p{}", offer.id.0, offer.proposer),
-                    Some(offer.trade),
-                    TradeCommand::Commit { offer_id: offer.id },
-                ));
-                options.push((
-                    format!("reject counter #{} from p{}", offer.id.0, offer.proposer),
-                    Some(offer.trade),
-                    TradeCommand::Reject { offer_id: offer.id },
-                ));
             }
         }
-        options.push((
-            "cancel original offer".to_owned(),
-            None,
-            TradeCommand::Cancel,
-        ));
-
-        self.select_trade_menu(model, "trade owner", options)
     }
 
     pub(crate) fn select_player_trade_offer(
@@ -849,7 +1058,7 @@ impl CliUi {
         self.message = "build trade with arrows/tab; enter offers; esc cancels".to_owned();
 
         loop {
-            self.personal_override = Some(player_trade_builder_lines(
+            self.interactive_override = Some(player_trade_builder_lines(
                 &available,
                 &give,
                 &take,
@@ -879,11 +1088,11 @@ impl CliUi {
                                 "same resource cannot appear on both trade sides".to_owned();
                             continue;
                         }
-                        self.personal_override = None;
+                        self.interactive_override = None;
                         return Ok(Some(PlayerTrade { give, take }));
                     }
                     KeyCode::Esc => {
-                        self.personal_override = None;
+                        self.interactive_override = None;
                         self.message = "player trade cancelled".to_owned();
                         return Ok(None);
                     }
@@ -924,41 +1133,38 @@ impl CliUi {
         }
     }
 
-    fn select_trade_menu<T: Clone>(
+    fn select_trade_decision(
         &mut self,
         model: &UiModel,
-        title: &str,
-        options: Vec<(String, Option<PlayerTrade>, T)>,
-    ) -> io::Result<Option<T>> {
-        if options.is_empty() {
-            self.message = "no trade actions available".to_owned();
+        session: &UiTradeSession,
+        selected_offer: Option<usize>,
+        actions: &[&'static str],
+    ) -> io::Result<Option<&'static str>> {
+        if actions.is_empty() {
             return Ok(None);
         }
 
         let mut selected = 0;
-        self.message = "select trade action with up/down; enter confirms; esc cancels".to_owned();
         loop {
-            let lines = options
-                .iter()
-                .map(|(label, trade, _)| (label.clone(), *trade))
-                .collect::<Vec<_>>();
-            self.personal_override = Some(trade_action_menu_lines(title, &lines, selected));
-            self.draw(Some(model), "trade: ", &options[selected].0)?;
+            self.interactive_override = Some(trade_decision_lines(
+                session,
+                selected_offer,
+                actions,
+                selected,
+            ));
+            self.draw(Some(model), "trade action: ", actions[selected])?;
             if let CrosstermEvent::Key(key) = event::read()?
                 && key.kind == KeyEventKind::Press
             {
                 match key.code {
-                    KeyCode::Enter => {
-                        self.personal_override = None;
-                        return Ok(Some(options[selected].2.clone()));
+                    KeyCode::Enter => return Ok(Some(actions[selected])),
+                    KeyCode::Esc => return Ok(None),
+                    KeyCode::Left => {
+                        selected = selected.checked_sub(1).unwrap_or(actions.len() - 1);
                     }
-                    KeyCode::Esc => {
-                        self.personal_override = None;
-                        self.message = "trade action cancelled".to_owned();
-                        return Ok(None);
+                    KeyCode::Right => {
+                        selected = (selected + 1) % actions.len();
                     }
-                    KeyCode::Up => selected = selected.checked_sub(1).unwrap_or(options.len() - 1),
-                    KeyCode::Down => selected = (selected + 1) % options.len(),
                     _ => {}
                 }
             }
@@ -974,7 +1180,7 @@ impl CliUi {
         let mut selected = 0;
         self.message = message.to_owned();
         loop {
-            self.personal_override = Some(resource_picker_lines(selected));
+            self.interactive_override = Some(resource_choice_lines("resource", selected, None));
             let resource = Resource::ALL[selected];
             self.draw(Some(model), prompt, &format!("{resource:?}"))?;
             if let CrosstermEvent::Key(key) = event::read()?
@@ -982,13 +1188,64 @@ impl CliUi {
             {
                 match key.code {
                     KeyCode::Enter => {
-                        self.personal_override = None;
+                        self.interactive_override = None;
                         return Ok(Some(resource));
                     }
                     KeyCode::Esc => {
-                        self.personal_override = None;
+                        self.interactive_override = None;
                         self.message = "resource selection cancelled".to_owned();
                         return Ok(None);
+                    }
+                    KeyCode::Left => {
+                        selected = selected.checked_sub(1).unwrap_or(Resource::ALL.len() - 1);
+                    }
+                    KeyCode::Right => {
+                        selected = (selected + 1) % Resource::ALL.len();
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    pub(crate) fn select_resource_pair(
+        &mut self,
+        model: &UiModel,
+        prompt: &str,
+        message: &str,
+    ) -> io::Result<Option<[Resource; 2]>> {
+        let mut selected = 0;
+        let mut first = None;
+        self.message = message.to_owned();
+        loop {
+            let title = if first.is_some() {
+                "year of plenty: second"
+            } else {
+                "year of plenty: first"
+            };
+            self.interactive_override = Some(resource_choice_lines(title, selected, first));
+            let resource = Resource::ALL[selected];
+            self.draw(Some(model), prompt, &format!("{resource:?}"))?;
+            if let CrosstermEvent::Key(key) = event::read()?
+                && key.kind == KeyEventKind::Press
+            {
+                match key.code {
+                    KeyCode::Enter => {
+                        if let Some(first) = first {
+                            self.interactive_override = None;
+                            return Ok(Some([first, resource]));
+                        }
+                        first = Some(resource);
+                        self.message = "first resource locked; select second resource".to_owned();
+                    }
+                    KeyCode::Esc => {
+                        if first.take().is_some() {
+                            self.message = "first resource cleared".to_owned();
+                        } else {
+                            self.interactive_override = None;
+                            self.message = "resource selection cancelled".to_owned();
+                            return Ok(None);
+                        }
                     }
                     KeyCode::Left => {
                         selected = selected.checked_sub(1).unwrap_or(Resource::ALL.len() - 1);
@@ -1018,18 +1275,18 @@ impl CliUi {
         let mut selected = 0;
         self.message = "select player with up/down; enter confirms; esc cancels".to_owned();
         loop {
-            self.personal_override = Some(player_menu_lines(candidates, selected));
+            self.interactive_override = Some(player_menu_lines(candidates, selected));
             self.draw(Some(model), prompt, &format!("p{}", candidates[selected]))?;
             if let CrosstermEvent::Key(key) = event::read()?
                 && key.kind == KeyEventKind::Press
             {
                 match key.code {
                     KeyCode::Enter => {
-                        self.personal_override = None;
+                        self.interactive_override = None;
                         return Ok(Some(candidates[selected]));
                     }
                     KeyCode::Esc => {
-                        self.personal_override = None;
+                        self.interactive_override = None;
                         self.message = "player selection cancelled".to_owned();
                         return Ok(None);
                     }
@@ -1048,6 +1305,7 @@ impl CliUi {
         let overlay = self.overlay.clone();
         let public_override = self.public_override.clone();
         let personal_override = self.personal_override.clone();
+        let interactive_override = self.interactive_override.clone();
         let view_mode = self.view_mode;
         let observer_event_count = self.observer_event_count;
         let observer_summary = self.observer_summary.clone();
@@ -1079,6 +1337,7 @@ impl CliUi {
                         NormalRenderState {
                             public_override,
                             personal_override,
+                            interactive_override,
                             journal_entries: &journal_entries,
                             active_player,
                         },
@@ -1144,6 +1403,50 @@ fn trade_offer_is_accepted(session: &UiTradeSession, offer_id: TradeOfferId) -> 
             TradeResponseState::Accepted { offer_id: accepted } if *accepted == offer_id
         )
     })
+}
+
+fn trade_browser_lines(
+    session: &UiTradeSession,
+    selected_offer: Option<usize>,
+    new_offer_selected: Option<bool>,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    if let Some(selected) = new_offer_selected {
+        lines.push(Line::from(vec![
+            Span::styled(
+                if selected { "> " } else { "  " },
+                Style::default().fg(Color::Yellow),
+            ),
+            Span::styled("+", Style::default().fg(Color::Green)),
+            Span::raw(" new trade"),
+        ]));
+    }
+    lines.extend(trade_tree_lines(session, selected_offer));
+    lines
+}
+
+fn trade_decision_lines(
+    session: &UiTradeSession,
+    selected_offer: Option<usize>,
+    actions: &[&'static str],
+    selected_action: usize,
+) -> Vec<Line<'static>> {
+    let mut lines = trade_browser_lines(session, selected_offer, None);
+    lines.push(Line::from(""));
+    let mut action_spans = Vec::new();
+    for (idx, action) in actions.iter().enumerate() {
+        if idx > 0 {
+            action_spans.push(Span::raw("  "));
+        }
+        let style = if idx == selected_action {
+            Style::default().fg(Color::Yellow)
+        } else {
+            subtle_panel_style()
+        };
+        action_spans.push(Span::styled(format!("[{action}]"), style));
+    }
+    lines.push(Line::from(action_spans));
+    lines
 }
 
 fn adjust_player_trade_selection(
@@ -1357,12 +1660,14 @@ fn right_column_area(layout: NormalLayoutAreas) -> Rect {
         .journal
         .width
         .max(layout.bank.width)
-        .max(layout.players.width);
+        .max(layout.players.width)
+        .max(layout.personal.width);
     let bottom = layout
         .journal
         .bottom()
         .max(layout.bank.bottom())
-        .max(layout.players.bottom());
+        .max(layout.players.bottom())
+        .max(layout.personal.bottom());
     Rect::new(x, y, width, bottom.saturating_sub(y))
 }
 
@@ -1384,6 +1689,7 @@ fn active_panel_style() -> Style {
 struct NormalRenderState<'a> {
     public_override: Option<Vec<Line<'static>>>,
     personal_override: Option<Vec<Line<'static>>>,
+    interactive_override: Option<Vec<Line<'static>>>,
     journal_entries: &'a [JournalEntry],
     active_player: Option<PlayerId>,
 }
@@ -1402,16 +1708,20 @@ fn render_normal_layout(
     overlay: &FieldOverlay,
     state: NormalRenderState<'_>,
 ) {
-    let field = Paragraph::new(field_lines(model, overlay)).block(panel_block("Field"));
+    let field = Paragraph::new(center_field_lines(
+        field_lines(model, overlay),
+        layout.field,
+    ))
+    .block(panel_block("Field"));
     frame.render_widget(field, layout.field);
 
-    let trade = Paragraph::new(trade_panel_lines(
-        model,
-        usize::from(layout.trade.width.saturating_sub(2)),
-    ))
-    .wrap(Wrap { trim: false })
-    .block(panel_block("Trade"));
-    frame.render_widget(trade, layout.trade);
+    let interactive_lines = state.interactive_override.unwrap_or_else(|| {
+        trade_panel_lines(model, usize::from(layout.trade.width.saturating_sub(2)))
+    });
+    let interactive = Paragraph::new(interactive_lines)
+        .wrap(Wrap { trim: false })
+        .block(panel_block("Interactive"));
+    frame.render_widget(interactive, layout.trade);
 
     if let Some(lines) = state.public_override {
         let area = right_column_area(layout);
@@ -1433,6 +1743,33 @@ fn render_normal_layout(
     .wrap(Wrap { trim: false })
     .block(panel_block("Private"));
     frame.render_widget(personal, layout.personal);
+}
+
+fn center_field_lines(lines: Vec<Line<'static>>, area: Rect) -> Vec<Line<'static>> {
+    let inner_width = usize::from(area.width.saturating_sub(2));
+    let inner_height = usize::from(area.height.saturating_sub(2));
+    let content_width = lines.iter().map(Line::width).max().unwrap_or(0);
+    let left_pad = inner_width.saturating_sub(content_width) / 2;
+    let top_pad = inner_height.saturating_sub(lines.len()) / 2;
+    let skip_rows = lines.len().saturating_sub(inner_height) / 2;
+
+    let mut centered = Vec::with_capacity(top_pad + lines.len());
+    centered.extend((0..top_pad).map(|_| Line::from("")));
+    centered.extend(
+        lines
+            .into_iter()
+            .skip(skip_rows)
+            .take(inner_height)
+            .map(|mut line| {
+                if left_pad > 0 {
+                    let mut spans = vec![Span::raw(" ".repeat(left_pad))];
+                    spans.extend(line.spans);
+                    line.spans = spans;
+                }
+                line
+            }),
+    );
+    centered
 }
 
 fn render_snapshot_layout(

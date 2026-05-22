@@ -21,10 +21,10 @@ use catan_core::{
         dev_card::{DevCardUsage, UsableDevCard},
         player::PlayerId,
         resource::ResourceSet,
-        trade::PlayerTrade,
     },
     topology::{Hex, Intersection},
 };
+use catan_render::field::FieldPreview;
 
 use super::{
     selectors::{
@@ -212,12 +212,8 @@ pub(crate) fn read_trade_response_action(
         Some(super::tui::TradeResponseMenuAction::Reject) | None => {
             Ok(TradeResponseCommand::Reject)
         }
-        Some(super::tui::TradeResponseMenuAction::Counter) => {
-            let give = read_resource_collection(ui, model, "counter give counts: ")?;
-            let take = read_resource_collection(ui, model, "counter take counts: ")?;
-            Ok(TradeResponseCommand::Counter {
-                offer: PlayerTrade { give, take },
-            })
+        Some(super::tui::TradeResponseMenuAction::Counter(offer)) => {
+            Ok(TradeResponseCommand::Counter { offer })
         }
     }
 }
@@ -305,25 +301,13 @@ fn handle_interactive_dev_card_action(
                 "select monopoly resource with left/right",
             )?
             .map(DevCardUsage::Monopoly),
-        PartialDevCardMode::YearOfPlenty => {
-            let Some(first) = ui.select_resource(
+        PartialDevCardMode::YearOfPlenty => ui
+            .select_resource_pair(
                 model,
-                "year-of-plenty 1: ",
-                "select first year-of-plenty resource",
+                "year-of-plenty: ",
+                "select two year-of-plenty resources",
             )?
-            else {
-                return Ok(CommandOutcome::Handled);
-            };
-            let Some(second) = ui.select_resource(
-                model,
-                "year-of-plenty 2: ",
-                "select second year-of-plenty resource",
-            )?
-            else {
-                return Ok(CommandOutcome::Handled);
-            };
-            Some(DevCardUsage::YearOfPlenty([first, second]))
-        }
+            .map(DevCardUsage::YearOfPlenty),
     };
 
     Ok(match usage {
@@ -407,7 +391,17 @@ fn select_roadbuild_usage(
     };
 
     let second_options = roadbuild_second_options(&envelope.legal, first.path);
-    let Some(Build::Road(second)) = ui.select_build(model, second_options, "roadbuild 2: ")? else {
+    let actor = model.actor.unwrap_or_default();
+    let Some(Build::Road(second)) = ui.select_build_with_preview(
+        model,
+        second_options,
+        "roadbuild 2: ",
+        vec![FieldPreview::Road {
+            player_id: actor,
+            road: first,
+        }],
+    )?
+    else {
         return Ok(None);
     };
 
@@ -579,44 +573,6 @@ fn command_label(command: CliCommand) -> &'static str {
         | CliCommand::PlayerTradeProposal { .. }
         | CliCommand::Regular(RegularCommand::OfferTrade(_)) => "player-trade",
         CliCommand::Regular(RegularCommand::UseDevCard(_)) | CliCommand::DevCard(_) => "dev-card",
-    }
-}
-
-pub(crate) fn read_resource_collection(
-    ui: &mut CliUi,
-    model: &UiModel,
-    prompt: &str,
-) -> io::Result<ResourceSet> {
-    log::trace!("Reading resource collection");
-    loop {
-        let line = ui.prompt(model, prompt)?;
-        if line == "drop" {
-            if let Some(resources) = ui.select_drop_cards(model)? {
-                return Ok(resources);
-            }
-            continue;
-        }
-        let parts = line
-            .split_whitespace()
-            .map(str::parse::<u16>)
-            .collect::<Result<Vec<_>, _>>();
-        match parts {
-            Ok(parts) if parts.len() == 5 => {
-                let resources = ResourceSet {
-                    brick: parts[0],
-                    wood: parts[1],
-                    wheat: parts[2],
-                    sheep: parts[3],
-                    ore: parts[4],
-                };
-                log::trace!("Resource collection read: {:?}", resources);
-                return Ok(resources);
-            }
-            _ => {
-                log::warn!("Invalid resource collection input: {}", line);
-                ui.set_message("expected five unsigned integers".to_owned())?
-            }
-        }
     }
 }
 
