@@ -8,7 +8,9 @@ use std::{
     time::Duration,
 };
 
-use catan_agents::remote_agent::{LegalDecisionOptions, UiModel, UiTradeSession, ui_model_summary};
+use catan_agents::remote_agent::{
+    LegalDecisionOptions, UiModel, UiPrivatePlayer, UiTradeOffer, UiTradeSession, ui_model_summary,
+};
 use catan_core::gameplay::{
     game::{
         event::{GameEndPlayerStats, GameEvent},
@@ -43,10 +45,10 @@ use super::{
     labels::{bank_trade_label, build_label, hex_label, intersection_label, path_label},
     layout::{NormalLayoutAreas, SnapshotLayoutAreas, normal_layout_areas, snapshot_layout_areas},
     panels::{
-        adjust_drop_selection, bank_panel_lines, bank_trade_menu_lines, drop_personal_lines,
+        adjust_discard_selection, bank_panel_lines, bank_trade_menu_lines, discard_personal_lines,
         game_ended_lines, personal_model_lines, player_menu_lines, player_trade_builder_lines,
         public_player_lines, resource_choice_lines, snapshot_state_lines, trade_panel_lines,
-        trade_tree_lines,
+        trade_tree_lines_for_viewer,
     },
     render::{field_lines, field_lines_cropped_left, field_size},
     selectors::{
@@ -381,7 +383,11 @@ impl CliUi {
         self.show_model(model, message)
     }
 
-    pub(crate) fn record_game_event(&mut self, event: &GameEvent) -> Option<String> {
+    pub(crate) fn record_game_event(
+        &mut self,
+        event: &GameEvent,
+        model: &UiModel,
+    ) -> Option<String> {
         match event {
             GameEvent::TurnStarted { player_id, .. } => {
                 self.active_player = Some(*player_id);
@@ -391,7 +397,7 @@ impl CliUi {
             }
             _ => {}
         }
-        self.journal.push_event(event)
+        self.journal.push_event_with_model(event, Some(model))
     }
 
     pub(crate) fn set_active_player(&mut self, player_id: Option<PlayerId>) {
@@ -765,7 +771,10 @@ impl CliUi {
         }
     }
 
-    pub(crate) fn select_drop_cards(&mut self, model: &UiModel) -> io::Result<Option<ResourceSet>> {
+    pub(crate) fn select_discard_cards(
+        &mut self,
+        model: &UiModel,
+    ) -> io::Result<Option<ResourceSet>> {
         let Some(private) = &model.private else {
             self.message = "no private resources".to_owned();
             return Ok(None);
@@ -775,10 +784,10 @@ impl CliUi {
         let mut selected_resource = 0;
         let mut selected = ResourceSet::EMPTY;
         self.message =
-            format!("select exactly {required} cards to drop; enter confirms; esc cancels");
+            format!("select exactly {required} cards to discard; enter confirms; esc cancels");
 
         loop {
-            self.interactive_override = Some(drop_personal_lines(
+            self.interactive_override = Some(discard_personal_lines(
                 private.player_id,
                 &private.resources,
                 &private.dev_cards,
@@ -788,7 +797,7 @@ impl CliUi {
             ));
             self.draw(
                 Some(model),
-                "drop: ",
+                "discard: ",
                 &format!("selected {} of {}", selected.total(), required),
             )?;
 
@@ -807,7 +816,7 @@ impl CliUi {
                     }
                     KeyCode::Esc => {
                         self.interactive_override = None;
-                        self.message = "drop cancelled".to_owned();
+                        self.message = "discard cancelled".to_owned();
                         return Ok(None);
                     }
                     KeyCode::Left => {
@@ -819,10 +828,10 @@ impl CliUi {
                         selected_resource = (selected_resource + 1) % Resource::ALL.len();
                     }
                     KeyCode::Up => {
-                        adjust_drop_selection(&private.resources, &mut selected, resource, 1);
+                        adjust_discard_selection(&private.resources, &mut selected, resource, 1);
                     }
                     KeyCode::Down => {
-                        adjust_drop_selection(&private.resources, &mut selected, resource, -1);
+                        adjust_discard_selection(&private.resources, &mut selected, resource, -1);
                     }
                     _ => {}
                 }
@@ -902,7 +911,12 @@ impl CliUi {
         self.message = "select trade with up/down; enter decides; esc rejects trade".to_owned();
         loop {
             let offer_idx = offer_indices[selected];
-            self.interactive_override = Some(trade_browser_lines(session, Some(offer_idx), None));
+            self.interactive_override = Some(trade_browser_lines(
+                session,
+                Some(offer_idx),
+                None,
+                model.private.as_ref(),
+            ));
             self.draw(
                 Some(model),
                 "trade: ",
@@ -914,11 +928,13 @@ impl CliUi {
                 match key.code {
                     KeyCode::Enter => {
                         let offer = &session.offers[offer_idx];
+                        let actions =
+                            trade_response_actions_for_offer(model.private.as_ref(), offer);
                         match self.select_trade_decision(
                             model,
                             session,
                             Some(offer_idx),
-                            &["accept", "reject", "counter"],
+                            actions,
                         )? {
                             Some("accept") => {
                                 self.interactive_override = None;
@@ -976,6 +992,7 @@ impl CliUi {
                 session,
                 selected_offer,
                 Some(selected == 0),
+                model.private.as_ref(),
             ));
             self.draw(
                 Some(model),
@@ -1151,6 +1168,7 @@ impl CliUi {
                 selected_offer,
                 actions,
                 selected,
+                model.private.as_ref(),
             ));
             self.draw(Some(model), "trade action: ", actions[selected])?;
             if let CrosstermEvent::Key(key) = event::read()?
@@ -1405,10 +1423,34 @@ fn trade_offer_is_accepted(session: &UiTradeSession, offer_id: TradeOfferId) -> 
     })
 }
 
+fn trade_response_actions_for_offer(
+    private: Option<&UiPrivatePlayer>,
+    offer: &UiTradeOffer,
+) -> &'static [&'static str] {
+    if can_accept_trade_offer(private, offer) {
+        &["accept", "reject", "counter"]
+    } else {
+        &["reject", "counter"]
+    }
+}
+
+fn can_accept_trade_offer(private: Option<&UiPrivatePlayer>, offer: &UiTradeOffer) -> bool {
+    let Some(private) = private else {
+        return false;
+    };
+    let required = if private.player_id == offer.proposer {
+        &offer.trade.give
+    } else {
+        &offer.trade.take
+    };
+    private.resources.has_enough(required)
+}
+
 fn trade_browser_lines(
     session: &UiTradeSession,
     selected_offer: Option<usize>,
     new_offer_selected: Option<bool>,
+    private: Option<&UiPrivatePlayer>,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     if let Some(selected) = new_offer_selected {
@@ -1421,7 +1463,12 @@ fn trade_browser_lines(
             Span::raw(" new trade"),
         ]));
     }
-    lines.extend(trade_tree_lines(session, selected_offer));
+    lines.extend(trade_tree_lines_for_viewer(
+        session,
+        selected_offer,
+        private.map(|private| private.player_id),
+        private.map(|private| &private.resources),
+    ));
     lines
 }
 
@@ -1430,8 +1477,9 @@ fn trade_decision_lines(
     selected_offer: Option<usize>,
     actions: &[&'static str],
     selected_action: usize,
+    private: Option<&UiPrivatePlayer>,
 ) -> Vec<Line<'static>> {
-    let mut lines = trade_browser_lines(session, selected_offer, None);
+    let mut lines = trade_browser_lines(session, selected_offer, None, private);
     lines.push(Line::from(""));
     let mut action_spans = Vec::new();
     for (idx, action) in actions.iter().enumerate() {
@@ -1550,7 +1598,45 @@ fn journal_entry_line(entry: &JournalEntry, visible_cols: usize) -> Line<'static
 fn styled_event_text(text: &str) -> Line<'static> {
     let mut spans = Vec::new();
     let mut token = String::new();
-    for ch in text.chars() {
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '[' {
+            let mut marker = String::new();
+            let mut closed = false;
+            for next in chars.by_ref() {
+                if next == ']' {
+                    closed = true;
+                    break;
+                }
+                marker.push(next);
+            }
+            if closed && let Some(marker) = parse_event_mini_card_marker(&marker) {
+                push_event_token(&mut spans, &token);
+                token.clear();
+                match marker {
+                    EventMiniCardMarker::Resource { count, resource } => {
+                        MiniCardGlyph::new(count)
+                            .face_style(resource_event_style_for(resource))
+                            .bracket_style(resource_event_style_for(resource))
+                            .push_to(&mut spans);
+                    }
+                    EventMiniCardMarker::Unknown => {
+                        MiniCardGlyph::new("?")
+                            .face_style(subtle_panel_style())
+                            .bracket_style(subtle_panel_style())
+                            .push_to(&mut spans);
+                    }
+                }
+                continue;
+            }
+            push_event_token(&mut spans, &token);
+            token.clear();
+            spans.push(Span::raw(format!("[{marker}")));
+            if closed {
+                spans.push(Span::raw("]"));
+            }
+            continue;
+        }
         if ch.is_alphanumeric() {
             token.push(ch);
         } else {
@@ -1561,6 +1647,35 @@ fn styled_event_text(text: &str) -> Line<'static> {
     }
     push_event_token(&mut spans, &token);
     Line::from(spans)
+}
+
+enum EventMiniCardMarker {
+    Resource { count: String, resource: Resource },
+    Unknown,
+}
+
+fn parse_event_mini_card_marker(marker: &str) -> Option<EventMiniCardMarker> {
+    if marker == "?" {
+        return Some(EventMiniCardMarker::Unknown);
+    }
+    let digit_len = marker
+        .char_indices()
+        .take_while(|(_, ch)| ch.is_ascii_digit())
+        .map(|(idx, ch)| idx + ch.len_utf8())
+        .last()?;
+    let (count, code) = marker.split_at(digit_len);
+    let resource = match code {
+        "B" => Resource::Brick,
+        "W" => Resource::Wood,
+        "H" => Resource::Wheat,
+        "S" => Resource::Sheep,
+        "O" => Resource::Ore,
+        _ => return None,
+    };
+    Some(EventMiniCardMarker::Resource {
+        count: count.to_owned(),
+        resource,
+    })
 }
 
 fn push_event_token(spans: &mut Vec<Span<'static>>, token: &str) {
@@ -1609,9 +1724,13 @@ fn resource_event_style(token: &str) -> Option<Style> {
         "Ore" | "ore" => Resource::Ore,
         _ => return None,
     };
-    Some(Style::default().fg(catan_render::adapters::ratatui::color(
+    Some(resource_event_style_for(resource))
+}
+
+fn resource_event_style_for(resource: Resource) -> Style {
+    Style::default().fg(catan_render::adapters::ratatui::color(
         catan_render::field::FieldRenderer::resource_color(resource),
-    )))
+    ))
 }
 
 fn render_bank(frame: &mut Frame<'_>, area: Rect, model: &UiModel) {
@@ -1916,7 +2035,7 @@ fn command_help_lines(view_mode: CliViewMode, width: usize) -> Vec<Line<'static>
             "bank-trade: bt or bank-trade give take G4|G3|S2",
             "player-trade: pt or trade give take",
             "dev: kn, yp, m, rb or use knight|yop|monopoly|roadbuild ...",
-            "drop: five resource counts or drop",
+            "discard: five resource counts or discard",
         ]
         .as_slice(),
         CliViewMode::Snapshot => ["s saves the latest exact state snapshot"].as_slice(),
@@ -1949,7 +2068,7 @@ fn fit_command_text(text: &str, width: usize) -> String {
 
 impl Drop for CliUi {
     fn drop(&mut self) {
-        log::trace!("Dropping CLI UI, cleaning up terminal");
+        log::trace!("Cleaning up CLI UI terminal");
         let _ = disable_raw_mode();
         let _ = execute!(self.terminal.backend_mut(), LeaveAlternateScreen);
         let _ = self.terminal.show_cursor();
@@ -1966,10 +2085,22 @@ fn observer_status_suffix(event_count: u64, summary: Option<&str>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use catan_core::gameplay::primitives::resource::{Resource, ResourceSet};
+    use catan_agents::remote_agent::{UiPrivatePlayer, UiTradeOffer};
+    use catan_core::gameplay::{
+        game::trade::TradeOfferId,
+        primitives::{
+            dev_card::DevCardData,
+            player::PlayerId,
+            resource::{Resource, ResourceSet},
+            trade::PlayerTrade,
+        },
+    };
     use ratatui::style::{Color, Style};
 
-    use super::{CardGlyph, CliViewMode, adjust_player_trade_selection, command_panel_lines};
+    use super::{
+        CardGlyph, CliViewMode, adjust_player_trade_selection, command_panel_lines,
+        styled_event_text, trade_response_actions_for_offer,
+    };
 
     #[test]
     fn command_panel_shows_short_hints_when_empty() {
@@ -2007,6 +2138,21 @@ mod tests {
     }
 
     #[test]
+    fn journal_resource_markers_render_as_colored_mini_cards() {
+        let line = styled_event_text("p0 got [4B][2S] and stole [?]");
+
+        assert_eq!(line.to_string(), "p0 got [4][2] and stole [?]");
+        let brick_color = catan_render::adapters::ratatui::color(
+            catan_render::field::FieldRenderer::resource_color(Resource::Brick),
+        );
+        assert!(
+            line.spans
+                .iter()
+                .any(|span| { span.content.as_ref() == "4" && span.style.fg == Some(brick_color) })
+        );
+    }
+
+    #[test]
     fn player_trade_adjustment_caps_give_and_clears_opposite_side() {
         let available = ResourceSet {
             ore: 1,
@@ -2023,5 +2169,61 @@ mod tests {
 
         assert_eq!(give.ore, 1);
         assert_eq!(take.ore, 0);
+    }
+
+    #[test]
+    fn trade_response_actions_hide_accept_when_viewer_cannot_pay() {
+        let offer = UiTradeOffer {
+            id: TradeOfferId(0),
+            proposer: PlayerId::new(0),
+            trade: PlayerTrade {
+                give: ResourceSet::from(Resource::Brick),
+                take: ResourceSet {
+                    ore: 2,
+                    ..ResourceSet::EMPTY
+                },
+            },
+        };
+        let private = UiPrivatePlayer {
+            player_id: PlayerId::new(1),
+            resources: ResourceSet {
+                ore: 1,
+                ..ResourceSet::EMPTY
+            },
+            dev_cards: DevCardData::default(),
+        };
+
+        assert_eq!(
+            trade_response_actions_for_offer(Some(&private), &offer),
+            &["reject", "counter"]
+        );
+    }
+
+    #[test]
+    fn trade_response_actions_include_accept_when_viewer_can_pay() {
+        let offer = UiTradeOffer {
+            id: TradeOfferId(0),
+            proposer: PlayerId::new(0),
+            trade: PlayerTrade {
+                give: ResourceSet::from(Resource::Brick),
+                take: ResourceSet {
+                    ore: 2,
+                    ..ResourceSet::EMPTY
+                },
+            },
+        };
+        let private = UiPrivatePlayer {
+            player_id: PlayerId::new(1),
+            resources: ResourceSet {
+                ore: 2,
+                ..ResourceSet::EMPTY
+            },
+            dev_cards: DevCardData::default(),
+        };
+
+        assert_eq!(
+            trade_response_actions_for_offer(Some(&private), &offer),
+            &["accept", "reject", "counter"]
+        );
     }
 }

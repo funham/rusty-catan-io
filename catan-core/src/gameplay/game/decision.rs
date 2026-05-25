@@ -45,7 +45,7 @@ pub enum DecisionKind {
     RegularCommand,
     MoveRobber,
     ChooseRobbedPlayer { robber_pos: Hex },
-    DropHalf { required: u16 },
+    DiscardHalf { required: u16 },
     TradeResponse { session: TradeSessionId },
     TradeOwnerAction { session: TradeSessionId },
 }

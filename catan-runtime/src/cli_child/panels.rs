@@ -55,7 +55,7 @@ pub(crate) fn bank_panel_lines(model: &UiModel, width: usize) -> Vec<Line<'stati
                 }
                 CardGlyph::new(
                     format!("{:>2}", resources[resource].min(99)),
-                    resource_style(resource),
+                    bank_resource_deck_style(resource, resources[resource]),
                 )
                 .push_to_rows(&mut rows);
             }
@@ -65,22 +65,24 @@ pub(crate) fn bank_panel_lines(model: &UiModel, width: usize) -> Vec<Line<'stati
                 if idx > 0 {
                     append_gap(&mut rows, " ");
                 }
-                CardGlyph::new(
-                    fullness_symbol(resources[resource]),
-                    resource_style(resource),
-                )
-                .push_to_rows(&mut rows);
+                let style = if resources[resource] == DeckFullnessLevel::Empty {
+                    resource_secondary_style(resource)
+                } else {
+                    resource_style(resource)
+                };
+                CardGlyph::new(fullness_symbol(resources[resource]), style).push_to_rows(&mut rows);
             }
         }
     }
 
     append_gap(&mut rows, " ");
+    let dev_deck_style = bank_dev_deck_style(&model.public.bank.dev_cards);
     CardGlyph::new(
         match model.public.bank.dev_cards {
             UiPublicBankDevCards::Exact(count) => format!("{:>2}", count.min(99)),
             UiPublicBankDevCards::Approx(level) => fullness_symbol(level).to_owned(),
         },
-        dev_card_style(),
+        dev_deck_style,
     )
     .push_to_rows(&mut rows);
 
@@ -93,7 +95,7 @@ fn add_bank_legend_if_fits(card_lines: Vec<Line<'static>>, width: usize) -> Vec<
     let legend = [
         Line::from("?? 14+"),
         Line::from("? 8-13"),
-        Line::from("?! 1-7 | ! 0"),
+        Line::from("?! 1-7"),
     ];
     let legend_width = legend.iter().map(Line::width).max().unwrap_or(0);
     if card_width + 2 + legend_width > width {
@@ -187,7 +189,7 @@ pub(crate) fn personal_model_lines(model: &UiModel) -> Vec<Line<'static>> {
         ]));
         lines.extend(join_lines_horizontal(
             &resource_card_lines(&private.resources, None),
-            Line::from(Span::styled("│", subtle_box_style())),
+            Line::from(Span::styled(" │ ", subtle_box_style())),
             &dev_card_lines(&private.dev_cards),
         ));
     } else {
@@ -223,9 +225,28 @@ pub(crate) fn trade_tree_lines(
     session: &UiTradeSession,
     selected_offer_index: Option<usize>,
 ) -> Vec<Line<'static>> {
+    trade_tree_lines_for_viewer(session, selected_offer_index, None, None)
+}
+
+pub(crate) fn trade_tree_lines_for_viewer(
+    session: &UiTradeSession,
+    selected_offer_index: Option<usize>,
+    viewer_id: Option<PlayerId>,
+    viewer_resources: Option<&ResourceSet>,
+) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     for (idx, offer) in session.offers.iter().enumerate() {
         let is_counter = offer.proposer != session.proposer;
+        let give_resources = resource_set_affordability_for_viewer(
+            &offer.trade.give,
+            viewer_id == Some(offer.proposer),
+            viewer_resources,
+        );
+        let take_resources = resource_set_affordability_for_viewer(
+            &offer.trade.take,
+            viewer_id.is_some_and(|viewer_id| viewer_id != offer.proposer),
+            viewer_resources,
+        );
         let mut spans = Vec::new();
         if selected_offer_index == Some(idx) {
             spans.push(Span::styled("> ", Style::default().fg(Color::Yellow)));
@@ -242,9 +263,9 @@ pub(crate) fn trade_tree_lines(
             player_style(offer.proposer),
         ));
         spans.push(Span::raw(" offers: "));
-        push_resource_set_mini_cards(&mut spans, &offer.trade.give);
-        spans.push(Span::raw(format!("; p{} accepts: ", offer.proposer)));
-        push_resource_set_mini_cards(&mut spans, &offer.trade.take);
+        push_resource_set_mini_cards(&mut spans, &give_resources);
+        spans.push(Span::raw("; for: "));
+        push_resource_set_mini_cards(&mut spans, &take_resources);
         spans.push(Span::raw("."));
         if !is_counter {
             spans.push(Span::raw(" "));
@@ -258,17 +279,49 @@ pub(crate) fn trade_tree_lines(
     lines
 }
 
+#[derive(Debug, Clone, Copy)]
+struct MiniResourceDisplay {
+    resource: Resource,
+    count: u16,
+    affordable: bool,
+}
+
+fn resource_set_affordability_for_viewer(
+    resources: &ResourceSet,
+    paid_by_viewer: bool,
+    viewer_resources: Option<&ResourceSet>,
+) -> Vec<MiniResourceDisplay> {
+    Resource::iter()
+        .filter_map(|resource| {
+            let count = resources[resource];
+            (count > 0).then(|| {
+                let affordable =
+                    !paid_by_viewer || viewer_resources.is_none_or(|held| held[resource] >= count);
+                MiniResourceDisplay {
+                    resource,
+                    count,
+                    affordable,
+                }
+            })
+        })
+        .collect()
+}
+
 fn push_trade_response_slots(
     spans: &mut Vec<Span<'static>>,
     session: &UiTradeSession,
     offer_id: catan_core::gameplay::game::trade::TradeOfferId,
 ) {
     let mut first = true;
-    for response in session.responses.iter().flatten() {
+    for (player_index, response) in session.responses.iter().enumerate() {
+        let Some(response) = response else {
+            continue;
+        };
         if !first {
             spans.push(Span::raw(" "));
         }
         first = false;
+        let player_id = PlayerId::try_from(player_index).expect("player index should fit in u8");
         let symbol = match response {
             catan_core::gameplay::game::trade::TradeResponseState::Waiting => "-",
             catan_core::gameplay::game::trade::TradeResponseState::Rejected => "x",
@@ -278,50 +331,30 @@ fn push_trade_response_slots(
             catan_core::gameplay::game::trade::TradeResponseState::Countered { .. } => "!",
             catan_core::gameplay::game::trade::TradeResponseState::Accepted { .. } => "-",
         };
-        spans.push(Span::styled(
-            format!("({symbol})"),
-            trade_response_style(symbol),
-        ));
+        spans.push(Span::styled(format!("({symbol})"), player_style(player_id)));
     }
 }
 
-fn trade_response_style(symbol: &str) -> Style {
-    match symbol {
-        "v" => Style::default().fg(Color::Green),
-        "x" => Style::default().fg(Color::Red),
-        "!" => Style::default().fg(Color::Yellow),
-        _ => subtle_box_style(),
-    }
-}
-
-fn push_resource_set_mini_cards(spans: &mut Vec<Span<'static>>, resources: &ResourceSet) {
-    let mut any = false;
-    for resource in Resource::iter() {
-        for _ in 0..resources[resource] {
-            MiniCardGlyph::new(resource_mini_symbol(resource))
-                .face_style(resource_style(resource))
-                .bracket_style(resource_style(resource))
-                .push_to(spans);
-            any = true;
-        }
-    }
-    if !any {
+fn push_resource_set_mini_cards(spans: &mut Vec<Span<'static>>, resources: &[MiniResourceDisplay]) {
+    if resources.is_empty() {
         spans.push(Span::styled("-", subtle_box_style()));
+        return;
     }
-}
-
-fn resource_mini_symbol(resource: Resource) -> &'static str {
-    match resource {
-        Resource::Brick => "0",
-        Resource::Wood => "1",
-        Resource::Wheat => "2",
-        Resource::Sheep => "3",
-        Resource::Ore => "4",
+    for display in resources {
+        let style = if display.affordable {
+            resource_style(display.resource)
+        } else {
+            resource_secondary_style(display.resource)
+        };
+        MiniCardGlyph::new(display.count.min(99).to_string())
+            .face_style(style)
+            .bracket_style(style)
+            .push_to(spans);
     }
 }
 
 pub(crate) fn player_trade_builder_lines(
-    available: &ResourceSet,
+    _available: &ResourceSet,
     give: &ResourceSet,
     take: &ResourceSet,
     selected_resource: usize,
@@ -337,14 +370,17 @@ pub(crate) fn player_trade_builder_lines(
         } else {
             "editing: take"
         }),
-        Line::from("available"),
     ];
-    lines.extend(resource_card_lines(available, None));
-    lines.push(resource_selector_line(selected_resource));
     lines.push(Line::from(if editing_give { "> give" } else { "  give" }));
     lines.extend(resource_card_lines(give, None));
+    if editing_give {
+        lines.push(resource_selector_line(selected_resource));
+    }
     lines.push(Line::from(if editing_give { "  take" } else { "> take" }));
     lines.extend(resource_card_lines(take, None));
+    if !editing_give {
+        lines.push(resource_selector_line(selected_resource));
+    }
     lines
 }
 
@@ -879,7 +915,7 @@ fn dev_deck_counts(dev_cards: &[DevCardKind]) -> DevDeckCounts {
 
 pub(crate) fn resource_card_lines(
     resources: &ResourceSet,
-    selected_drop: Option<&ResourceSet>,
+    selected_discard: Option<&ResourceSet>,
 ) -> Vec<Line<'static>> {
     let mut rows = [Vec::new(), Vec::new(), Vec::new()];
     let mut selected = Vec::new();
@@ -889,19 +925,23 @@ pub(crate) fn resource_card_lines(
             append_gap(&mut rows, " ");
             selected.push(Span::raw(" "));
         }
-        let style = resource_style(resource);
+        let style = if resources[resource] == 0 {
+            resource_secondary_style(resource)
+        } else {
+            resource_style(resource)
+        };
         CardGlyph::new(format!("{:02}", resources[resource].min(99)), style)
             .push_to_rows(&mut rows);
-        if let Some(drop) = selected_drop {
+        if let Some(discard) = selected_discard {
             selected.push(Span::styled(
-                format!(" {:02} ", drop[resource].min(99)),
+                format!(" {:02} ", discard[resource].min(99)),
                 style,
             ));
         }
     }
 
     let mut lines = rows.into_iter().map(Line::from).collect::<Vec<_>>();
-    if selected_drop.is_some() {
+    if selected_discard.is_some() {
         lines.push(Line::from(selected));
     }
     lines
@@ -926,7 +966,7 @@ fn dev_card_compact_lines(dev_cards: &DevCardData) -> Vec<Line<'static>> {
         if idx > 0 {
             append_gap(&mut rows, " ");
         }
-        CardGlyph::new(dev_card_abbrev(card), dev_card_style())
+        CardGlyph::new(dev_card_abbrev(card), dev_card_glyph_style(dev_cards, card))
             .index_top(dev_cards.used[card], used_dev_card_count_style())
             .index_mid(dev_cards.active[card], active_dev_card_count_style())
             .index_bottom(dev_cards.queued[card], queued_dev_card_count_style())
@@ -934,17 +974,23 @@ fn dev_card_compact_lines(dev_cards: &DevCardData) -> Vec<Line<'static>> {
     }
 
     append_gap(&mut rows, " ");
-    CardGlyph::new("VP", dev_card_style())
-        .index_mid(dev_cards.victory_pts, active_dev_card_count_style())
-        .push_to_rows(&mut rows);
+    CardGlyph::new(
+        "VP",
+        victory_point_dev_card_glyph_style(dev_cards.victory_pts),
+    )
+    .index_mid(
+        dev_cards.victory_pts,
+        victory_point_dev_card_count_style(dev_cards.victory_pts),
+    )
+    .push_to_rows(&mut rows);
 
     rows.into_iter().map(Line::from).collect()
 }
 
-pub(crate) fn drop_personal_lines(
+pub(crate) fn discard_personal_lines(
     player_id: impl Into<PlayerId>,
     resources: &ResourceSet,
-    dev_cards: &DevCardData,
+    _dev_cards: &DevCardData,
     selected: &ResourceSet,
     required: u16,
     selected_resource: usize,
@@ -952,19 +998,17 @@ pub(crate) fn drop_personal_lines(
     let player_id = player_id.into();
     let mut lines = vec![
         Line::from(format!("you: p{player_id}")),
-        Line::from(format!("drop {} / {} cards", selected.total(), required)),
+        Line::from(format!("discard {} / {} cards", selected.total(), required)),
     ];
-    lines.extend(drop_resource_card_lines(
+    lines.extend(discard_resource_card_lines(
         resources,
         selected,
         selected_resource,
     ));
-    lines.push(Line::from(""));
-    lines.extend(dev_card_lines(dev_cards));
     lines
 }
 
-fn drop_resource_card_lines(
+fn discard_resource_card_lines(
     resources: &ResourceSet,
     selected: &ResourceSet,
     selected_resource: usize,
@@ -1012,18 +1056,27 @@ pub(crate) fn bank_trade_menu_lines(options: &[BankTrade], selected: usize) -> V
 }
 
 fn bank_trade_menu_line(marker: &str, trade: BankTrade) -> Line<'static> {
-    let rate = match trade.kind {
-        BankTradeKind::BankGeneric => "4:1",
-        BankTradeKind::PortGeneric => "3:1",
-        BankTradeKind::PortSpecific => "2:1",
-    };
-    Line::from(vec![
-        Span::raw(marker.to_owned()),
-        Span::raw(format!("{rate} ")),
-        Span::styled(format!("{:?}", trade.give), resource_style(trade.give)),
-        Span::raw(" -> "),
-        Span::styled(format!("{:?}", trade.take), resource_style(trade.take)),
-    ])
+    let mut spans = vec![Span::raw(marker.to_owned())];
+    let give_style = resource_style(trade.give);
+    MiniCardGlyph::new(bank_trade_rate_count(trade.kind).to_string())
+        .face_style(give_style)
+        .bracket_style(give_style)
+        .push_to(&mut spans);
+    spans.push(Span::raw(" -> "));
+    let take_style = resource_style(trade.take);
+    MiniCardGlyph::new("1")
+        .face_style(take_style)
+        .bracket_style(take_style)
+        .push_to(&mut spans);
+    Line::from(spans)
+}
+
+fn bank_trade_rate_count(kind: BankTradeKind) -> u16 {
+    match kind {
+        BankTradeKind::BankGeneric => 4,
+        BankTradeKind::PortGeneric => 3,
+        BankTradeKind::PortSpecific => 2,
+    }
 }
 
 pub(crate) fn resource_choice_lines(
@@ -1069,6 +1122,23 @@ fn resource_secondary_style(resource: Resource) -> Style {
     resource_style(resource).add_modifier(Modifier::DIM)
 }
 
+fn bank_resource_deck_style(resource: Resource, count: u16) -> Style {
+    if count == 0 {
+        resource_secondary_style(resource)
+    } else {
+        resource_style(resource)
+    }
+}
+
+fn bank_dev_deck_style(dev_cards: &UiPublicBankDevCards) -> Style {
+    match dev_cards {
+        UiPublicBankDevCards::Exact(0) | UiPublicBankDevCards::Approx(DeckFullnessLevel::Empty) => {
+            dev_card_secondary_style()
+        }
+        UiPublicBankDevCards::Exact(_) | UiPublicBankDevCards::Approx(_) => dev_card_style(),
+    }
+}
+
 fn resource_selector_line(selected_resource: usize) -> Line<'static> {
     let mut selector = Vec::new();
     for (idx, resource) in Resource::iter().enumerate() {
@@ -1097,7 +1167,7 @@ pub(crate) fn player_menu_lines(candidates: &[PlayerId], selected: usize) -> Vec
     lines
 }
 
-pub(crate) fn adjust_drop_selection(
+pub(crate) fn adjust_discard_selection(
     available: &ResourceSet,
     selected: &mut ResourceSet,
     resource: Resource,
@@ -1180,16 +1250,50 @@ fn dev_card_style() -> Style {
     Style::default().fg(Color::Magenta)
 }
 
+fn dev_card_secondary_style() -> Style {
+    dev_card_style().add_modifier(Modifier::DIM)
+}
+
+fn empty_dev_card_style() -> Style {
+    subtle_box_style()
+}
+
+fn dev_card_glyph_style(dev_cards: &DevCardData, card: UsableDevCard) -> Style {
+    if dev_cards.active[card] > 0 {
+        dev_card_style()
+    } else if dev_cards.queued[card] > 0 {
+        dev_card_secondary_style()
+    } else {
+        empty_dev_card_style()
+    }
+}
+
+fn victory_point_dev_card_glyph_style(count: u16) -> Style {
+    if count > 0 {
+        dev_card_style()
+    } else {
+        empty_dev_card_style()
+    }
+}
+
+fn victory_point_dev_card_count_style(count: u16) -> Style {
+    if count > 0 {
+        active_dev_card_count_style()
+    } else {
+        empty_dev_card_style()
+    }
+}
+
 fn used_dev_card_count_style() -> Style {
-    Style::default().fg(Color::White)
+    subtle_box_style()
 }
 
 fn active_dev_card_count_style() -> Style {
-    active_box_style()
+    dev_card_style()
 }
 
 fn queued_dev_card_count_style() -> Style {
-    subtle_box_style()
+    dev_card_secondary_style()
 }
 
 #[cfg(test)]
@@ -1212,9 +1316,10 @@ mod tests {
     use ratatui::style::{Color, Style};
 
     use super::{
-        adjust_drop_selection, bank_trade_menu_lines, dev_card_lines, drop_personal_lines,
-        personal_model_lines, player_trade_builder_lines, player_trade_glyph_lines,
-        public_model_lines, resource_card_lines, snapshot_state_lines,
+        adjust_discard_selection, bank_panel_lines, bank_trade_menu_lines, dev_card_lines,
+        discard_personal_lines, personal_model_lines, player_style, player_trade_builder_lines,
+        player_trade_glyph_lines, public_model_lines, resource_card_lines,
+        resource_secondary_style, snapshot_state_lines,
     };
 
     #[test]
@@ -1256,14 +1361,78 @@ mod tests {
 
         let lines = dev_card_lines(&dev_cards);
         assert!(lines[0].spans.iter().any(|span| {
-            span.content.as_ref().trim() == "1" && span.style.fg == Some(Color::White)
+            span.content.as_ref().trim() == "1" && span.style == super::subtle_box_style()
         }));
         assert!(lines[1].spans.iter().any(|span| {
-            span.content.as_ref().trim() == "2" && span.style.fg == Some(Color::Indexed(39))
+            span.content.as_ref().trim() == "2" && span.style.fg == Some(Color::Magenta)
         }));
         assert!(lines[2].spans.iter().any(|span| {
-            span.content.as_ref().trim() == "3" && span.style.fg == Some(Color::Indexed(244))
+            span.content.as_ref().trim() == "3"
+                && span.style.fg == Some(Color::Magenta)
+                && span
+                    .style
+                    .add_modifier
+                    .contains(ratatui::style::Modifier::DIM)
         }));
+    }
+
+    #[test]
+    fn dev_card_glyph_color_ignores_used_and_prefers_active_then_queued() {
+        let mut dev_cards = DevCardData::default();
+        dev_cards.used[UsableDevCard::Knight] = 4;
+        dev_cards.queued[UsableDevCard::YearOfPlenty] = 1;
+        dev_cards.active[UsableDevCard::Monopoly] = 1;
+
+        let lines = dev_card_lines(&dev_cards);
+
+        assert!(lines[1].spans.iter().any(|span| {
+            span.content.as_ref() == "KN" && span.style == super::subtle_box_style()
+        }));
+        assert!(lines[1].spans.iter().any(|span| {
+            span.content.as_ref() == "YP"
+                && span.style.fg == Some(Color::Magenta)
+                && span
+                    .style
+                    .add_modifier
+                    .contains(ratatui::style::Modifier::DIM)
+        }));
+        assert!(lines[1].spans.iter().any(|span| {
+            span.content.as_ref().trim() == "M" && span.style.fg == Some(Color::Magenta)
+        }));
+    }
+
+    #[test]
+    fn private_dev_card_glyphs_never_use_default_or_white_style() {
+        let mut dev_cards = DevCardData::default();
+        dev_cards.used[UsableDevCard::Knight] = 1;
+        dev_cards.queued[UsableDevCard::YearOfPlenty] = 1;
+        dev_cards.active[UsableDevCard::Monopoly] = 1;
+
+        for line in dev_card_lines(&dev_cards) {
+            for span in line.spans {
+                let content = span.content.as_ref();
+                if content.trim().is_empty() {
+                    continue;
+                }
+                assert_ne!(span.style.fg, None, "unstyled dev-card span: {content:?}");
+                assert_ne!(
+                    span.style.fg,
+                    Some(Color::White),
+                    "white dev-card span: {content:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn empty_private_dev_card_glyphs_are_grey_including_victory_points() {
+        let lines = dev_card_lines(&DevCardData::default());
+
+        for label in ["KN", "YP", "M", "RB", "VP"] {
+            assert!(lines[1].spans.iter().any(|span| {
+                span.content.as_ref().trim() == label && span.style == super::subtle_box_style()
+            }));
+        }
     }
 
     #[test]
@@ -1303,7 +1472,7 @@ mod tests {
     }
 
     #[test]
-    fn trade_tree_lines_render_prime_offers_counters_and_response_slots() {
+    fn trade_tree_lines_render_prime_offers_counters_and_player_colored_response_slots() {
         let session = catan_agents::remote_agent::UiTradeSession {
             id: catan_core::gameplay::game::trade::TradeSessionId(0),
             proposer: PlayerId::new(0),
@@ -1343,22 +1512,127 @@ mod tests {
             open: true,
         };
 
-        let rendered = super::trade_tree_lines(&session, Some(0))
-            .into_iter()
+        let lines = super::trade_tree_lines(&session, Some(0));
+        let rendered = lines
+            .iter()
             .map(|line| line.to_string())
             .collect::<Vec<_>>()
             .join("\n");
 
         assert!(rendered.contains("p0 offers:"));
-        assert!(rendered.contains("p0 accepts:"));
+        assert!(rendered.contains("for:"));
         assert!(rendered.contains("(-)"));
         assert!(rendered.contains("(v)"));
         assert!(rendered.contains("(!)"));
         assert!(rendered.contains(">>> p3 offers:"));
+        let first_line = &lines[0];
+        assert!(first_line.spans.iter().any(|span| {
+            span.content.as_ref() == "(-)" && span.style == player_style(PlayerId::new(1))
+        }));
+        assert!(first_line.spans.iter().any(|span| {
+            span.content.as_ref() == "(v)" && span.style == player_style(PlayerId::new(2))
+        }));
+        assert!(first_line.spans.iter().any(|span| {
+            span.content.as_ref() == "(!)" && span.style == player_style(PlayerId::new(3))
+        }));
     }
 
     #[test]
-    fn player_trade_builder_lines_show_available_cards_and_cancel_hint() {
+    fn trade_tree_resource_mini_cards_show_counts_not_resource_ordinals() {
+        let session = catan_agents::remote_agent::UiTradeSession {
+            id: catan_core::gameplay::game::trade::TradeSessionId(0),
+            proposer: PlayerId::new(0),
+            offers: vec![catan_agents::remote_agent::UiTradeOffer {
+                id: catan_core::gameplay::game::trade::TradeOfferId(0),
+                proposer: PlayerId::new(0),
+                trade: PlayerTrade {
+                    give: ResourceSet {
+                        brick: 1,
+                        sheep: 2,
+                        ..ResourceSet::EMPTY
+                    },
+                    take: ResourceSet {
+                        ore: 3,
+                        ..ResourceSet::EMPTY
+                    },
+                },
+            }],
+            responses: vec![
+                None,
+                Some(catan_core::gameplay::game::trade::TradeResponseState::Waiting),
+            ],
+            version: 0,
+            open: true,
+        };
+
+        let line = super::trade_tree_lines(&session, None)
+            .into_iter()
+            .next()
+            .expect("trade line should render");
+        let rendered = line.to_string();
+
+        assert!(rendered.contains("[1]"));
+        assert!(rendered.contains("[2]"));
+        assert!(rendered.contains("[3]"));
+        assert!(!rendered.contains("[0]"));
+        assert!(!rendered.contains("[3][3]"));
+        assert!(line.spans.iter().any(|span| {
+            span.content.as_ref() == "2" && span.style == super::resource_style(Resource::Sheep)
+        }));
+    }
+
+    #[test]
+    fn trade_tree_dims_resources_the_viewer_cannot_pay() {
+        let session = catan_agents::remote_agent::UiTradeSession {
+            id: catan_core::gameplay::game::trade::TradeSessionId(0),
+            proposer: PlayerId::new(0),
+            offers: vec![catan_agents::remote_agent::UiTradeOffer {
+                id: catan_core::gameplay::game::trade::TradeOfferId(0),
+                proposer: PlayerId::new(0),
+                trade: PlayerTrade {
+                    give: ResourceSet {
+                        brick: 1,
+                        ..ResourceSet::EMPTY
+                    },
+                    take: ResourceSet {
+                        ore: 2,
+                        ..ResourceSet::EMPTY
+                    },
+                },
+            }],
+            responses: vec![
+                None,
+                Some(catan_core::gameplay::game::trade::TradeResponseState::Waiting),
+            ],
+            version: 0,
+            open: true,
+        };
+        let viewer_resources = ResourceSet {
+            ore: 1,
+            ..ResourceSet::EMPTY
+        };
+
+        let line = super::trade_tree_lines_for_viewer(
+            &session,
+            None,
+            Some(PlayerId::new(1)),
+            Some(&viewer_resources),
+        )
+        .into_iter()
+        .next()
+        .expect("trade line should render");
+
+        assert!(line.spans.iter().any(|span| {
+            span.content.as_ref() == "1" && span.style == super::resource_style(Resource::Brick)
+        }));
+        assert!(line.spans.iter().any(|span| {
+            span.content.as_ref() == "2"
+                && span.style == super::resource_secondary_style(Resource::Ore)
+        }));
+    }
+
+    #[test]
+    fn player_trade_builder_lines_show_only_give_take_and_selector_on_edited_set() {
         let available = ResourceSet {
             ore: 2,
             wood: 1,
@@ -1374,10 +1648,55 @@ mod tests {
 
         assert!(rendered.contains("player trade"));
         assert!(rendered.contains("esc cancels"));
-        assert!(rendered.contains("available"));
+        assert!(!rendered.contains("available"));
         assert!(rendered.contains("give"));
         assert!(rendered.contains("take"));
         assert!(rendered.contains("^^"));
+
+        let lines = player_trade_builder_lines(&available, &give, &take, 4, true);
+        let rendered_lines = lines
+            .iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+        let give_index = rendered_lines
+            .iter()
+            .position(|line| line.contains("> give"))
+            .expect("give label should render");
+        let take_index = rendered_lines
+            .iter()
+            .position(|line| line.contains("  take"))
+            .expect("take label should render");
+        assert!(rendered_lines[give_index + 4].contains("^^^^"));
+        assert!(
+            rendered_lines
+                .iter()
+                .skip(take_index + 1)
+                .all(|line| !line.contains("^^^^"))
+        );
+    }
+
+    #[test]
+    fn selected_trade_set_zero_cards_use_secondary_outline() {
+        let available = ResourceSet {
+            ore: 2,
+            ..ResourceSet::EMPTY
+        };
+        let lines = player_trade_builder_lines(
+            &available,
+            &ResourceSet::EMPTY,
+            &ResourceSet::EMPTY,
+            4,
+            true,
+        );
+        let give_top = lines
+            .iter()
+            .skip_while(|line| !line.to_string().contains("> give"))
+            .nth(1)
+            .expect("give top row should render");
+
+        assert!(give_top.spans.iter().any(|span| {
+            span.content.as_ref() == "┌──┐" && span.style == resource_secondary_style(Resource::Ore)
+        }));
     }
 
     #[test]
@@ -1421,7 +1740,21 @@ mod tests {
             .join("\n");
 
         assert!(!rendered.contains("|||"));
+        assert!(rendered.contains(" │ "));
         assert!(rendered.contains("│KN│"));
+    }
+
+    #[test]
+    fn zero_resource_cards_use_secondary_style() {
+        let resources = ResourceSet {
+            brick: 1,
+            ..ResourceSet::EMPTY
+        };
+        let lines = resource_card_lines(&resources, None);
+
+        assert!(lines[1].spans.iter().any(|span| {
+            span.content.as_ref() == "00" && span.style == resource_secondary_style(Resource::Wood)
+        }));
     }
 
     #[test]
@@ -1460,26 +1793,26 @@ mod tests {
     }
 
     #[test]
-    fn drop_selection_is_bounded_by_available_resources() {
+    fn discard_selection_is_bounded_by_available_resources() {
         let available = ResourceSet {
             brick: 2,
             ..ResourceSet::EMPTY
         };
         let mut selected = ResourceSet::EMPTY;
 
-        adjust_drop_selection(&available, &mut selected, Resource::Brick, 1);
-        adjust_drop_selection(&available, &mut selected, Resource::Brick, 1);
-        adjust_drop_selection(&available, &mut selected, Resource::Brick, 1);
+        adjust_discard_selection(&available, &mut selected, Resource::Brick, 1);
+        adjust_discard_selection(&available, &mut selected, Resource::Brick, 1);
+        adjust_discard_selection(&available, &mut selected, Resource::Brick, 1);
         assert_eq!(selected.brick, 2);
 
-        adjust_drop_selection(&available, &mut selected, Resource::Brick, -1);
-        adjust_drop_selection(&available, &mut selected, Resource::Brick, -1);
-        adjust_drop_selection(&available, &mut selected, Resource::Brick, -1);
+        adjust_discard_selection(&available, &mut selected, Resource::Brick, -1);
+        adjust_discard_selection(&available, &mut selected, Resource::Brick, -1);
+        adjust_discard_selection(&available, &mut selected, Resource::Brick, -1);
         assert_eq!(selected.brick, 0);
     }
 
     #[test]
-    fn drop_lines_show_selector_counts_and_total() {
+    fn discard_lines_show_selector_counts_and_total() {
         let resources = ResourceSet {
             brick: 2,
             wood: 1,
@@ -1490,12 +1823,18 @@ mod tests {
             ..ResourceSet::EMPTY
         };
         let dev_cards = DevCardData::default();
-        let lines = drop_personal_lines(0, &resources, &dev_cards, &selected, 2, 0)
+        let lines = discard_personal_lines(0, &resources, &dev_cards, &selected, 2, 0)
             .into_iter()
             .map(|line| line.to_string())
             .collect::<Vec<_>>();
 
-        assert!(lines.iter().any(|line| line.contains("drop 1 / 2 cards")));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("discard 1 / 2 cards"))
+        );
+        assert!(!lines.iter().any(|line| line.contains("KN")));
+        assert!(!lines.iter().any(|line| line.contains("VP")));
         assert!(lines.iter().any(|line| line.contains("^^^^")));
         assert!(lines.iter().any(|line| line.contains(" 1  ")));
         assert!(lines.iter().any(|line| line.contains(" 0  ")));
@@ -1521,7 +1860,8 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert!(lines.iter().any(|line| line.contains("up/down select")));
-        assert!(lines.iter().any(|line| line.contains("> 3:1 Wheat -> Ore")));
+        assert!(lines.iter().any(|line| line.contains("> [3] -> [1]")));
+        assert!(!lines.iter().any(|line| line.contains("Wheat -> Ore")));
     }
 
     #[test]
@@ -1650,6 +1990,36 @@ mod tests {
         assert_eq!(rendered.len(), 3);
         assert!(rendered.iter().any(|line| line.contains("?? 14+")));
         assert!(rendered.iter().any(|line| line.contains("? 8-13")));
-        assert!(rendered.iter().any(|line| line.contains("?! 1-7 | ! 0")));
+        assert!(rendered.iter().any(|line| line.contains("?! 1-7")));
+        assert!(!rendered.iter().any(|line| line.contains("! 0")));
+    }
+
+    #[test]
+    fn bank_empty_decks_use_secondary_style() {
+        let mut state = SetupGameState::default().finish();
+        state.bank.resources.brick = 0;
+        state.bank.dev_cards.clear();
+        let index = GameIndex::rebuild(&state);
+        let visibility = VisibilityConfig::default();
+        let factory = ContextFactory {
+            state: &state,
+            index: &index,
+            visibility: &visibility,
+            trade_sessions: &[],
+        };
+        let model = UiModel::from_observer(
+            ObserverNotificationContext::Spectator {
+                public: factory.spectator_public_view(),
+            },
+            false,
+        );
+
+        let lines = bank_panel_lines(&model, 80);
+        assert!(lines[1].spans.iter().any(|span| {
+            span.content.as_ref() == " !" && span.style == resource_secondary_style(Resource::Brick)
+        }));
+        assert!(lines[1].spans.iter().any(|span| {
+            span.content.as_ref() == " !" && span.style == super::dev_card_secondary_style()
+        }));
     }
 }

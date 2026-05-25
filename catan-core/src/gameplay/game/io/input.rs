@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::gameplay::{
     game::{
         command::{
-            ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, InitialPlacementCommand,
+            ChooseRobbedPlayerCommand, DiscardHalfCommand, InitCommand, InitialPlacementCommand,
             MoveRobberCommand, PostDevCardCommand, PostDiceCommand, RegularCommand,
         },
         decision::{DecisionId, DecisionKind, OpenDecision},
@@ -27,7 +27,7 @@ pub enum PlayerCommand {
     Regular(RegularCommand),
     MoveRobber(MoveRobberCommand),
     ChooseRobbedPlayer(ChooseRobbedPlayerCommand),
-    DropHalf(DropHalfCommand),
+    DiscardHalf(DiscardHalfCommand),
     Trade(TradeCommand),
 }
 
@@ -114,9 +114,9 @@ impl DecisionRequest {
             .then(|| self.respond(PlayerCommand::ChooseRobbedPlayer(command)))
     }
 
-    pub fn respond_drop_half(&self, command: DropHalfCommand) -> Option<DecisionResponse> {
-        matches!(self.kind, DecisionKind::DropHalf { .. })
-            .then(|| self.respond(PlayerCommand::DropHalf(command)))
+    pub fn respond_discard_half(&self, command: DiscardHalfCommand) -> Option<DecisionResponse> {
+        matches!(self.kind, DecisionKind::DiscardHalf { .. })
+            .then(|| self.respond(PlayerCommand::DiscardHalf(command)))
     }
 
     pub fn respond_trade(&self, command: TradeCommand) -> Option<DecisionResponse> {
@@ -158,8 +158,8 @@ impl DecisionRequest {
                 DecisionKind::ChooseRobbedPlayer { .. },
                 PlayerCommand::ChooseRobbedPlayer(command),
             ) => self.respond_choose_robbed_player(command),
-            (DecisionKind::DropHalf { .. }, PlayerCommand::DropHalf(command)) => {
-                self.respond_drop_half(command)
+            (DecisionKind::DiscardHalf { .. }, PlayerCommand::DiscardHalf(command)) => {
+                self.respond_discard_half(command)
             }
             (
                 DecisionKind::TradeResponse { .. } | DecisionKind::TradeOwnerAction { .. },

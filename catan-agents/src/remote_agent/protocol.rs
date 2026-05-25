@@ -5,7 +5,7 @@ use std::{
 
 use catan_core::{
     gameplay::game::command::{
-        ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, InitialPlacementCommand,
+        ChooseRobbedPlayerCommand, DiscardHalfCommand, InitCommand, InitialPlacementCommand,
         MoveRobberCommand, PostDevCardCommand, PostDiceCommand, RegularCommand, TradeAnswer,
     },
     gameplay::{
@@ -142,7 +142,7 @@ pub enum DecisionRequestFrame {
     AnswerTrade(DecisionRequestEnvelope),
     TradeResponse(DecisionRequestEnvelope),
     TradeOwnerAction(DecisionRequestEnvelope),
-    DropHalf(DecisionRequestEnvelope),
+    DiscardHalf(DecisionRequestEnvelope),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -157,7 +157,7 @@ pub enum DecisionResponseFrame {
     AnswerTrade(TradeAnswer),
     TradeResponse(TradeResponseCommand),
     TradeOwnerAction(TradeCommand),
-    DropHalf(DropHalfCommand),
+    DiscardHalf(DiscardHalfCommand),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -205,7 +205,7 @@ impl DecisionRequestFrame {
             Self::AnswerTrade(_) => "answer_trade",
             Self::TradeResponse(_) => "trade_response",
             Self::TradeOwnerAction(_) => "trade_owner_action",
-            Self::DropHalf(_) => "drop_half",
+            Self::DiscardHalf(_) => "discard_half",
         }
     }
 
@@ -221,7 +221,7 @@ impl DecisionRequestFrame {
             | Self::AnswerTrade(envelope)
             | Self::TradeResponse(envelope)
             | Self::TradeOwnerAction(envelope)
-            | Self::DropHalf(envelope) => envelope,
+            | Self::DiscardHalf(envelope) => envelope,
         }
     }
 }

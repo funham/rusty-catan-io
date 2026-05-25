@@ -49,7 +49,7 @@ impl InitialPlacementCommand {
 pub struct ChooseRobbedPlayerCommand(pub PlayerId);
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct DropHalfCommand(pub ResourceSet);
+pub struct DiscardHalfCommand(pub ResourceSet);
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct MoveRobberCommand(pub Hex);

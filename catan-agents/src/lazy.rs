@@ -2,8 +2,9 @@ use catan_core::{
     gameplay::{
         game::{
             command::{
-                ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, InitialPlacementCommand,
-                MoveRobberCommand, PostDevCardCommand, PostDiceCommand, RegularCommand,
+                ChooseRobbedPlayerCommand, DiscardHalfCommand, InitCommand,
+                InitialPlacementCommand, MoveRobberCommand, PostDevCardCommand, PostDiceCommand,
+                RegularCommand,
             },
             decision::DecisionKind,
             input::DecisionRequest,
@@ -65,8 +66,8 @@ impl LazyAgent {
         lazy_choose_player_to_rob(context, robber_pos)
     }
 
-    fn drop_half(&mut self, context: PlayerDecisionContext<'_>) -> DropHalfCommand {
-        lazy_drop_half(context)
+    fn discard_half(&mut self, context: PlayerDecisionContext<'_>) -> DiscardHalfCommand {
+        lazy_discard_half(context)
     }
 }
 
@@ -100,7 +101,9 @@ impl BotPolicy for LazyAgent {
             DecisionKind::ChooseRobbedPlayer { robber_pos } => Some(
                 PlayerCommand::ChooseRobbedPlayer(self.choose_player_to_rob(context, robber_pos)),
             ),
-            DecisionKind::DropHalf { .. } => Some(PlayerCommand::DropHalf(self.drop_half(context))),
+            DecisionKind::DiscardHalf { .. } => {
+                Some(PlayerCommand::DiscardHalf(self.discard_half(context)))
+            }
             DecisionKind::TradeResponse { .. } | DecisionKind::TradeOwnerAction { .. } => {
                 unsupported_decision_command(request)
             }
@@ -108,20 +111,20 @@ impl BotPolicy for LazyAgent {
     }
 }
 
-pub fn lazy_drop_half(context: PlayerDecisionContext<'_>) -> DropHalfCommand {
-    let number_to_drop = context.private.resources.total() / 2;
-    let mut to_drop = ResourceSet::default();
+pub fn lazy_discard_half(context: PlayerDecisionContext<'_>) -> DiscardHalfCommand {
+    let number_to_discard = context.private.resources.total() / 2;
+    let mut to_discard = ResourceSet::default();
     for (resource, number) in context.private.resources.unroll() {
-        let remaining = number_to_drop - to_drop.total();
+        let remaining = number_to_discard - to_discard.total();
 
         if remaining == 0 {
             break;
         }
 
-        to_drop[resource] = remaining.min(number);
+        to_discard[resource] = remaining.min(number);
     }
 
-    DropHalfCommand(to_drop)
+    DiscardHalfCommand(to_discard)
 }
 
 pub fn lazy_choose_player_to_rob(

@@ -4,8 +4,9 @@ use catan_core::{
     gameplay::{
         game::{
             command::{
-                ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, InitialPlacementCommand,
-                MoveRobberCommand, PostDevCardCommand, PostDiceCommand, RegularCommand,
+                ChooseRobbedPlayerCommand, DiscardHalfCommand, InitCommand,
+                InitialPlacementCommand, MoveRobberCommand, PostDevCardCommand, PostDiceCommand,
+                RegularCommand,
             },
             decision::DecisionKind,
             event::{
@@ -206,10 +207,10 @@ impl RemoteCliAgent {
         }
     }
 
-    fn drop_half(&mut self, context: PlayerDecisionContext<'_>) -> DropHalfCommand {
+    fn discard_half(&mut self, context: PlayerDecisionContext<'_>) -> DiscardHalfCommand {
         let envelope = self.envelope(&context, None);
-        match self.request(DecisionRequestFrame::DropHalf(envelope)) {
-            DecisionResponseFrame::DropHalf(action) => action,
+        match self.request(DecisionRequestFrame::DiscardHalf(envelope)) {
+            DecisionResponseFrame::DiscardHalf(action) => action,
             other => panic!("unexpected CLI response: {other:?}"),
         }
     }
@@ -245,7 +246,9 @@ impl BotPolicy for RemoteCliAgent {
             DecisionKind::ChooseRobbedPlayer { robber_pos } => Some(
                 PlayerCommand::ChooseRobbedPlayer(self.choose_player_to_rob(context, robber_pos)),
             ),
-            DecisionKind::DropHalf { .. } => Some(PlayerCommand::DropHalf(self.drop_half(context))),
+            DecisionKind::DiscardHalf { .. } => {
+                Some(PlayerCommand::DiscardHalf(self.discard_half(context)))
+            }
             DecisionKind::TradeResponse { session } => Some(PlayerCommand::Trade(
                 TradeCommand::Respond(self.trade_response(context, session)),
             )),
@@ -261,7 +264,7 @@ impl Drop for RemoteCliAgent {
         let _ = write_frame(
             &mut self.stream,
             &HostToCli::Shutdown {
-                reason: "host dropped remote CLI agent".to_owned(),
+                reason: "host closed remote CLI agent".to_owned(),
             },
         );
     }
@@ -355,7 +358,7 @@ impl Drop for RemoteCliObserver {
         let _ = write_frame(
             &mut self.stream,
             &HostToCli::Shutdown {
-                reason: "host dropped remote CLI observer".to_owned(),
+                reason: "host closed remote CLI observer".to_owned(),
             },
         );
     }

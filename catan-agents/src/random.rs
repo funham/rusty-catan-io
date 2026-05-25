@@ -3,8 +3,9 @@ use catan_core::{
     gameplay::{
         game::{
             command::{
-                ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, InitialPlacementCommand,
-                MoveRobberCommand, PostDevCardCommand, PostDiceCommand, RegularCommand,
+                ChooseRobbedPlayerCommand, DiscardHalfCommand, InitCommand,
+                InitialPlacementCommand, MoveRobberCommand, PostDevCardCommand, PostDiceCommand,
+                RegularCommand,
             },
             decision::DecisionKind,
             input::{DecisionRequest, PlayerCommand, TradeCommand, TradeResponseCommand},
@@ -95,8 +96,8 @@ impl<R: Rng> RandomAgent<R> {
         rand_choose_player_to_rob(context, robber_pos, &mut self.rng)
     }
 
-    fn drop_half(&mut self, context: PlayerDecisionContext<'_>) -> DropHalfCommand {
-        rand_drop_half(context, &mut self.rng)
+    fn discard_half(&mut self, context: PlayerDecisionContext<'_>) -> DiscardHalfCommand {
+        rand_discard_half(context, &mut self.rng)
     }
 
     fn trade_response(
@@ -146,7 +147,9 @@ impl<R: Rng> BotPolicy for RandomAgent<R> {
             DecisionKind::ChooseRobbedPlayer { robber_pos } => Some(
                 PlayerCommand::ChooseRobbedPlayer(self.choose_player_to_rob(context, robber_pos)),
             ),
-            DecisionKind::DropHalf { .. } => Some(PlayerCommand::DropHalf(self.drop_half(context))),
+            DecisionKind::DiscardHalf { .. } => {
+                Some(PlayerCommand::DiscardHalf(self.discard_half(context)))
+            }
             DecisionKind::TradeResponse { session } => Some(PlayerCommand::Trade(
                 TradeCommand::Respond(self.trade_response(context, session)),
             )),
@@ -542,26 +545,29 @@ fn rand_road_extension_with_extra_roads<const N: usize>(
         .choose(rng)
 }
 
-pub fn rand_drop_half(context: PlayerDecisionContext<'_>, rng: &mut impl Rng) -> DropHalfCommand {
-    let number_to_drop = context.private.resources.total() / 2;
+pub fn rand_discard_half(
+    context: PlayerDecisionContext<'_>,
+    rng: &mut impl Rng,
+) -> DiscardHalfCommand {
+    let number_to_discard = context.private.resources.total() / 2;
 
     match context.search {
         Some(search) => {
-            let mut to_drop = ResourceSet::default();
+            let mut to_discard = ResourceSet::default();
             let search = search.make_owned();
             let mut res = *search.state.players.get(search.root_player).resources();
 
-            for _ in 0..number_to_drop {
+            for _ in 0..number_to_discard {
                 let card = pop_random_resource(&mut res, rng)
-                    .unwrap_or_else(|| panic!("must contain {number_to_drop} cards"));
-                to_drop[card] += 1;
+                    .unwrap_or_else(|| panic!("must contain {number_to_discard} cards"));
+                to_discard[card] += 1;
             }
 
-            DropHalfCommand(to_drop)
+            DiscardHalfCommand(to_discard)
         }
         None => {
             log::error!("couldn't find search context for random agent");
-            lazy::lazy_drop_half(context)
+            lazy::lazy_discard_half(context)
         }
     }
 }

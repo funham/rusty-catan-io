@@ -31,6 +31,7 @@ use crate::{
 const P0: PlayerId = PlayerId::new(0);
 const P1: PlayerId = PlayerId::new(1);
 const P2: PlayerId = PlayerId::new(2);
+const P3: PlayerId = PlayerId::new(3);
 fn one_brick() -> ResourceSet {
     ResourceSet {
         brick: 1,
@@ -1473,6 +1474,45 @@ fn same_resource_on_both_sides_is_rejected() {
 }
 
 #[test]
+fn active_player_cannot_open_trade_without_give_resources() {
+    let (mut engine, _outputs) = started_engine();
+    engine.test_force_regular_action_phase(0);
+    let owner = engine.open_decision_for_test(0, DecisionKind::RegularCommand);
+    let mut sink = Vec::new();
+
+    apply_to_sink(
+        &mut engine,
+        submit(
+            P0,
+            owner.id,
+            PlayerCommand::Trade(TradeCommand::Propose {
+                offer: PlayerTrade {
+                    give: one_brick(),
+                    take: one_wood(),
+                },
+            }),
+        ),
+        &mut sink,
+    );
+
+    assert!(sink.iter().any(|output| {
+        matches!(
+            output,
+            GameOutput::CommandRejected {
+                token,
+                reason: CommandRejectionReason::IllegalCommand(_),
+                ..
+            } if token.player_id == P0 && token.id == owner.id
+        )
+    }));
+    assert!(
+        !sink
+            .iter()
+            .any(|output| { matches!(output_event(output), Some(GameEvent::TradeOpened { .. })) })
+    );
+}
+
+#[test]
 fn player_can_reject_trade() {
     let (mut engine, _outputs) = started_engine();
     engine.test_force_regular_action_phase(0);
@@ -1503,6 +1543,55 @@ fn player_can_reject_trade() {
                 session_id,
                 player_id: P1,
                 response: crate::gameplay::game::trade::TradeResponseState::Rejected,
+            }) if *session_id == session
+        )
+    }));
+}
+
+#[test]
+fn player_cannot_accept_trade_without_required_resources() {
+    let (mut engine, _outputs) = started_engine();
+    engine.test_force_regular_action_phase(0);
+    engine.test_give_resources(0, one_brick());
+    let session = engine.test_open_trade_session(
+        0,
+        PlayerTrade {
+            give: one_brick(),
+            take: one_wood(),
+        },
+    );
+    let offer = engine.test_trade_original_offer(session);
+    let response = engine.open_decision_for_test(1, DecisionKind::TradeResponse { session });
+    let mut sink = Vec::new();
+
+    apply_to_sink(
+        &mut engine,
+        submit(
+            P1,
+            response.id,
+            PlayerCommand::Trade(TradeCommand::Respond(TradeResponseCommand::Accept {
+                offer_id: offer,
+            })),
+        ),
+        &mut sink,
+    );
+
+    assert!(sink.iter().any(|output| {
+        matches!(
+            output,
+            GameOutput::CommandRejected {
+                token,
+                reason: CommandRejectionReason::IllegalCommand(_),
+            } if token.player_id == P1 && token.id == response.id
+        )
+    }));
+    assert!(!sink.iter().any(|output| {
+        matches!(
+            output_event(output),
+            Some(GameEvent::TradeResponseUpdated {
+                session_id,
+                player_id: P1,
+                response: crate::gameplay::game::trade::TradeResponseState::Accepted { .. },
             }) if *session_id == session
         )
     }));
@@ -1556,6 +1645,56 @@ fn player_can_counter_trade() {
                 session_id,
                 player_id: P1,
                 response: crate::gameplay::game::trade::TradeResponseState::Countered { .. },
+            }) if *session_id == session
+        )
+    }));
+}
+
+#[test]
+fn player_cannot_counter_trade_without_give_resources() {
+    let (mut engine, _outputs) = started_engine();
+    engine.test_force_regular_action_phase(0);
+    let session = engine.test_open_trade_session(
+        0,
+        PlayerTrade {
+            give: one_brick(),
+            take: one_wood(),
+        },
+    );
+    let response = engine.open_decision_for_test(1, DecisionKind::TradeResponse { session });
+    let mut sink = Vec::new();
+
+    apply_to_sink(
+        &mut engine,
+        submit(
+            P1,
+            response.id,
+            PlayerCommand::Trade(TradeCommand::Respond(TradeResponseCommand::Counter {
+                offer: PlayerTrade {
+                    give: one_wood(),
+                    take: one_brick(),
+                },
+            })),
+        ),
+        &mut sink,
+    );
+
+    assert!(sink.iter().any(|output| {
+        matches!(
+            output,
+            GameOutput::CommandRejected {
+                token,
+                reason: CommandRejectionReason::IllegalCommand(_),
+            } if token.player_id == P1 && token.id == response.id
+        )
+    }));
+    assert!(!sink.iter().any(|output| {
+        matches!(
+            output_event(output),
+            Some(GameEvent::TradeOfferAdded {
+                session_id,
+                player_id: P1,
+                ..
             }) if *session_id == session
         )
     }));
@@ -1823,6 +1962,70 @@ fn active_player_can_add_another_prime_offer_to_open_trade() {
                 player_id: P1,
                 response: TradeResponseState::Waiting,
             }) if *session_id == session
+        )
+    }));
+}
+
+#[test]
+fn active_player_reprompts_trade_participants_after_new_prime_offer() {
+    let (mut engine, _outputs) = started_engine();
+    engine.test_force_regular_action_phase(0);
+    engine.test_give_resources(0, one_brick());
+    engine.test_give_resources(1, one_wood());
+    let session = engine.test_open_trade_session(
+        0,
+        PlayerTrade {
+            give: one_brick(),
+            take: one_wood(),
+        },
+    );
+    let owner = engine.open_decision_for_test(0, DecisionKind::TradeOwnerAction { session });
+    let peer_1 = engine.open_decision_for_test(1, DecisionKind::TradeResponse { session });
+    let peer_2 = engine.open_decision_for_test(2, DecisionKind::TradeResponse { session });
+    let peer_3 = engine.open_decision_for_test(3, DecisionKind::TradeResponse { session });
+    let mut sink = Vec::new();
+
+    apply_to_sink(
+        &mut engine,
+        submit(
+            P0,
+            owner.id,
+            PlayerCommand::Trade(TradeCommand::Propose {
+                offer: PlayerTrade {
+                    give: one_brick(),
+                    take: one_wood(),
+                },
+            }),
+        ),
+        &mut sink,
+    );
+
+    for decision in [owner, peer_1, peer_2, peer_3] {
+        assert!(sink.iter().any(|output| {
+            matches!(
+                output,
+                GameOutput::DecisionClosed { decision_id } if *decision_id == decision.id
+            )
+        }));
+    }
+
+    for player_id in [P1, P2, P3] {
+        assert!(sink.iter().any(|output| {
+            matches!(
+                output,
+                GameOutput::DecisionOpened(decision)
+                    if decision.player_id() == player_id
+                        && decision.kind() == DecisionKind::TradeResponse { session }
+            )
+        }));
+    }
+
+    assert!(sink.iter().any(|output| {
+        matches!(
+            output,
+            GameOutput::DecisionOpened(decision)
+                if decision.player_id() == P0
+                    && decision.kind() == DecisionKind::TradeOwnerAction { session }
         )
     }));
 }

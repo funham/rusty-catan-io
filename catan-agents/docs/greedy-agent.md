@@ -43,7 +43,7 @@ If exact search state is available, it chooses the trade that unlocks the highes
 
 ## Discard and robber choices
 
-When dropping half its hand, the agent discards one card at a time and keeps the remaining hand as close as possible to its next greedy objective.
+When discarding half its hand, the agent discards one card at a time and keeps the remaining hand as close as possible to its next greedy objective.
 
 When moving the robber, human visibility mode blocks the hex with the strongest visible opponent production. Counting mode also considers exact known opponent resources and prefers hexes that can steal cards useful for the agent's next objective.
 

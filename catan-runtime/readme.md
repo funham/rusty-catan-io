@@ -135,9 +135,9 @@ Interactive development-card shortcuts:
 - `yp` or `use yop`: pick two resources.
 - `rb` or `use roadbuild`: choose two road placements consecutively.
 
-## Dropping Cards
+## Discarding Cards
 
-When the host asks you to drop cards after a 7, either type five numbers:
+When the host asks you to discard cards after a 7, either type five numbers:
 
 ```text
 0 1 0 2 0
@@ -146,10 +146,10 @@ When the host asks you to drop cards after a 7, either type five numbers:
 or type:
 
 ```text
-drop
+discard
 ```
 
-Interactive drop mode shows your resource cards, the required total, and a selected drop count under every resource deck. Use Left/Right to choose a resource, Up/Down to change that resource's drop count, Enter to submit, and Esc to cancel. The UI prevents counts below zero or above the cards you hold, and it only submits when the selected total matches the required total.
+Interactive discard mode shows your resource cards, the required total, and a selected discard count under every resource deck. Use Left/Right to choose a resource, Up/Down to change that resource's discard count, Enter to submit, and Esc to cancel. The UI prevents counts below zero or above the cards you hold, and it only submits when the selected total matches the required total.
 
 ## Robber
 

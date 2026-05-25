@@ -6,8 +6,9 @@ use catan_core::{
         field::state::BoardLayout,
         game::{
             command::{
-                ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, InitialPlacementCommand,
-                MoveRobberCommand, PostDevCardCommand, PostDiceCommand, RegularCommand,
+                ChooseRobbedPlayerCommand, DiscardHalfCommand, InitCommand,
+                InitialPlacementCommand, MoveRobberCommand, PostDevCardCommand, PostDiceCommand,
+                RegularCommand,
             },
             decision::DecisionKind,
             input::{DecisionRequest, PlayerCommand, TradeCommand, TradeResponseCommand},
@@ -92,8 +93,8 @@ impl GreedyAgent {
         greedy_choose_player_to_rob(context, robber_pos)
     }
 
-    fn drop_half(&mut self, context: PlayerDecisionContext<'_>) -> DropHalfCommand {
-        greedy_drop_half(context)
+    fn discard_half(&mut self, context: PlayerDecisionContext<'_>) -> DiscardHalfCommand {
+        greedy_discard_half(context)
     }
 
     fn trade_response(
@@ -145,7 +146,9 @@ impl BotPolicy for GreedyAgent {
             DecisionKind::ChooseRobbedPlayer { robber_pos } => Some(
                 PlayerCommand::ChooseRobbedPlayer(self.choose_player_to_rob(context, robber_pos)),
             ),
-            DecisionKind::DropHalf { .. } => Some(PlayerCommand::DropHalf(self.drop_half(context))),
+            DecisionKind::DiscardHalf { .. } => {
+                Some(PlayerCommand::DiscardHalf(self.discard_half(context)))
+            }
             DecisionKind::TradeResponse { session } => Some(PlayerCommand::Trade(
                 TradeCommand::Respond(self.trade_response(context, session)),
             )),
@@ -156,21 +159,21 @@ impl BotPolicy for GreedyAgent {
     }
 }
 
-pub fn greedy_drop_half(context: PlayerDecisionContext<'_>) -> DropHalfCommand {
-    let number_to_drop = context.private.resources.total() / 2;
+pub fn greedy_discard_half(context: PlayerDecisionContext<'_>) -> DiscardHalfCommand {
+    let number_to_discard = context.private.resources.total() / 2;
     let mut remaining = *context.private.resources;
-    let mut to_drop = ResourceSet::default();
+    let mut to_discard = ResourceSet::default();
 
-    for _ in 0..number_to_drop {
-        let Some(resource) = best_resource_to_drop(&context, context.actor, &remaining) else {
+    for _ in 0..number_to_discard {
+        let Some(resource) = best_resource_to_discard(&context, context.actor, &remaining) else {
             break;
         };
 
         remaining[resource] -= 1;
-        to_drop[resource] += 1;
+        to_discard[resource] += 1;
     }
 
-    DropHalfCommand(to_drop)
+    DiscardHalfCommand(to_discard)
 }
 
 pub fn greedy_choose_player_to_rob(
@@ -502,7 +505,7 @@ fn next_objective_score_for_resources(
     (0, 0)
 }
 
-fn best_resource_to_drop(
+fn best_resource_to_discard(
     context: &PlayerDecisionContext<'_>,
     player_id: PlayerId,
     resources: &ResourceSet,
@@ -510,11 +513,11 @@ fn best_resource_to_drop(
     Resource::iter()
         .filter(|resource| resources[*resource] > 0)
         .fold(None, |best, resource| {
-            let mut after_drop = *resources;
-            after_drop[resource] -= 1;
-            let candidate = DropCandidateScore {
+            let mut after_discard = *resources;
+            after_discard[resource] -= 1;
+            let candidate = DiscardCandidateScore {
                 resource,
-                hand_score: hand_score(context, player_id, &after_drop),
+                hand_score: hand_score(context, player_id, &after_discard),
                 demand_score: resource_demand_score_with_hand(
                     context, player_id, resources, resource,
                 ),
@@ -523,7 +526,7 @@ fn best_resource_to_drop(
 
             match best {
                 Some(best)
-                    if best_drop_candidate_ordering(candidate, best) != Ordering::Greater =>
+                    if best_discard_candidate_ordering(candidate, best) != Ordering::Greater =>
                 {
                     Some(best)
                 }
@@ -534,16 +537,16 @@ fn best_resource_to_drop(
 }
 
 #[derive(Debug, Clone, Copy)]
-struct DropCandidateScore {
+struct DiscardCandidateScore {
     resource: Resource,
     hand_score: (u8, usize),
     demand_score: u16,
     current_count: u16,
 }
 
-fn best_drop_candidate_ordering(
-    candidate: DropCandidateScore,
-    best: DropCandidateScore,
+fn best_discard_candidate_ordering(
+    candidate: DiscardCandidateScore,
+    best: DiscardCandidateScore,
 ) -> Ordering {
     candidate
         .hand_score
@@ -797,7 +800,7 @@ mod tests {
     const P3: PlayerId = PlayerId::new(3);
 
     #[test]
-    fn drop_half_preserves_buildable_city_and_discards_surplus() {
+    fn discard_half_preserves_buildable_city_and_discards_surplus() {
         let mut init = SetupGameState::default();
         place_initial_anywhere(&mut init, P0);
         let mut state = init.finish();
@@ -814,7 +817,7 @@ mod tests {
             .expect("bank should fund test resources");
 
         with_context(&state, P0, CountingMode::Human, |context| {
-            let command = greedy_drop_half(context);
+            let command = greedy_discard_half(context);
 
             assert_eq!(
                 command.0,

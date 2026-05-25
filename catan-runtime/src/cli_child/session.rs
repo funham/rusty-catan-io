@@ -10,7 +10,7 @@ use catan_agents::remote_agent::{
     NonblockingFrameReader, UiModel, read_frame, ui_model_summary, write_frame,
 };
 use catan_core::gameplay::game::command::{
-    ChooseRobbedPlayerCommand, DropHalfCommand, InitialPlacementCommand, MoveRobberCommand,
+    ChooseRobbedPlayerCommand, DiscardHalfCommand, InitialPlacementCommand, MoveRobberCommand,
     PostDevCardCommand, TradeAnswer,
 };
 use catan_core::gameplay::game::output::{CommandRejectionReason, GameOutput};
@@ -241,7 +241,7 @@ fn decision_request_from_output(
         DecisionKind::ChooseRobbedPlayer { .. } => {
             DecisionRequestFrame::ChoosePlayerToRob(envelope)
         }
-        DecisionKind::DropHalf { .. } => DecisionRequestFrame::DropHalf(envelope),
+        DecisionKind::DiscardHalf { .. } => DecisionRequestFrame::DiscardHalf(envelope),
         DecisionKind::TradeResponse { .. } => DecisionRequestFrame::TradeResponse(envelope),
         DecisionKind::TradeOwnerAction { .. } => DecisionRequestFrame::TradeOwnerAction(envelope),
     })
@@ -274,8 +274,8 @@ fn command_from_decision_response(
             DecisionKind::ChooseRobbedPlayer { .. },
             DecisionResponseFrame::ChoosePlayerToRob(action),
         ) => Some(PlayerCommand::ChooseRobbedPlayer(action)),
-        (DecisionKind::DropHalf { .. }, DecisionResponseFrame::DropHalf(action)) => {
-            Some(PlayerCommand::DropHalf(action))
+        (DecisionKind::DiscardHalf { .. }, DecisionResponseFrame::DiscardHalf(action)) => {
+            Some(PlayerCommand::DiscardHalf(action))
         }
         (DecisionKind::TradeResponse { .. }, DecisionResponseFrame::AnswerTrade(answer)) => {
             let response = match answer {
@@ -440,7 +440,7 @@ fn process_host_event(
         "processing event: {:?}",
         event
     );
-    let event_message = ui.record_game_event(event);
+    let event_message = ui.record_game_event(event, view);
     if let (
         CliViewMode::Normal,
         catan_core::gameplay::game::event::GameEvent::GameFinished {
@@ -670,19 +670,21 @@ fn handle_decision(
             let command = read_trade_owner_action(ui, &envelope.view, session)?;
             Ok(DecisionResponseFrame::TradeOwnerAction(command))
         }
-        DecisionRequestFrame::DropHalf(envelope) => {
+        DecisionRequestFrame::DiscardHalf(envelope) => {
             log::trace!(
                 target: "catan_runtime::cli_child::session",
-                "processing DropHalf decision id={}",
+                "processing DiscardHalf decision id={}",
                 envelope.request_id
             );
             let resources = loop {
-                if let Some(resources) = ui.select_drop_cards(&envelope.view)? {
+                if let Some(resources) = ui.select_discard_cards(&envelope.view)? {
                     break resources;
                 }
             };
-            log::trace!("Resources to drop: {:?}", resources);
-            Ok(DecisionResponseFrame::DropHalf(DropHalfCommand(resources)))
+            log::trace!("Resources to discard: {:?}", resources);
+            Ok(DecisionResponseFrame::DiscardHalf(DiscardHalfCommand(
+                resources,
+            )))
         }
     }
 }

@@ -18,7 +18,7 @@ use crate::{
     DecisionResponse,
     gameplay::game::{
         command::{
-            self, ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, MoveRobberCommand,
+            self, ChooseRobbedPlayerCommand, DiscardHalfCommand, InitCommand, MoveRobberCommand,
             PostDevCardCommand, PostDiceCommand, RegularCommand,
         },
         decision::{
@@ -162,11 +162,11 @@ fn decide_playing_submit(
         Some(DecisionCommand::UseDevCard { usage, next_kind }) => {
             decide_use_dev_card(active, decision, usage, next_kind, context, &mut events);
         }
-        Some(DecisionCommand::DropHalf {
+        Some(DecisionCommand::DiscardHalf {
             required,
             resources,
         }) => {
-            decide_drop_half(active, decision, required, resources, &mut events);
+            decide_discard_half(active, decision, required, resources, &mut events);
         }
         Some(DecisionCommand::MoveRobber(hex)) => {
             decide_move_robber(active, decision, hex, context, &mut events);
@@ -242,7 +242,7 @@ enum DecisionCommand {
         usage: DevCardUsage,
         next_kind: DecisionKind,
     },
-    DropHalf {
+    DiscardHalf {
         required: u16,
         resources: ResourceSet,
     },
@@ -299,9 +299,9 @@ fn command_for_decision(kind: DecisionKind, command: PlayerCommand) -> Option<De
             next_kind: DecisionKind::RegularCommand,
         }),
         (
-            DecisionKind::DropHalf { required },
-            PlayerCommand::DropHalf(DropHalfCommand(resources)),
-        ) => Some(DecisionCommand::DropHalf {
+            DecisionKind::DiscardHalf { required },
+            PlayerCommand::DiscardHalf(DiscardHalfCommand(resources)),
+        ) => Some(DecisionCommand::DiscardHalf {
             required,
             resources,
         }),
@@ -516,6 +516,14 @@ fn decide_trade_response(
                 );
                 return;
             }
+            if !crate::gameplay::game::trade::trade_is_funded(
+                active.game.players.get(session.proposer).resources(),
+                active.game.players.get(decision.player_id).resources(),
+                &offer.trade,
+            ) {
+                reject_illegal(events, &decision, "trade resources are not available");
+                return;
+            }
             events.push(GameEvent::TradeResponseUpdated {
                 session_id,
                 player_id: decision.player_id,
@@ -644,12 +652,14 @@ fn decide_add_prime_trade_offer(
         return;
     };
     let offer_id = crate::gameplay::game::trade::TradeOfferId(session.offers.len() as u64);
+    close_session_decisions(active, session_id, events);
     events.push(GameEvent::TradeOfferAdded {
         session_id,
         player_id: decision.player_id,
         offer_id,
         offer,
     });
+    let mut decisions = active.decisions();
     for player_id in player_ids(active.game.players.count()) {
         if player_id == decision.player_id {
             continue;
@@ -659,7 +669,25 @@ fn decide_add_prime_trade_offer(
             player_id,
             response: crate::gameplay::game::trade::TradeResponseState::Waiting,
         });
+        open_decision(
+            events,
+            &mut decisions,
+            player_id,
+            DecisionKind::TradeResponse {
+                session: session_id,
+            },
+            DecisionLifetime::UntilSessionClosed(session_id),
+        );
     }
+    open_decision(
+        events,
+        &mut decisions,
+        decision.player_id,
+        DecisionKind::TradeOwnerAction {
+            session: session_id,
+        },
+        DecisionLifetime::UntilSessionClosed(session_id),
+    );
 }
 
 fn decide_commit_trade(
@@ -776,7 +804,7 @@ fn close_session_decisions(
     }
 }
 
-fn decide_drop_half(
+fn decide_discard_half(
     active: &PlayingEngine,
     decision: OpenDecision,
     required: u16,
@@ -818,7 +846,7 @@ fn decide_drop_half(
             events,
             &mut decisions,
             next_player,
-            DecisionKind::DropHalf { required },
+            DecisionKind::DiscardHalf { required },
             DecisionLifetime::OneShot,
         );
     } else {
@@ -1125,7 +1153,7 @@ fn open_next_discard_or_robber(
             events,
             &mut decisions,
             player_id,
-            DecisionKind::DropHalf { required },
+            DecisionKind::DiscardHalf { required },
             DecisionLifetime::OneShot,
         );
     } else {

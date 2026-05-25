@@ -7,8 +7,9 @@ use catan_core::{
     gameplay::{
         game::{
             command::{
-                ChooseRobbedPlayerCommand, DropHalfCommand, InitCommand, InitialPlacementCommand,
-                MoveRobberCommand, PostDevCardCommand, PostDiceCommand, RegularCommand,
+                ChooseRobbedPlayerCommand, DiscardHalfCommand, InitCommand,
+                InitialPlacementCommand, MoveRobberCommand, PostDevCardCommand, PostDiceCommand,
+                RegularCommand,
             },
             decision::DecisionKind,
             event::{GameEvent, PlayerNotification},
@@ -136,11 +137,11 @@ impl CliAgent {
         TerminalUi::read_trade_owner_action(session)
     }
 
-    fn drop_half(&mut self, context: PlayerDecisionContext<'_>) -> DropHalfCommand {
+    fn discard_half(&mut self, context: PlayerDecisionContext<'_>) -> DiscardHalfCommand {
         let _guard = self.terminal.inner.lock().expect("terminal mutex poisoned");
         TerminalUi::print_decision_context("Discard half", &context);
-        DropHalfCommand(TerminalUi::read_resource_collection(
-            "drop brick wood wheat sheep ore: ",
+        DiscardHalfCommand(TerminalUi::read_resource_collection(
+            "discard brick wood wheat sheep ore: ",
         ))
     }
 }
@@ -175,7 +176,9 @@ impl BotPolicy for CliAgent {
             DecisionKind::ChooseRobbedPlayer { robber_pos } => Some(
                 PlayerCommand::ChooseRobbedPlayer(self.choose_player_to_rob(context, robber_pos)),
             ),
-            DecisionKind::DropHalf { .. } => Some(PlayerCommand::DropHalf(self.drop_half(context))),
+            DecisionKind::DiscardHalf { .. } => {
+                Some(PlayerCommand::DiscardHalf(self.discard_half(context)))
+            }
             DecisionKind::TradeResponse { session } => Some(PlayerCommand::Trade(
                 TradeCommand::Respond(self.answer_trade(context, session)),
             )),

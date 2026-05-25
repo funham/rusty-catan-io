@@ -2,10 +2,12 @@
 
 use std::collections::VecDeque;
 
+use catan_agents::remote_agent::UiModel;
 use catan_core::gameplay::{
     game::{event::GameEvent, run::GameResult, trade::TradeResponseState},
     primitives::{
         PlayerId,
+        board::Tile,
         build::{Build, EstablishmentType},
         dev_card::DevCardUsage,
         resource::{Resource, ResourceSet},
@@ -59,26 +61,37 @@ impl EventJournal {
     }
 
     pub(crate) fn push_event(&mut self, event: &GameEvent) -> Option<String> {
-        let line = meaningful_event_line(event)?;
-        let player_id = event_player_id(event);
+        self.push_event_with_model(event, None)
+    }
 
-        let needs_divider = match (self.last_player_id, event_player_id(event)) {
-            (Some(last_id), Some(curr_id)) => curr_id != last_id,
-            _ => false,
-        };
+    pub(crate) fn push_event_with_model(
+        &mut self,
+        event: &GameEvent,
+        model: Option<&UiModel>,
+    ) -> Option<String> {
+        let lines = meaningful_event_entries(event, model);
+        let first = lines.first().map(|(line, _)| line.clone())?;
 
-        if needs_divider {
-            self.push_entry(JournalEntry::Divider);
+        for (idx, (line, player_id)) in lines.into_iter().enumerate() {
+            let needs_divider = idx == 0
+                && matches!(
+                    (self.last_player_id, player_id),
+                    (Some(last_id), Some(curr_id)) if curr_id != last_id
+                );
+
+            if needs_divider {
+                self.push_entry(JournalEntry::Divider);
+            }
+
+            self.push_entry(JournalEntry::Event {
+                text: line,
+                player_id,
+            });
+
+            self.last_player_id = player_id;
         }
 
-        self.push_entry(JournalEntry::Event {
-            text: line.clone(),
-            player_id,
-        });
-
-        self.last_player_id = player_id;
-
-        Some(line)
+        Some(first)
     }
 
     fn push_entry(&mut self, entry: JournalEntry) {
@@ -109,7 +122,24 @@ impl EventJournal {
 }
 
 pub(crate) fn meaningful_event_line(event: &GameEvent) -> Option<String> {
-    Some(match event {
+    meaningful_event_line_with_model(event, None)
+}
+
+pub(crate) fn meaningful_event_line_with_model(
+    event: &GameEvent,
+    model: Option<&UiModel>,
+) -> Option<String> {
+    meaningful_event_entries(event, model)
+        .into_iter()
+        .next()
+        .map(|(line, _)| line)
+}
+
+fn meaningful_event_entries(
+    event: &GameEvent,
+    model: Option<&UiModel>,
+) -> Vec<(String, Option<PlayerId>)> {
+    let line = match event {
         GameEvent::GameStarted => "game started".to_owned(),
         GameEvent::TurnStarted { player_id, turn_no } => {
             format!("turn {turn_no}: p{player_id} to play")
@@ -129,7 +159,7 @@ pub(crate) fn meaningful_event_line(event: &GameEvent) -> Option<String> {
             resources,
         } => format!(
             "p{player_id} received initial resources {}",
-            resource_set_label(resources)
+            resource_set_mini_marker_label(resources)
         ),
         GameEvent::DiceRolled { player_id, value } => {
             format!("p{player_id} rolled {}", value.get())
@@ -139,14 +169,20 @@ pub(crate) fn meaningful_event_line(event: &GameEvent) -> Option<String> {
                 .iter()
                 .filter(|(_, resources)| !resources.is_empty())
                 .map(|(player_id, resources)| {
-                    format!("p{player_id} {}", resource_set_label(resources))
+                    (
+                        format!(
+                            "p{player_id} got {}",
+                            resource_set_mini_marker_label(resources)
+                        ),
+                        Some(*player_id),
+                    )
                 })
                 .collect::<Vec<_>>();
-            if grants.is_empty() {
-                "no resources were produced".to_owned()
+            return if grants.is_empty() {
+                vec![("no resources were produced".to_owned(), None)]
             } else {
-                format!("resources: {}", grants.join("; "))
-            }
+                grants
+            };
         }
         GameEvent::DevCardBought { player_id } => {
             format!("p{player_id} bought a development card")
@@ -196,26 +232,32 @@ pub(crate) fn meaningful_event_line(event: &GameEvent) -> Option<String> {
         GameEvent::PlayerDiscarded {
             player_id,
             resources,
-        } => format!("p{player_id} discarded {}", resource_set_label(resources)),
+        } => format!(
+            "p{player_id} discarded {}",
+            resource_set_mini_marker_label(resources)
+        ),
         GameEvent::RobberMoved {
             player_id,
             hex,
             robbed_id,
         } => match robbed_id {
-            Some(robbed_id) => format!(
-                "p{player_id} moved the robber to h{} and targeted p{robbed_id}",
-                hex.index().to_spiral()
+            Some(_) => format!(
+                "p{player_id} moved the robber to {}",
+                robber_hex_label(*hex, model)
             ),
             None => format!(
-                "p{player_id} moved the robber to h{}",
-                hex.index().to_spiral()
+                "p{player_id} moved the robber to {}",
+                robber_hex_label(*hex, model)
             ),
         },
         GameEvent::ResourceStolen {
             player_id,
             robbed_id,
             resource,
-        } => format!("p{player_id} stole {resource:?} from p{robbed_id}"),
+        } => format!(
+            "p{player_id} stole {} from p{robbed_id}",
+            stolen_resource_label(*player_id, *robbed_id, *resource, model)
+        ),
         GameEvent::GameFinished { result, .. } => match result {
             GameResult::Win(player_id) => format!("p{player_id} won the game"),
             GameResult::Interrupted { reason } => format!("game interrupted: {reason}"),
@@ -224,8 +266,10 @@ pub(crate) fn meaningful_event_line(event: &GameEvent) -> Option<String> {
         GameEvent::DecisionOpened(_)
         | GameEvent::DecisionClosed { .. }
         | GameEvent::CommandRejected { .. }
-        | GameEvent::DevCardDrawn { .. } => return None,
-    })
+        | GameEvent::DevCardDrawn { .. } => return Vec::new(),
+    };
+
+    vec![(line, event_player_id(event))]
 }
 
 fn event_player_id(event: &GameEvent) -> Option<PlayerId> {
@@ -288,33 +332,83 @@ fn dev_card_usage_label(usage: &DevCardUsage) -> String {
 
 fn bank_trade_label(trade: BankTrade) -> String {
     let rate = match trade.kind {
-        BankTradeKind::BankGeneric => "4:1",
-        BankTradeKind::PortGeneric => "3:1",
-        BankTradeKind::PortSpecific => "2:1",
+        BankTradeKind::BankGeneric => 4,
+        BankTradeKind::PortGeneric => 3,
+        BankTradeKind::PortSpecific => 2,
     };
-    format!("{rate} {:?} -> {:?}", trade.give, trade.take)
+    format!(
+        "[{rate}{}] -> [1{}]",
+        resource_marker_code(trade.give),
+        resource_marker_code(trade.take)
+    )
 }
 
 fn player_trade_label(trade: &PlayerTrade) -> String {
     format!(
         "give {} for {}",
-        resource_set_label(&trade.give),
-        resource_set_label(&trade.take)
+        resource_set_mini_marker_label(&trade.give),
+        resource_set_mini_marker_label(&trade.take)
     )
 }
 
-fn resource_set_label(resources: &ResourceSet) -> String {
+fn resource_set_mini_marker_label(resources: &ResourceSet) -> String {
     let parts = Resource::iter()
         .filter_map(|resource| {
             let count = resources[resource];
-            (count > 0).then(|| format!("{count} {resource:?}"))
+            (count > 0).then(|| format!("[{count}{}]", resource_marker_code(resource)))
         })
         .collect::<Vec<_>>();
     if parts.is_empty() {
         "nothing".to_owned()
     } else {
-        parts.join(", ")
+        parts.join("")
     }
+}
+
+fn resource_marker_code(resource: Resource) -> &'static str {
+    match resource {
+        Resource::Brick => "B",
+        Resource::Wood => "W",
+        Resource::Wheat => "H",
+        Resource::Sheep => "S",
+        Resource::Ore => "O",
+    }
+}
+
+fn robber_hex_label(hex: catan_core::topology::Hex, model: Option<&UiModel>) -> String {
+    let Some(tile) = model.and_then(|model| model.public.board.tiles.get(hex.index().to_spiral()))
+    else {
+        return format!("h{}", hex.index().to_spiral());
+    };
+    match tile {
+        Tile::Resource { resource, number } => format!("{resource:?} {} hex", number.get()),
+        Tile::River { number } => format!("River {} hex", number.get()),
+        Tile::Desert => "Desert hex".to_owned(),
+    }
+}
+
+fn stolen_resource_label(
+    player_id: PlayerId,
+    robbed_id: PlayerId,
+    resource: Resource,
+    model: Option<&UiModel>,
+) -> String {
+    match model_player_perspective(model) {
+        Some(viewer) if viewer == player_id || viewer == robbed_id => {
+            format!("[1{}]", resource_marker_code(resource))
+        }
+        Some(_) | None => "[?]".to_owned(),
+    }
+}
+
+fn model_player_perspective(model: Option<&UiModel>) -> Option<PlayerId> {
+    model.and_then(|model| {
+        model
+            .private
+            .as_ref()
+            .map(|private| private.player_id)
+            .or(model.actor)
+    })
 }
 
 fn intersection_label(intersection: catan_core::topology::Intersection) -> String {
@@ -380,7 +474,7 @@ mod tests {
     }
 
     #[test]
-    fn journal_drops_technical_decision_events() {
+    fn journal_filters_technical_decision_events() {
         let technical = GameEvent::DecisionOpened(OpenDecision {
             id: DecisionId(4),
             player_id: P0,
@@ -389,6 +483,229 @@ mod tests {
         });
 
         assert_eq!(meaningful_event_line(&technical), None);
+    }
+
+    #[test]
+    fn journal_splits_resource_distribution_by_player_with_mini_card_markers() {
+        let mut by_player = catan_core::gameplay::game::event::ResourceDistribution::new();
+        by_player.push((
+            P0,
+            catan_core::gameplay::primitives::resource::ResourceSet {
+                brick: 4,
+                ..Default::default()
+            },
+        ));
+        by_player.push((
+            P1,
+            catan_core::gameplay::primitives::resource::ResourceSet {
+                wood: 1,
+                sheep: 2,
+                ..Default::default()
+            },
+        ));
+        let mut journal = EventJournal::new(8);
+
+        journal.push_event(&GameEvent::ResourcesDistributed { by_player });
+
+        let entries = journal
+            .entries()
+            .filter_map(|entry| match entry {
+                JournalEntry::Event { text, player_id } => Some((text.as_str(), *player_id)),
+                JournalEntry::Divider => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            entries,
+            vec![("p0 got [4B]", Some(P0)), ("p1 got [1W][2S]", Some(P1)),]
+        );
+    }
+
+    #[test]
+    fn journal_uses_mini_card_markers_for_all_quantified_resources() {
+        use catan_core::gameplay::primitives::{
+            resource::{Resource, ResourceSet},
+            trade::{BankTrade, BankTradeKind, PlayerTrade},
+        };
+
+        assert_eq!(
+            meaningful_event_line(&GameEvent::InitialResourcesGranted {
+                player_id: P0,
+                resources: ResourceSet {
+                    brick: 1,
+                    ore: 2,
+                    ..ResourceSet::EMPTY
+                },
+            }),
+            Some("p0 received initial resources [1B][2O]".to_owned())
+        );
+        assert_eq!(
+            meaningful_event_line(&GameEvent::BankTradeCompleted {
+                player_id: P0,
+                trade: BankTrade {
+                    give: Resource::Brick,
+                    take: Resource::Wood,
+                    kind: BankTradeKind::BankGeneric,
+                },
+            }),
+            Some("p0 traded with bank: [4B] -> [1W]".to_owned())
+        );
+        assert_eq!(
+            meaningful_event_line(&GameEvent::TradeOpened {
+                session_id: catan_core::gameplay::game::trade::TradeSessionId(0),
+                proposer_id: P0,
+                offer_id: catan_core::gameplay::game::trade::TradeOfferId(0),
+                offer: PlayerTrade {
+                    give: ResourceSet {
+                        sheep: 2,
+                        ..ResourceSet::EMPTY
+                    },
+                    take: ResourceSet {
+                        wheat: 1,
+                        ..ResourceSet::EMPTY
+                    },
+                },
+            }),
+            Some("p0 opened public trade: give [2S] for [1H]".to_owned())
+        );
+        assert_eq!(
+            meaningful_event_line(&GameEvent::PlayerDiscarded {
+                player_id: P1,
+                resources: ResourceSet {
+                    wood: 1,
+                    ..ResourceSet::EMPTY
+                },
+            }),
+            Some("p1 discarded [1W]".to_owned())
+        );
+    }
+
+    #[test]
+    fn robber_move_and_resource_stolen_journal_entries_are_split() {
+        use catan_agents::remote_agent::UiModel;
+        use catan_core::gameplay::{
+            game::{
+                event::ObserverNotificationContext,
+                state::SetupGameState,
+                view::{ContextFactory, VisibilityConfig},
+            },
+            primitives::board::Tile,
+        };
+
+        let state = SetupGameState::default().finish();
+        let index = catan_core::gameplay::game::index::GameIndex::rebuild(&state);
+        let visibility = VisibilityConfig::default();
+        let factory = ContextFactory {
+            state: &state,
+            index: &index,
+            visibility: &visibility,
+            trade_sessions: &[],
+        };
+        let model = UiModel::from_observer(
+            ObserverNotificationContext::Spectator {
+                public: factory.spectator_public_view(),
+            },
+            false,
+        );
+        let (hex, resource, number) = model
+            .public
+            .board
+            .tiles
+            .iter()
+            .copied()
+            .enumerate()
+            .find_map(|(idx, tile)| match tile {
+                Tile::Resource { resource, number } => Some((
+                    catan_core::topology::HexIndex::spiral_to_hex(idx),
+                    resource,
+                    number,
+                )),
+                Tile::River { .. } | Tile::Desert => None,
+            })
+            .expect("default board should have a resource tile");
+
+        assert_eq!(
+            super::meaningful_event_line_with_model(
+                &GameEvent::RobberMoved {
+                    player_id: P0,
+                    hex,
+                    robbed_id: Some(P1),
+                },
+                Some(&model),
+            ),
+            Some(format!(
+                "p0 moved the robber to {resource:?} {} hex",
+                number.get()
+            ))
+        );
+        assert_eq!(
+            meaningful_event_line(&GameEvent::ResourceStolen {
+                player_id: P0,
+                robbed_id: P1,
+                resource: catan_core::gameplay::primitives::resource::Resource::Brick,
+            }),
+            Some("p0 stole [?] from p1".to_owned())
+        );
+    }
+
+    #[test]
+    fn stolen_resource_journal_reveals_exact_card_only_to_involved_player_perspectives() {
+        use catan_agents::remote_agent::UiModel;
+        use catan_core::gameplay::{
+            game::{
+                event::ObserverNotificationContext,
+                state::SetupGameState,
+                view::{ContextFactory, VisibilityConfig},
+            },
+            primitives::resource::Resource,
+        };
+
+        let state = SetupGameState::default().finish();
+        let index = catan_core::gameplay::game::index::GameIndex::rebuild(&state);
+        let visibility = VisibilityConfig::default();
+        let factory = ContextFactory {
+            state: &state,
+            index: &index,
+            visibility: &visibility,
+            trade_sessions: &[],
+        };
+        let thief_model = UiModel::from_observer(
+            ObserverNotificationContext::Player {
+                public: factory.public_view(visibility.player_policy(P0)),
+                private: factory.private_view(P0),
+            },
+            false,
+        );
+        let victim_model = UiModel::from_observer(
+            ObserverNotificationContext::Player {
+                public: factory.public_view(visibility.player_policy(P1)),
+                private: factory.private_view(P1),
+            },
+            false,
+        );
+        let spectator_model = UiModel::from_observer(
+            ObserverNotificationContext::Spectator {
+                public: factory.spectator_public_view(),
+            },
+            false,
+        );
+        let event = GameEvent::ResourceStolen {
+            player_id: P0,
+            robbed_id: P1,
+            resource: Resource::Brick,
+        };
+
+        assert_eq!(
+            super::meaningful_event_line_with_model(&event, Some(&thief_model)),
+            Some("p0 stole [1B] from p1".to_owned())
+        );
+        assert_eq!(
+            super::meaningful_event_line_with_model(&event, Some(&victim_model)),
+            Some("p0 stole [1B] from p1".to_owned())
+        );
+        assert_eq!(
+            super::meaningful_event_line_with_model(&event, Some(&spectator_model)),
+            Some("p0 stole [?] from p1".to_owned())
+        );
     }
 
     #[test]
