@@ -60,6 +60,7 @@ impl EventJournal {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn push_event(&mut self, event: &GameEvent) -> Option<String> {
         self.push_event_with_model(event, None)
     }
@@ -121,10 +122,12 @@ impl EventJournal {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn meaningful_event_line(event: &GameEvent) -> Option<String> {
     meaningful_event_line_with_model(event, None)
 }
 
+#[cfg(test)]
 pub(crate) fn meaningful_event_line_with_model(
     event: &GameEvent,
     model: Option<&UiModel>,

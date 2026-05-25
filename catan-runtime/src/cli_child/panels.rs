@@ -13,7 +13,7 @@ use catan_core::gameplay::{
         dev_card::{DevCardData, DevCardKind, UsableDevCard},
         player::PlayerId,
         resource::{Resource, ResourceSet},
-        trade::{BankTrade, BankTradeKind, PlayerTrade},
+        trade::{BankTrade, BankTradeKind},
     },
 };
 use catan_render::{adapters::ratatui::color as ratatui_color, field::FieldRenderer};
@@ -250,8 +250,6 @@ pub(crate) fn trade_tree_lines_for_viewer(
         let mut spans = Vec::new();
         if selected_offer_index == Some(idx) {
             spans.push(Span::styled("> ", Style::default().fg(Color::Yellow)));
-        } else if is_counter {
-            spans.push(Span::raw("  "));
         } else {
             spans.push(Span::raw("  "));
         }
@@ -393,45 +391,6 @@ fn trade_session_summary_line(session: &UiTradeSession) -> Line<'static> {
         Span::raw(format!("p{} public  ", session.proposer)),
         Span::raw(format!("offers {}", session.offers.len())),
     ])
-}
-
-pub(crate) fn player_trade_glyph_lines(trade: &PlayerTrade) -> Vec<Line<'static>> {
-    let give = resource_set_glyph_rows(&trade.give);
-    let take = resource_set_glyph_rows(&trade.take);
-    give.into_iter()
-        .zip(take)
-        .enumerate()
-        .map(|(idx, (mut left, right))| {
-            let separator = if idx == 1 { " -> " } else { "    " };
-            left.spans.push(Span::styled(separator, subtle_box_style()));
-            left.spans.extend(right.spans);
-            left
-        })
-        .collect()
-}
-
-fn resource_set_glyph_rows(resources: &ResourceSet) -> Vec<Line<'static>> {
-    let mut rows = [Vec::new(), Vec::new(), Vec::new()];
-    let mut added = false;
-    for resource in Resource::iter() {
-        let count = resources[resource];
-        if count == 0 {
-            continue;
-        }
-        if added {
-            append_gap(&mut rows, " ");
-        }
-        CardGlyph::new(resource_abbrev(resource), resource_style(resource))
-            .indices([None, Some(count), None])
-            .push_to_rows(&mut rows);
-        added = true;
-    }
-    if !added {
-        for row in &mut rows {
-            row.push(Span::styled("-", subtle_box_style()));
-        }
-    }
-    rows.into_iter().map(Line::from).collect()
 }
 
 pub(crate) fn snapshot_state_lines(
@@ -1318,8 +1277,7 @@ mod tests {
     use super::{
         adjust_discard_selection, bank_panel_lines, bank_trade_menu_lines, dev_card_lines,
         discard_personal_lines, personal_model_lines, player_style, player_trade_builder_lines,
-        player_trade_glyph_lines, public_model_lines, resource_card_lines,
-        resource_secondary_style, snapshot_state_lines,
+        public_model_lines, resource_card_lines, resource_secondary_style, snapshot_state_lines,
     };
 
     #[test]
@@ -1452,23 +1410,6 @@ mod tests {
         assert_eq!(spans[0].style.fg, Some(Color::White));
         assert_eq!(spans[1].style.fg, Some(Color::Blue));
         assert_eq!(spans[2].style.fg, Some(Color::White));
-    }
-
-    #[test]
-    fn player_trade_glyph_lines_put_arrow_only_on_middle_row() {
-        let trade = PlayerTrade {
-            give: ResourceSet::from(Resource::Ore),
-            take: ResourceSet::from(Resource::Wood),
-        };
-        let rendered = player_trade_glyph_lines(&trade)
-            .into_iter()
-            .map(|line| line.to_string())
-            .collect::<Vec<_>>();
-
-        assert_eq!(rendered.len(), 3);
-        assert!(!rendered[0].contains("->"));
-        assert!(rendered[1].contains("->"));
-        assert!(!rendered[2].contains("->"));
     }
 
     #[test]

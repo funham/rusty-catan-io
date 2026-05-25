@@ -134,16 +134,6 @@ impl CardGlyph {
         self
     }
 
-    pub(crate) fn indices(mut self, indices: [Option<u16>; 3]) -> Self {
-        self.indices = indices.map(|index| {
-            index.map(|value| CardGlyphIndex {
-                value,
-                style: Style::default(),
-            })
-        });
-        self
-    }
-
     pub(crate) fn index_top(mut self, value: u16, style: Style) -> Self {
         self.indices[0] = Some(CardGlyphIndex { value, style });
         self
@@ -2128,7 +2118,8 @@ mod tests {
     #[test]
     fn card_glyph_renders_three_lines_with_optional_indices() {
         let lines = CardGlyph::new("KN", Style::default().fg(Color::Magenta))
-            .indices([Some(1), Some(2), None])
+            .index_top(1, Style::default())
+            .index_mid(2, Style::default())
             .lines()
             .into_iter()
             .map(|line| line.to_string())
