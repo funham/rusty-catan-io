@@ -1,4 +1,4 @@
-use catan_agents::remote_agent::{CliToHost, HostToCli};
+use catan_remote::{ClientMessage, HostMessage};
 
-pub type ServerToClient = HostToCli;
-pub type ClientToServer = CliToHost;
+pub type ServerToClient = HostMessage;
+pub type ClientToServer = ClientMessage;

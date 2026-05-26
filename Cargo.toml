@@ -2,8 +2,9 @@
 resolver = "3"
 members = [
     "catan-core",
-    "catan-render",
-    "catan-agents",
+    "catan-bots",
+    "catan-tui",
+    "catan-remote",
     "catan-runtime",
     "catan-train",
     "catan-server",

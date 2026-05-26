@@ -1,0 +1,13 @@
+[package]
+name = "catan-tui"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+catan-core = { path = "../catan-core" }
+crossterm = "0.29"
+log = "0.4.29"
+ratatui = "0.30"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

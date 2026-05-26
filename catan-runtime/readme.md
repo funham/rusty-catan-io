@@ -18,25 +18,25 @@ cargo run --bin catan-runtime -- catan-runtime/data/configurations/observer_debu
 
 ## Logging
 
-Both the host runtime and the spawned CLI child use `env_logger`, so log verbosity is controlled with `RUST_LOG`.
+Both the host runtime and the spawned remote TUI use `env_logger`, so log verbosity is controlled with `RUST_LOG`.
 
-The CLI child runs in its own terminal window, but its logs are sent back to the host over a dedicated log socket. The host then re-emits those child log lines with the `catan_cli_child` target and includes the child role plus the original child target in the message:
+The remote TUI runs in its own terminal window, but its logs are sent back to the host over a dedicated log socket. The host then re-emits those child log lines with the `catan_remote_tui` target and includes the child role plus the original child target in the message:
 
 ```text
-[player-0][catan_runtime::cli_child::session] selected road
+[player-0][catan_remote::tui_adapter] selected road
 ```
 
-To see trace logs from the CLI child and debug logs from `catan-runtime`, run:
+To see trace logs from the remote TUI and debug logs from `catan-runtime`, run:
 
 ```sh
-RUST_LOG=warn,catan_runtime=debug,catan_runtime::cli_child=trace,catan_cli_child=trace \
+RUST_LOG=warn,catan_runtime=debug,catan_remote::tui=trace,catan_remote_tui=trace \
   cargo run --bin catan-runtime
 ```
 
 For a specific configuration:
 
 ```sh
-RUST_LOG=warn,catan_runtime=debug,catan_runtime::cli_child=trace,catan_cli_child=trace \
+RUST_LOG=warn,catan_runtime=debug,catan_remote::tui=trace,catan_remote_tui=trace \
   cargo run --bin catan-runtime -- \
   catan-runtime/data/configurations/observer_debug.json
 ```
@@ -44,21 +44,21 @@ RUST_LOG=warn,catan_runtime=debug,catan_runtime::cli_child=trace,catan_cli_child
 Useful variants:
 
 ```sh
-# Only CLI child trace logs.
-RUST_LOG=warn,catan_runtime::cli_child=trace,catan_cli_child=trace \
+# Only remote TUI trace logs.
+RUST_LOG=warn,catan_remote::tui=trace,catan_remote_tui=trace \
   cargo run --bin catan-runtime
 
 # Runtime debug logs plus all warnings from dependencies.
 RUST_LOG=warn,catan_runtime=debug cargo run --bin catan-runtime
 
 # Very verbose: trace everything in this crate, including the child before forwarding.
-RUST_LOG=catan_runtime=trace,catan_cli_child=trace cargo run --bin catan-runtime
+RUST_LOG=catan_runtime=trace,catan_remote_tui=trace cargo run --bin catan-runtime
 ```
 
 The child log filter has two required parts:
 
-- `catan_runtime::cli_child=trace` lets the child process emit its own trace records.
-- `catan_cli_child=trace` lets the host print the forwarded child records.
+- `catan_remote::tui=trace` lets the child process emit its own trace records.
+- `catan_remote_tui=trace` lets the host print the forwarded child records.
 
 If either half is missing, child trace logs will not appear in the host terminal.
 

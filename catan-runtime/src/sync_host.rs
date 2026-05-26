@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use catan_agents::bot::BotPolicy;
+use catan_bots::bot::BotPolicy;
 use catan_core::gameplay::{
     game::{
         engine::GameEngine,
@@ -246,7 +246,7 @@ pub fn bot_seat(policy: Box<dyn BotPolicy>) -> Box<dyn Seat> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use catan_agents::{bot::decline_trade_command, greedy::GreedyAgent, lazy::LazyAgent};
+    use catan_bots::{bot::decline_trade_command, greedy::GreedyAgent, lazy::LazyAgent};
     use catan_core::gameplay::{
         game::{
             command::RegularCommand,

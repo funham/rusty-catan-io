@@ -5,8 +5,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use catan_agents::bot::BotPolicy;
-use catan_agents::{greedy::GreedyAgent, lazy::LazyAgent, random::RandomAgent};
+use catan_bots::bot::BotPolicy;
+use catan_bots::{greedy::GreedyAgent, lazy::LazyAgent, random::RandomAgent};
 use catan_core::{
     gameplay::game::{
         run::{GameResult, RunOptions},
@@ -16,7 +16,7 @@ use catan_core::{
     gameplay::random::GameRandom,
 };
 use catan_runtime::{
-    config::{self, FieldConfig, MatchConfig, PlayerConfig},
+    config::{self, FieldConfig, MatchConfig, SeatConfig},
     run_stats::GameRunStats,
     simulation::SimulationHost,
 };
@@ -272,7 +272,7 @@ fn validate_benchmark_config(config: &MatchConfig) -> Result<(), String> {
     if config
         .players
         .iter()
-        .any(|player| matches!(player, PlayerConfig::Cli))
+        .any(|player| matches!(player, SeatConfig::Remote))
     {
         return Err(
             "benchmark runner currently supports only lazy, greedy, and random in-process agents"
@@ -306,20 +306,20 @@ fn run_one_game(
     })
 }
 
-fn build_agents(players: &[PlayerConfig], seed: u64) -> Vec<Box<dyn BotPolicy>> {
+fn build_agents(players: &[SeatConfig], seed: u64) -> Vec<Box<dyn BotPolicy>> {
     players
         .iter()
         .enumerate()
         .map(|(id, player)| {
             let player_id = PlayerId::try_from(id).expect("player count should fit in u8");
             match player {
-                PlayerConfig::Lazy => Box::new(LazyAgent::new(player_id)) as Box<dyn BotPolicy>,
-                PlayerConfig::Greedy => Box::new(GreedyAgent::new(player_id)) as Box<dyn BotPolicy>,
-                PlayerConfig::Random => {
+                SeatConfig::Lazy => Box::new(LazyAgent::new(player_id)) as Box<dyn BotPolicy>,
+                SeatConfig::Greedy => Box::new(GreedyAgent::new(player_id)) as Box<dyn BotPolicy>,
+                SeatConfig::Random => {
                     Box::new(RandomAgent::with_seed(player_id, agent_seed(seed, id)))
                         as Box<dyn BotPolicy>
                 }
-                PlayerConfig::Cli => {
+                SeatConfig::Remote => {
                     unreachable!("unsupported agents are rejected during validation")
                 }
             }

@@ -4,6 +4,7 @@ pub mod engine;
 pub mod index;
 pub mod io;
 pub mod legal;
+pub mod projection;
 pub mod query;
 pub mod run;
 pub mod state;

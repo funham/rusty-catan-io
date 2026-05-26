@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 pub struct MatchConfig {
-    pub players: Vec<PlayerConfig>,
+    pub players: Vec<SeatConfig>,
     #[serde(default)]
     pub observers: Vec<ObserverConfig>,
     #[serde(default)]
@@ -23,8 +23,8 @@ pub struct MatchConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum PlayerConfig {
-    Cli,
+pub enum SeatConfig {
+    Remote,
     Lazy,
     Greedy,
     Random,

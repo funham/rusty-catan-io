@@ -228,16 +228,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "catan-agents"
+name = "catan-bots"
 version = "0.1.0"
 dependencies = [
  "catan-core",
- "catan-render",
  "log",
  "rand 0.10.1",
  "serde",
  "serde_json",
- "termcolor",
 ]
 
 [[package]]
@@ -255,26 +253,27 @@ dependencies = [
 ]
 
 [[package]]
-name = "catan-render"
+name = "catan-remote"
 version = "0.1.0"
 dependencies = [
  "catan-core",
- "ratatui",
- "termcolor",
+ "catan-runtime",
+ "catan-tui",
+ "env_logger",
+ "log",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
 name = "catan-runtime"
 version = "0.1.0"
 dependencies = [
- "catan-agents",
+ "catan-bots",
  "catan-core",
- "catan-render",
  "chrono",
- "crossterm",
  "env_logger",
  "log",
- "ratatui",
  "serde",
  "serde_json",
 ]
@@ -284,7 +283,7 @@ name = "catan-server"
 version = "0.1.0"
 dependencies = [
  "axum",
- "catan-agents",
+ "catan-remote",
  "log",
  "serde_json",
  "tokio",
@@ -293,6 +292,18 @@ dependencies = [
 [[package]]
 name = "catan-train"
 version = "0.1.0"
+
+[[package]]
+name = "catan-tui"
+version = "0.1.0"
+dependencies = [
+ "catan-core",
+ "crossterm",
+ "log",
+ "ratatui",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "catan-web"
@@ -1932,15 +1943,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bf256ce5efdfa370213c1dabab5935a12e49f2c58d15e9eac2870d3b4f27263"
 
 [[package]]
-name = "termcolor"
-version = "1.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755"
-dependencies = [
- "winapi-util",
-]
-
-[[package]]
 name = "terminfo"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2438,15 +2440,6 @@ name = "winapi-i686-pc-windows-gnu"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac3b87c63620426dd9b991e5ce0329eff545bccbbb34f3be09ff6fb6ab51b7b6"
-
-[[package]]
-name = "winapi-util"
-version = "0.1.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
-dependencies = [
- "windows-sys",
-]
 
 [[package]]
 name = "winapi-x86_64-pc-windows-gnu"

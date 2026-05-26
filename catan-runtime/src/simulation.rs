@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use catan_agents::bot::BotPolicy;
+use catan_bots::bot::BotPolicy;
 use catan_core::gameplay::{
     game::{
         engine::GameEngine,
@@ -120,7 +120,7 @@ impl SimulationHost {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use catan_agents::lazy::LazyAgent;
+    use catan_bots::lazy::LazyAgent;
 
     #[test]
     fn lazy_bots_reach_turn_limit() {

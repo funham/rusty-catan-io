@@ -1,7 +1,6 @@
 pub mod config;
 pub mod host;
 pub mod persistence;
-pub mod remote_seat;
 pub mod replay;
 pub mod run_stats;
 pub mod simulation;

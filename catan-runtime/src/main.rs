@@ -1,4 +1,3 @@
-mod cli_child;
 mod logging;
 
 use catan_runtime::host;
@@ -7,29 +6,11 @@ use std::path::PathBuf;
 
 fn main() {
     let args = std::env::args().collect::<Vec<_>>();
-    if args.get(1).map(String::as_str) == Some("cli-child") {
-        let socket = arg_value(&args, "--socket").unwrap_or_else(|| {
-            eprintln!("missing --socket");
-            std::process::exit(2);
-        });
-        let log_socket = arg_value(&args, "--log-socket").unwrap_or_else(|| {
-            eprintln!("missing --log-socket");
-            std::process::exit(2);
-        });
-        let role = arg_value(&args, "--role").unwrap_or_else(|| "unknown".to_owned());
-        if let Err(err) = cli_child::run(&PathBuf::from(socket), &PathBuf::from(log_socket), &role)
-        {
-            eprintln!("{err}");
-            std::process::exit(1);
-        }
-        return;
-    }
-
     let config_path = args
         .get(1)
         .cloned()
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("catan-runtime/data/configurations/cli_single.json"));
+        .unwrap_or_else(|| PathBuf::from("catan-runtime/data/configurations/bots3.json"));
 
     let config = match host::load_config(&config_path) {
         Ok(config) => config,
@@ -48,9 +29,4 @@ fn main() {
         eprintln!("{err}");
         std::process::exit(1);
     }
-}
-
-fn arg_value(args: &[String], name: &str) -> Option<String> {
-    args.windows(2)
-        .find_map(|window| (window[0] == name).then(|| window[1].clone()))
 }
