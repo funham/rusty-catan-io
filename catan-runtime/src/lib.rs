@@ -1,5 +1,6 @@
 pub mod config;
 pub mod host;
+pub mod logging;
 pub mod persistence;
 pub mod replay;
 pub mod run_stats;

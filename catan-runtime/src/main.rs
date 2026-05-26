@@ -1,5 +1,3 @@
-mod logging;
-
 use catan_runtime::host;
 
 use std::path::PathBuf;
@@ -20,7 +18,7 @@ fn main() {
         }
     };
 
-    if let Err(err) = logging::init_host_logger(&config.logging) {
+    if let Err(err) = catan_runtime::logging::init_host_logger(&config.logging) {
         eprintln!("{err}");
         std::process::exit(1);
     }

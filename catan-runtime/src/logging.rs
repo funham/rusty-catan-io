@@ -6,7 +6,7 @@ use std::{
 
 use chrono::{DateTime, Utc};
 
-use catan_runtime::config::LoggingConfig;
+use crate::config::LoggingConfig;
 
 struct TeeLogWriter {
     stderr: io::Stderr,
@@ -33,7 +33,7 @@ impl Write for TeeLogWriter {
     }
 }
 
-pub(crate) fn init_host_logger(config: &LoggingConfig) -> Result<Option<PathBuf>, String> {
+pub fn init_host_logger(config: &LoggingConfig) -> Result<Option<PathBuf>, String> {
     let log_path = if config.enabled {
         let path = timestamped_log_path(config, Utc::now());
         if let Some(parent) = path.parent() {
@@ -111,7 +111,7 @@ fn strip_ansi_escape_codes(buf: &[u8], state: &mut AnsiStripState) -> Vec<u8> {
 mod tests {
     use chrono::{TimeZone, Utc};
 
-    use catan_runtime::config::LoggingConfig;
+    use crate::config::LoggingConfig;
 
     use super::{AnsiStripState, strip_ansi_escape_codes, timestamped_log_path};
 
