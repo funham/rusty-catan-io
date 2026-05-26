@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 pub struct MatchConfig {
-    pub players: Vec<SeatConfig>,
+    pub players: Vec<BotConfig>,
     #[serde(default)]
     pub observers: Vec<ObserverConfig>,
     #[serde(default)]
@@ -23,8 +23,7 @@ pub struct MatchConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum SeatConfig {
-    Remote,
+pub enum BotConfig {
     Lazy,
     Greedy,
     Random,
@@ -33,10 +32,7 @@ pub enum SeatConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ObserverConfig {
-    CliSpectator,
-    CliPlayer { player_id: usize },
-    CliOmniscient,
-    SnapshotObserver,
+    RunSummary,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -152,22 +148,26 @@ fn default_logging_file_prefix() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{FieldConfig, InitialStateConfig, MatchConfig, ObserverConfig, PersistenceConfig};
+    use super::{FieldConfig, InitialStateConfig, MatchConfig, PersistenceConfig};
 
     #[test]
-    fn parses_snapshot_observer_config() {
+    fn runtime_rejects_remote_player_config() {
+        let err = serde_json::from_str::<MatchConfig>(r#"{ "players": [{ "kind": "remote" }] }"#)
+            .unwrap_err();
+
+        assert!(err.to_string().contains("unknown variant"));
+    }
+
+    #[test]
+    fn runtime_parses_bot_players_directly() {
         let config: MatchConfig = serde_json::from_str(
             r#"{
-              "players": [{ "kind": "lazy" }],
-              "observers": [{ "kind": "snapshot_observer" }]
+              "players": [{ "kind": "lazy" }, { "kind": "greedy" }, { "kind": "random" }]
             }"#,
         )
         .unwrap();
 
-        assert!(matches!(
-            config.observers.as_slice(),
-            [ObserverConfig::SnapshotObserver]
-        ));
+        assert_eq!(config.players.len(), 3);
     }
 
     #[test]

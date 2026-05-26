@@ -16,8 +16,8 @@ use catan_core::{
     gameplay::random::GameRandom,
 };
 use catan_runtime::{
-    config::{self, FieldConfig, MatchConfig, SeatConfig},
-    run_stats::GameRunStats,
+    config::{self, BotConfig, FieldConfig, MatchConfig},
+    run_stats::{GameRunStats, RunStatsObserver},
     simulation::SimulationHost,
 };
 use serde::Serialize;
@@ -269,16 +269,6 @@ fn validate_benchmark_config(config: &MatchConfig) -> Result<(), String> {
     if !config.observers.is_empty() {
         return Err("benchmark runner currently supports observer-free configs only".to_owned());
     }
-    if config
-        .players
-        .iter()
-        .any(|player| matches!(player, SeatConfig::Remote))
-    {
-        return Err(
-            "benchmark runner currently supports only lazy, greedy, and random in-process agents"
-                .to_owned(),
-        );
-    }
     Ok(())
 }
 
@@ -298,29 +288,28 @@ fn run_one_game(
             random: GameRandom::seeded(seed),
         },
     );
+    let (stats_observer, stats_handle) = RunStatsObserver::new();
+    host.add_observer(Box::new(stats_observer));
     let result = host.run();
 
     Ok(GameOutcome {
         result,
-        stats: host.run_stats(),
+        stats: stats_handle.stats(),
     })
 }
 
-fn build_agents(players: &[SeatConfig], seed: u64) -> Vec<Box<dyn BotPolicy>> {
+fn build_agents(players: &[BotConfig], seed: u64) -> Vec<Box<dyn BotPolicy>> {
     players
         .iter()
         .enumerate()
         .map(|(id, player)| {
             let player_id = PlayerId::try_from(id).expect("player count should fit in u8");
             match player {
-                SeatConfig::Lazy => Box::new(LazyAgent::new(player_id)) as Box<dyn BotPolicy>,
-                SeatConfig::Greedy => Box::new(GreedyAgent::new(player_id)) as Box<dyn BotPolicy>,
-                SeatConfig::Random => {
+                BotConfig::Lazy => Box::new(LazyAgent::new(player_id)) as Box<dyn BotPolicy>,
+                BotConfig::Greedy => Box::new(GreedyAgent::new(player_id)) as Box<dyn BotPolicy>,
+                BotConfig::Random => {
                     Box::new(RandomAgent::with_seed(player_id, agent_seed(seed, id)))
                         as Box<dyn BotPolicy>
-                }
-                SeatConfig::Remote => {
-                    unreachable!("unsupported agents are rejected during validation")
                 }
             }
         })

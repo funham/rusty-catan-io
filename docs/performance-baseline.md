@@ -43,7 +43,7 @@ RUST_LOG=off target/release/catan-runtime catan-runtime/data/configurations/gree
 
 The benchmark runner executes many games in one process with deterministic dice
 and dev-card deck shuffling. It currently supports observer-free configs with
-in-process `lazy` and `greedy` agents.
+in-process `lazy`, `greedy`, and `random` agents.
 
 ```sh
 cargo build --release -p catan-runtime --bin catan-bench

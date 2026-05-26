@@ -1,0 +1,12 @@
+{
+  "players": [
+    { "kind": "remote" },
+    { "kind": "remote" }
+  ],
+  "field": {
+    "kind": "layout_ref",
+    "path": "../../../catan-runtime/data/layouts/standard-4p.layout.json"
+  },
+  "dice": { "kind": "random" },
+  "limits": { "max_turns": 500 }
+}

@@ -1,9 +1,24 @@
-use catan_core::gameplay::game::{
-    decision::DecisionKind,
-    event::{EventTransaction, GameEvent},
-    run::GameResult,
+use std::{cell::RefCell, rc::Rc};
+
+use catan_core::gameplay::{
+    game::{
+        decision::DecisionKind,
+        event::{EventTransaction, GameEvent, ObserverNotificationContext},
+        output::GameOutput,
+        projection::GameProjection,
+        run::GameResult,
+        view::VisibilityPolicy,
+    },
+    primitives::{
+        build::{Build, EstablishmentType},
+        dev_card::UsableDevCardSet,
+        resource::ResourceSet,
+    },
 };
+use catan_core::math::dice::DiceRoll;
 use serde::{Deserialize, Serialize};
+
+use crate::sync_host::{ObserverFrame, OutputObserver};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GameRunStats {
@@ -25,9 +40,143 @@ pub struct GameRunStats {
     pub games_interrupted: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiceRollHistogram {
+    pub counts: [u64; DiceRoll::COUNT],
+}
+
+impl Default for DiceRollHistogram {
+    fn default() -> Self {
+        Self {
+            counts: [0; DiceRoll::COUNT],
+        }
+    }
+}
+
+impl DiceRollHistogram {
+    pub fn record(&mut self, roll: DiceRoll) {
+        self.counts[(roll.get() - DiceRoll::MIN_VALUE) as usize] += 1;
+    }
+
+    pub fn count(&self, roll: DiceRoll) -> u64 {
+        self.counts[(roll.get() - DiceRoll::MIN_VALUE) as usize]
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResourceFlowStats {
+    pub distributed: ResourceSet,
+    pub discarded: ResourceSet,
+    pub stolen: ResourceSet,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BuildStats {
+    pub roads: u64,
+    pub settlements: u64,
+    pub cities: u64,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct GameSummary {
+    pub result: Option<GameResult>,
+    pub run: GameRunStats,
+    pub dice: DiceRollHistogram,
+    pub resources: ResourceFlowStats,
+    pub builds: BuildStats,
+    pub dev_cards_used: UsableDevCardSet,
+    pub final_view: Option<GameProjection>,
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct RunStatsCollector {
     stats: GameRunStats,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct RunStatsHandle {
+    inner: Rc<RefCell<GameSummary>>,
+}
+
+impl RunStatsHandle {
+    pub fn summary(&self) -> GameSummary {
+        self.inner.borrow().clone()
+    }
+
+    pub fn stats(&self) -> GameRunStats {
+        self.inner.borrow().run
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RunStatsObserver {
+    inner: Rc<RefCell<GameSummary>>,
+    collector: RunStatsCollector,
+}
+
+impl RunStatsObserver {
+    pub fn new() -> (Self, RunStatsHandle) {
+        let inner = Rc::new(RefCell::new(GameSummary::default()));
+        (
+            Self {
+                inner: inner.clone(),
+                collector: RunStatsCollector::default(),
+            },
+            RunStatsHandle { inner },
+        )
+    }
+
+    fn record_event(&mut self, event: &GameEvent, frame: &ObserverFrame<'_>) {
+        self.collector.record_event(event);
+
+        let mut summary = self.inner.borrow_mut();
+        summary.run = self.collector.stats();
+
+        match event {
+            GameEvent::DiceRolled { value, .. } => summary.dice.record(*value),
+            GameEvent::ResourcesDistributed { by_player } => {
+                for (_, resources) in by_player {
+                    summary.resources.distributed += *resources;
+                }
+            }
+            GameEvent::PlayerDiscarded { resources, .. } => {
+                summary.resources.discarded += *resources;
+            }
+            GameEvent::ResourceStolen { resource, .. } => {
+                summary.resources.stolen[*resource] += 1;
+            }
+            GameEvent::Built { build, .. } => match build {
+                Build::Road(_) => summary.builds.roads += 1,
+                Build::Establishment(establishment) => match establishment.stage {
+                    EstablishmentType::Settlement => summary.builds.settlements += 1,
+                    EstablishmentType::City => summary.builds.cities += 1,
+                },
+            },
+            GameEvent::DevCardUsed { usage, .. } => {
+                summary.dev_cards_used[usage.card_kind()] += 1;
+            }
+            GameEvent::GameEnded { result } => {
+                summary.result = Some(result.clone());
+                summary.final_view = Some(GameProjection::from_observer(
+                    ObserverNotificationContext::Omniscient {
+                        public: frame.factory.public_view(VisibilityPolicy::Omniscient),
+                        full: frame.factory.omniscient_view(),
+                    },
+                    false,
+                ));
+            }
+            _ => {}
+        }
+    }
+}
+
+impl OutputObserver for RunStatsObserver {
+    fn on_output(&mut self, frame: ObserverFrame<'_>) {
+        let GameOutput::Event(record) = frame.output else {
+            return;
+        };
+        self.record_event(&record.event, &frame);
+    }
 }
 
 impl RunStatsCollector {
@@ -91,7 +240,7 @@ impl RunStatsCollector {
                 counts_toward_limit: false,
                 ..
             } => {}
-            GameEvent::GameFinished { result, .. } => match result {
+            GameEvent::GameEnded { result } => match result {
                 GameResult::Win(_) => self.stats.games_ended += 1,
                 GameResult::Interrupted { .. } | GameResult::LimitReached { .. } => {
                     self.stats.games_interrupted += 1;
@@ -181,9 +330,8 @@ mod tests {
             player_id: P0,
             turn_no: 0,
         });
-        tx.events.push(GameEvent::GameFinished {
+        tx.events.push(GameEvent::GameEnded {
             result: GameResult::Win(P0),
-            stats: None,
         });
 
         let mut collector = RunStatsCollector::default();
@@ -202,5 +350,60 @@ mod tests {
         assert_eq!(stats.action_rejections, 1);
         assert_eq!(stats.games_ended, 1);
         assert_eq!(stats.games_interrupted, 0);
+    }
+
+    #[test]
+    fn stats_observer_records_dice_and_final_view() {
+        use catan_core::dice_roll;
+        use catan_core::gameplay::{
+            game::{
+                engine::GameEngine,
+                event::{EventVisibility, GameEvent},
+                output::{GameEventRecord, GameOutput},
+                run::GameResult,
+                state::SetupGameState,
+                view::{ContextFactory, VisibilityConfig},
+            },
+            primitives::player::PlayerId,
+        };
+
+        let init = SetupGameState::default();
+        let engine = GameEngine::from_init(init, Default::default());
+        let visibility = VisibilityConfig::default();
+        let factory = ContextFactory {
+            state: engine.table(),
+            index: engine.index(),
+            visibility: &visibility,
+            trade_sessions: engine.trade_sessions(),
+        };
+        let (mut observer, handle) = RunStatsObserver::new();
+
+        observer.on_output(ObserverFrame {
+            output: &GameOutput::event(GameEventRecord {
+                event: GameEvent::DiceRolled {
+                    player_id: PlayerId::new(0),
+                    value: dice_roll!(8),
+                },
+                visibility: EventVisibility::Public,
+            }),
+            factory: &factory,
+            engine: &engine,
+        });
+        observer.on_output(ObserverFrame {
+            output: &GameOutput::event(GameEventRecord {
+                event: GameEvent::GameEnded {
+                    result: GameResult::Win(PlayerId::new(0)),
+                },
+                visibility: EventVisibility::Public,
+            }),
+            factory: &factory,
+            engine: &engine,
+        });
+
+        let summary = handle.summary();
+        assert_eq!(summary.dice.count(dice_roll!(8)), 1);
+        assert!(matches!(summary.result, Some(GameResult::Win(_))));
+        assert!(summary.final_view.is_some());
+        assert!(summary.final_view.unwrap().snapshot_state.is_none());
     }
 }

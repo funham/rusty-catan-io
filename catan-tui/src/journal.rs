@@ -261,7 +261,7 @@ fn meaningful_event_entries(
             "p{player_id} stole {} from p{robbed_id}",
             stolen_resource_label(*player_id, *robbed_id, *resource, model)
         ),
-        GameEvent::GameFinished { result, .. } => match result {
+        GameEvent::GameEnded { result } => match result {
             GameResult::Win(player_id) => format!("p{player_id} won the game"),
             GameResult::Interrupted { reason } => format!("game interrupted: {reason}"),
             GameResult::LimitReached { turns } => format!("turn limit reached after {turns} turns"),
@@ -294,7 +294,7 @@ fn event_player_id(event: &GameEvent) -> Option<PlayerId> {
         GameEvent::TradeOpened { proposer_id, .. }
         | GameEvent::TradeCompleted { proposer_id, .. }
         | GameEvent::TradeCancelled { proposer_id, .. } => Some(*proposer_id),
-        GameEvent::GameFinished { result, .. } => match result {
+        GameEvent::GameEnded { result } => match result {
             GameResult::Win(player_id) => Some(*player_id),
             GameResult::Interrupted { .. } | GameResult::LimitReached { .. } => None,
         },

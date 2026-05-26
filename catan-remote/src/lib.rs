@@ -1,3 +1,4 @@
+pub mod config;
 pub mod frame;
 pub mod protocol;
 pub mod runtime_adapter;

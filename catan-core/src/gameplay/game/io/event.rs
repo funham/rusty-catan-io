@@ -3,8 +3,7 @@ use smallvec::SmallVec;
 
 use crate::{
     constants::capacities::{
-        EVENT_BATCH_INLINE, EVENT_RECIPIENTS_INLINE, GAME_END_STATS_INLINE,
-        RESOURCE_DISTRIBUTION_INLINE,
+        EVENT_BATCH_INLINE, EVENT_RECIPIENTS_INLINE, RESOURCE_DISTRIBUTION_INLINE,
     },
     gameplay::{
         game::{
@@ -32,7 +31,6 @@ use crate::{
 pub type EventBatch = SmallVec<[GameEvent; EVENT_BATCH_INLINE]>;
 pub type ResourceDistribution = SmallVec<[(PlayerId, ResourceSet); RESOURCE_DISTRIBUTION_INLINE]>;
 pub type EventRecipients = SmallVec<[PlayerId; EVENT_RECIPIENTS_INLINE]>;
-pub type GameEndStats = SmallVec<[GameEndPlayerStats; GAME_END_STATS_INLINE]>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EventCause {
@@ -84,22 +82,6 @@ impl EventVisibility {
             _ => Self::Public,
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GameEndPlayerStats {
-    pub player_id: PlayerId,
-    pub total_vp: u16,
-    pub build_vp: u16,
-    pub dev_card_vp: u16,
-    pub award_vp: u16,
-    pub settlements: u16,
-    pub cities: u16,
-    pub roads: u16,
-    pub longest_road_length: u16,
-    pub knights_used: u16,
-    pub has_longest_road: bool,
-    pub has_largest_army: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -230,8 +212,7 @@ pub enum GameEvent {
         robbed_id: PlayerId,
         resource: Resource,
     },
-    GameFinished {
+    GameEnded {
         result: GameResult,
-        stats: Option<GameEndStats>,
     },
 }

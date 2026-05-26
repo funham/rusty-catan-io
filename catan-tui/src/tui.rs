@@ -15,7 +15,7 @@ use catan_core::gameplay::game::projection::{
 };
 use catan_core::gameplay::{
     game::{
-        event::{GameEndPlayerStats, GameEvent},
+        event::GameEvent,
         input::TradeCommand,
         trade::{TradeOfferId, TradeResponseState, TradeSessionId},
     },
@@ -47,7 +47,7 @@ use super::{
     layout::{NormalLayoutAreas, SnapshotLayoutAreas, normal_layout_areas, snapshot_layout_areas},
     panels::{
         adjust_discard_selection, bank_panel_lines, bank_trade_menu_lines, discard_personal_lines,
-        game_ended_lines, personal_model_lines, player_menu_lines, player_trade_builder_lines,
+        game_summary_lines, personal_model_lines, player_menu_lines, player_trade_builder_lines,
         public_player_lines, resource_choice_lines, snapshot_state_lines, trade_panel_lines,
         trade_tree_lines_for_viewer,
     },
@@ -71,6 +71,23 @@ pub struct CliUi {
     journal: EventJournal,
     active_player: Option<PlayerId>,
     show_command_help: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct FinalGameSummaryView {
+    pub result: String,
+    pub turns_started: u64,
+    pub dice_counts: Vec<(u8, u64)>,
+    pub resources_distributed: u16,
+    pub resources_discarded: u16,
+    pub resources_stolen: u16,
+    pub roads_built: u64,
+    pub settlements_built: u64,
+    pub cities_built: u64,
+    pub knights_used: u16,
+    pub year_of_plenty_used: u16,
+    pub road_build_used: u16,
+    pub monopoly_used: u16,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -383,7 +400,7 @@ impl CliUi {
             GameEvent::TurnStarted { player_id, .. } => {
                 self.active_player = Some(*player_id);
             }
-            GameEvent::GameFinished { .. } => {
+            GameEvent::GameEnded { .. } => {
                 self.active_player = None;
             }
             _ => {}
@@ -399,23 +416,21 @@ impl CliUi {
         self.message.clone()
     }
 
-    pub fn show_game_ended(
+    pub fn show_game_summary(
         &mut self,
-        model: &GameProjection,
-        winner_id: PlayerId,
-        turn_no: u64,
-        stats: &[GameEndPlayerStats],
+        summary: &FinalGameSummaryView,
+        final_view: Option<&GameProjection>,
     ) -> io::Result<()> {
         self.message = "game ended".to_owned();
         self.overlay.selected = None;
         self.overlay.status = SelectionStatus::Neutral;
         self.overlay.preview.clear();
-        self.public_override = Some(game_ended_lines(model, winner_id, turn_no, stats));
+        self.public_override = Some(game_summary_lines(summary));
         self.personal_override = None;
         self.interactive_override = None;
         self.show_command_help = false;
         loop {
-            self.draw(Some(model), "[press esc to quit]", "")?;
+            self.draw(final_view, "[press esc to quit]", "")?;
             if let CrosstermEvent::Key(key) = event::read()?
                 && key.kind == KeyEventKind::Press
                 && key.code == KeyCode::Esc

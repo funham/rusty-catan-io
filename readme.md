@@ -8,8 +8,11 @@ cargo run -p catan-train -- \
 cargo run -p catan-server -- \
   --port 8080
 
-# default local game
-cargo run --bin catan-runtime
+# pure bot game
+scripts/run-bots.sh
+
+# one local TUI player against bots
+scripts/run-cli-single.sh
 
 # bot benchmark
 cargo run --release --bin catan-bench -- \

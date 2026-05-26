@@ -8,7 +8,7 @@ use crate::gameplay::{
     primitives::{
         PlayerId, PortKind, Tile,
         build::{Build, Establishment},
-        dev_card::{DevCardUsage, UsableDevCard},
+        dev_card::DevCardUsage,
         player::player_ids,
         resource::ResourceSet,
         trade::{BankTrade, BankTradeKind, PlayerTrade},
@@ -24,7 +24,7 @@ use crate::{
         decision::{
             DecisionAllocator, DecisionKind, DecisionLifetime, OpenDecision, PendingDecisions,
         },
-        event::{EventBatch, GameEndPlayerStats, GameEndStats, GameEvent},
+        event::{EventBatch, GameEvent},
         input::{DecisionToken, GameInput, PlayerCommand, TradeCommand, TradeResponseCommand},
         output::CommandRejectionReason,
         run::GameResult,
@@ -373,15 +373,14 @@ fn finish_after_invalid_action_limit(
         || active.invalid_actions + rejected_actions < limit
         || events
             .iter()
-            .any(|event| matches!(event, GameEvent::GameFinished { .. }))
+            .any(|event| matches!(event, GameEvent::GameEnded { .. }))
     {
         return;
     }
-    events.push(GameEvent::GameFinished {
+    events.push(GameEvent::GameEnded {
         result: GameResult::Interrupted {
             reason: format!("too many invalid actions ({limit})"),
         },
-        stats: None,
     });
 }
 
@@ -1033,9 +1032,8 @@ fn decide_use_dev_card(
         .check_win_condition()
         .is_some()
     {
-        events.push(GameEvent::GameFinished {
+        events.push(GameEvent::GameEnded {
             result: GameResult::Win(player_id),
-            stats: Some(game_end_stats(&candidate, &candidate_index)),
         });
         return;
     }
@@ -1082,9 +1080,8 @@ fn decide_buy_dev_card(active: &PlayingEngine, decision: OpenDecision, events: &
     events.push(GameEvent::DevCardBought { player_id });
     events.push(GameEvent::DevCardDrawn { player_id, card });
     if let Some(winner) = GameQuery::new(&candidate, &candidate_index).check_win_condition() {
-        events.push(GameEvent::GameFinished {
+        events.push(GameEvent::GameEnded {
             result: GameResult::Win(winner),
-            stats: Some(game_end_stats(&candidate, &candidate_index)),
         });
     } else {
         let mut decisions = active.decisions();
@@ -1186,9 +1183,8 @@ fn decide_build(
     });
     events.push(GameEvent::Built { player_id, build });
     if let Some(winner) = GameQuery::new(&candidate, &candidate_index).check_win_condition() {
-        events.push(GameEvent::GameFinished {
+        events.push(GameEvent::GameEnded {
             result: GameResult::Win(winner),
-            stats: Some(game_end_stats(&candidate, &candidate_index)),
         });
     } else {
         let mut decisions = active.decisions();
@@ -1200,38 +1196,6 @@ fn decide_build(
             DecisionLifetime::OneShot,
         );
     }
-}
-
-fn game_end_stats(
-    game: &crate::gameplay::game::state::GameState,
-    index: &GameIndex,
-) -> GameEndStats {
-    let query = GameQuery::new(game, index);
-    player_ids(game.players.count())
-        .map(|player_id| {
-            let build_vp = query.count_build_vp(player_id);
-            let dev_card_vp = query.count_dev_card_vp(player_id);
-            let has_longest_road = query.has_longest_road(player_id);
-            let has_largest_army = query.has_largest_army(player_id);
-            let award_vp = query.award_vp(player_id);
-            let builds = game.builds.by_player(player_id);
-
-            GameEndPlayerStats {
-                player_id,
-                total_vp: build_vp + dev_card_vp + award_vp,
-                build_vp,
-                dev_card_vp,
-                award_vp,
-                settlements: builds.settlements_count() as u16,
-                cities: builds.cities_count() as u16,
-                roads: builds.roads_count() as u16,
-                longest_road_length: query.count_max_tract_length(player_id),
-                knights_used: game.players.get(player_id).dev_cards().used[UsableDevCard::Knight],
-                has_longest_road,
-                has_largest_army,
-            }
-        })
-        .collect()
 }
 
 fn decide_bank_trade(
@@ -1300,11 +1264,10 @@ fn decide_end_move(
     if let Some(max_turns) = context.max_turns
         && next_turn_no >= max_turns
     {
-        events.push(GameEvent::GameFinished {
+        events.push(GameEvent::GameEnded {
             result: GameResult::LimitReached {
                 turns: next_turn_no,
             },
-            stats: None,
         });
         return;
     }
@@ -1378,9 +1341,8 @@ fn decide_initial_placement(
         if let Some(max_turns) = context.max_turns
             && turn_no >= max_turns
         {
-            events.push(GameEvent::GameFinished {
+            events.push(GameEvent::GameEnded {
                 result: GameResult::LimitReached { turns: turn_no },
-                stats: None,
             });
             return;
         }

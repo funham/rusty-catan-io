@@ -22,7 +22,7 @@ use catan_tui::{
         read_post_dice_action, read_regular_action, read_robbed_player, read_trade_owner_action,
         read_trade_response_action,
     },
-    tui::{CliUi, CliViewMode, ControlInput},
+    tui::{CliUi, CliViewMode, ControlInput, FinalGameSummaryView},
 };
 
 use crate::{
@@ -113,6 +113,13 @@ fn run_player_session(
             HostMessage::SnapshotFailed { reason } => {
                 ui.set_message(format!("snapshot failed: {reason}"))
                     .map_err(|err| format!("failed to draw TUI: {err}"))?;
+            }
+            HostMessage::GameSummary { summary } => {
+                let final_view = summary.final_view.as_ref();
+                let display = final_summary_view(&summary);
+                ui.show_game_summary(&display, final_view)
+                    .map_err(|err| format!("failed to draw game summary: {err}"))?;
+                return Ok(());
             }
             HostMessage::Event { event, view } => {
                 if process_host_event(&mut ui, view_mode, &event, &view, None)? {
@@ -327,6 +334,13 @@ fn run_observer_session(mut stream: UnixStream, mut ui: CliUi) -> Result<(), Str
                     state.latest.message = format!("snapshot failed: {reason}");
                     draw_latest_or_message(&mut ui, &state.latest, state.event_count)?;
                 }
+                HostMessage::GameSummary { summary } => {
+                    let final_view = summary.final_view.as_ref();
+                    let display = final_summary_view(&summary);
+                    ui.show_game_summary(&display, final_view)
+                        .map_err(|err| format!("failed to draw game summary: {err}"))?;
+                    return Ok(());
+                }
                 HostMessage::Event { event, view } => {
                     state.event_count += 1;
                     log::trace!(
@@ -431,7 +445,7 @@ impl SessionViewState {
 
 fn process_host_event(
     ui: &mut CliUi,
-    view_mode: CliViewMode,
+    _view_mode: CliViewMode,
     event: &catan_core::gameplay::game::event::GameEvent,
     view: &GameProjection,
     observer_event_count: Option<u64>,
@@ -442,19 +456,6 @@ fn process_host_event(
         event
     );
     let event_message = ui.record_game_event(event, view);
-    if let (
-        CliViewMode::Normal,
-        catan_core::gameplay::game::event::GameEvent::GameFinished {
-            result: catan_core::gameplay::game::run::GameResult::Win(winner_id),
-            stats: Some(stats),
-        },
-    ) = (view_mode, event)
-    {
-        let turn_no = view.snapshot_state.as_ref().map(|_| 0).unwrap_or_default();
-        ui.show_game_ended(view, *winner_id, turn_no, stats)
-            .map_err(|err| format!("failed to draw game ended screen: {err}"))?;
-        return Ok(true);
-    }
 
     let message = event_message.unwrap_or_else(|| ui.current_message());
     match observer_event_count {
@@ -472,6 +473,30 @@ fn process_host_event(
     }
     .map_err(|err| format!("failed to draw TUI: {err}"))?;
     Ok(false)
+}
+
+fn final_summary_view(summary: &catan_runtime::run_stats::GameSummary) -> FinalGameSummaryView {
+    FinalGameSummaryView {
+        result: summary
+            .result
+            .as_ref()
+            .map(|result| format!("{result:?}"))
+            .unwrap_or_else(|| "unknown".to_owned()),
+        turns_started: summary.run.turns_started,
+        dice_counts: catan_core::math::dice::DiceRoll::iter()
+            .map(|roll| (roll.get(), summary.dice.count(roll)))
+            .collect(),
+        resources_distributed: summary.resources.distributed.total(),
+        resources_discarded: summary.resources.discarded.total(),
+        resources_stolen: summary.resources.stolen.total(),
+        roads_built: summary.builds.roads,
+        settlements_built: summary.builds.settlements,
+        cities_built: summary.builds.cities,
+        knights_used: summary.dev_cards_used.knight,
+        year_of_plenty_used: summary.dev_cards_used.year_of_plenty,
+        road_build_used: summary.dev_cards_used.road_build,
+        monopoly_used: summary.dev_cards_used.monopoly,
+    }
 }
 
 fn handle_control_input(

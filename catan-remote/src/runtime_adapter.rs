@@ -38,6 +38,15 @@ impl RemoteCliSeat {
         expect_ready(&mut stream)?;
         Ok(Self { player_id, stream })
     }
+
+    pub fn send_summary(&mut self, summary: &catan_runtime::run_stats::GameSummary) {
+        let _ = write_frame(
+            &mut self.stream,
+            &HostMessage::GameSummary {
+                summary: summary.clone(),
+            },
+        );
+    }
 }
 
 impl Seat for RemoteCliSeat {
@@ -143,6 +152,15 @@ impl RemoteCliOutputObserver {
             reader: NonblockingFrameReader::default(),
             snapshot_store,
         })
+    }
+
+    pub fn send_summary(&mut self, summary: &catan_runtime::run_stats::GameSummary) {
+        let _ = write_frame(
+            &mut self.stream,
+            &HostMessage::GameSummary {
+                summary: summary.clone(),
+            },
+        );
     }
 }
 
@@ -441,6 +459,25 @@ mod tests {
             child.join().unwrap(),
             Err(err) if err.kind() == std::io::ErrorKind::WouldBlock
                 || err.kind() == std::io::ErrorKind::TimedOut
+        ));
+    }
+
+    #[test]
+    fn remote_cli_seat_sends_game_summary() {
+        let (host_stream, mut client_stream) = UnixStream::pair().unwrap();
+        let client = std::thread::spawn(move || {
+            let hello = read_frame::<HostMessage>(&mut client_stream).unwrap();
+            assert!(matches!(hello, HostMessage::Hello { .. }));
+            write_frame(&mut client_stream, &ClientMessage::Ready).unwrap();
+            read_frame::<HostMessage>(&mut client_stream).unwrap()
+        });
+
+        let mut seat = RemoteCliSeat::new(P0, host_stream).unwrap();
+        seat.send_summary(&catan_runtime::run_stats::GameSummary::default());
+
+        assert!(matches!(
+            client.join().unwrap(),
+            HostMessage::GameSummary { .. }
         ));
     }
 

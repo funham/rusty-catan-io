@@ -1,29 +1,28 @@
 //! Text panel builders for the terminal UI.
 //!
 //! Builds ratatui line buffers for public game state, personal resources/dev cards,
-//! discard selection, bank-trade menus, resource pickers, player menus, and game-end stats.
+//! discard selection, bank-trade menus, resource pickers, player menus, and game-end summaries.
 
 use crate::{field::FieldRenderer, ratatui_adapter::color as ratatui_color};
 use catan_core::gameplay::game::projection::{
     GameProjection, PublicBankDevCardsProjection, PublicBankResourcesProjection,
     PublicPlayerResourcesProjection, TradeSessionProjection,
 };
-use catan_core::gameplay::{
-    game::event::GameEndPlayerStats,
-    primitives::{
-        bank::DeckFullnessLevel,
-        dev_card::{DevCardData, DevCardKind, UsableDevCard},
-        player::PlayerId,
-        resource::{Resource, ResourceSet},
-        trade::{BankTrade, BankTradeKind},
-    },
+use catan_core::gameplay::primitives::{
+    bank::DeckFullnessLevel,
+    dev_card::{DevCardData, DevCardKind, UsableDevCard},
+    player::PlayerId,
+    resource::{Resource, ResourceSet},
+    trade::{BankTrade, BankTradeKind},
 };
 use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
 };
 
-use super::tui::{CardGlyph, InlineBadge, MiniCardGlyph, append_gap, join_lines_horizontal};
+use super::tui::{
+    CardGlyph, FinalGameSummaryView, InlineBadge, MiniCardGlyph, append_gap, join_lines_horizontal,
+};
 
 #[cfg(test)]
 pub fn public_model_lines(model: &GameProjection) -> Vec<Line<'static>> {
@@ -115,64 +114,44 @@ fn add_bank_legend_if_fits(card_lines: Vec<Line<'static>>, width: usize) -> Vec<
         .collect()
 }
 
-pub fn game_ended_lines(
-    model: &GameProjection,
-    winner_id: PlayerId,
-    turn_no: u64,
-    stats: &[GameEndPlayerStats],
-) -> Vec<Line<'static>> {
+pub fn game_summary_lines(summary: &FinalGameSummaryView) -> Vec<Line<'static>> {
     let mut lines = vec![
         Line::from(Span::styled(
             "Game ended",
             Style::default().fg(Color::Green),
         )),
-        Line::from(format!("winner: p{winner_id} | turns: {turn_no}")),
-        Line::from(format!(
-            "LR {:?} | LA {:?}",
-            model.public.longest_road_owner, model.public.largest_army_owner
-        )),
+        Line::from(format!("result: {}", summary.result)),
+        Line::from(format!("turns: {}", summary.turns_started)),
         Line::from(""),
-        Line::from("final stats"),
-        Line::from("┌───┬──┬──┬──┬──┬──┬──┬──┬──┬──┬─────────┐"),
-        Line::from("│P  │VP│B │DC│A │S │C │R │L │K │Tags     │"),
-        Line::from("├───┼──┼──┼──┼──┼──┼──┼──┼──┼──┼─────────┤"),
+        Line::from("dice"),
     ];
 
-    let mut sorted = stats.to_vec();
-    sorted.sort_by_key(|stats| (std::cmp::Reverse(stats.total_vp), stats.player_id));
-    for stats in sorted {
-        let mut tags = Vec::new();
-        if stats.player_id == winner_id {
-            tags.push("WIN");
-        }
-        if stats.has_longest_road {
-            tags.push("LR");
-        }
-        if stats.has_largest_army {
-            tags.push("LA");
-        }
-        lines.push(Line::from(format!(
-            "│p{:<2}│{:>2}│{:>2}│{:>2}│{:>2}│{:>2}│{:>2}│{:>2}│{:>2}│{:>2}│{:<9}│",
-            stats.player_id,
-            stats.total_vp,
-            stats.build_vp,
-            stats.dev_card_vp,
-            stats.award_vp,
-            stats.settlements,
-            stats.cities,
-            stats.roads,
-            stats.longest_road_length,
-            stats.knights_used,
-            tags.join(" "),
-        )));
+    for (roll, count) in &summary.dice_counts {
+        lines.push(Line::from(format!("{roll:>2}: {count}")));
     }
 
     lines.extend([
-        Line::from("└───┴──┴──┴──┴──┴──┴──┴──┴──┴──┴─────────┘"),
         Line::from(""),
-        Line::from("B=build VP,     A=award VP, DC=dev card VP"),
-        Line::from("S=setllement,   C=city count, R=road count"),
-        Line::from("L=longest road, K=knights played"),
+        Line::from(format!(
+            "resources distributed: {}",
+            summary.resources_distributed
+        )),
+        Line::from(format!(
+            "resources discarded: {}",
+            summary.resources_discarded
+        )),
+        Line::from(format!("resources stolen: {}", summary.resources_stolen)),
+        Line::from(format!(
+            "builds: roads {} settlements {} cities {}",
+            summary.roads_built, summary.settlements_built, summary.cities_built
+        )),
+        Line::from(format!(
+            "dev cards used: knights {} yp {} rb {} monopoly {}",
+            summary.knights_used,
+            summary.year_of_plenty_used,
+            summary.road_build_used,
+            summary.monopoly_used
+        )),
         Line::from(Span::styled(
             "[press esc to quit]",
             Style::default().fg(Color::Yellow),

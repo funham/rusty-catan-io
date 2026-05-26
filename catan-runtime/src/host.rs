@@ -7,7 +7,7 @@ use catan_core::gameplay::{
 };
 
 use crate::{
-    config::{self, FieldConfig, InitialStateConfig, MatchConfig, SeatConfig},
+    config::{self, BotConfig, FieldConfig, InitialStateConfig, MatchConfig},
     persistence::PersistenceObserver,
     snapshot,
     sync_host::{Seat, SyncGameHost, bot_seat},
@@ -41,9 +41,7 @@ pub fn run_match(config: MatchConfig) -> Result<(), String> {
 
     let mut host = SyncGameHost::from_engine(engine, seats);
     if !config.observers.is_empty() {
-        return Err(
-            "terminal/remote observers are hosted by catan-remote, not catan-runtime".to_owned(),
-        );
+        log::debug!("runtime-local observers are not wired to visible output yet");
     }
     if let Some(observer) = PersistenceObserver::from_config(&config.persistence)
         .map_err(|err| format!("failed to initialize persistence: {err}"))?
@@ -61,9 +59,18 @@ pub fn build_initial_engine(
     player_count: usize,
     options: RunOptions,
 ) -> Result<catan_core::gameplay::game::engine::GameEngine, String> {
-    match &config.initial {
+    build_initial_engine_from_parts(&config.initial, &config.field, player_count, options)
+}
+
+pub fn build_initial_engine_from_parts(
+    initial: &InitialStateConfig,
+    field: &FieldConfig,
+    player_count: usize,
+    options: RunOptions,
+) -> Result<catan_core::gameplay::game::engine::GameEngine, String> {
+    match initial {
         InitialStateConfig::Fresh => {
-            let init = build_initial_state(&config.field, player_count)?;
+            let init = build_initial_state(field, player_count)?;
             Ok(catan_core::gameplay::game::engine::GameEngine::from_init(
                 init, options,
             ))
@@ -89,46 +96,22 @@ pub fn build_initial_engine(
     }
 }
 
-pub fn build_seats(players: &[SeatConfig]) -> Result<Vec<Box<dyn Seat>>, String> {
+pub fn build_seats(players: &[BotConfig]) -> Result<Vec<Box<dyn Seat>>, String> {
     players
         .iter()
         .enumerate()
         .map(|(id, player)| {
             let player_id = PlayerId::try_from(id).map_err(|err| err.to_string())?;
-            match player {
-                SeatConfig::Lazy => Ok(bot_seat(
-                    Box::new(LazyAgent::new(player_id)) as Box<dyn BotPolicy>
-                )),
-                SeatConfig::Greedy => Ok(bot_seat(
-                    Box::new(GreedyAgent::new(player_id)) as Box<dyn BotPolicy>
-                )),
-                SeatConfig::Random => Ok(bot_seat(
-                    Box::new(RandomAgent::new(player_id)) as Box<dyn BotPolicy>
-                )),
-                SeatConfig::Remote => Err(
-                    "remote/TUI player seats are hosted by catan-remote, not catan-runtime"
-                        .to_owned(),
-                ),
-            }
+            Ok(build_bot_seat(player, player_id))
         })
         .collect()
 }
 
-pub fn build_bot_seat(
-    player: &SeatConfig,
-    player_id: PlayerId,
-) -> Result<Option<Box<dyn Seat>>, String> {
+pub fn build_bot_seat(player: &BotConfig, player_id: PlayerId) -> Box<dyn Seat> {
     match player {
-        SeatConfig::Lazy => Ok(Some(bot_seat(
-            Box::new(LazyAgent::new(player_id)) as Box<dyn BotPolicy>
-        ))),
-        SeatConfig::Greedy => Ok(Some(bot_seat(
-            Box::new(GreedyAgent::new(player_id)) as Box<dyn BotPolicy>
-        ))),
-        SeatConfig::Random => Ok(Some(bot_seat(
-            Box::new(RandomAgent::new(player_id)) as Box<dyn BotPolicy>
-        ))),
-        SeatConfig::Remote => Ok(None),
+        BotConfig::Lazy => bot_seat(Box::new(LazyAgent::new(player_id)) as Box<dyn BotPolicy>),
+        BotConfig::Greedy => bot_seat(Box::new(GreedyAgent::new(player_id)) as Box<dyn BotPolicy>),
+        BotConfig::Random => bot_seat(Box::new(RandomAgent::new(player_id)) as Box<dyn BotPolicy>),
     }
 }
 
@@ -163,8 +146,8 @@ mod tests {
 
     use crate::{
         config::{
-            DiceConfig, FieldConfig, InitialStateConfig, LimitsConfig, LoggingConfig, MatchConfig,
-            PersistenceConfig, SeatConfig,
+            BotConfig, DiceConfig, FieldConfig, InitialStateConfig, LimitsConfig, LoggingConfig,
+            MatchConfig, PersistenceConfig,
         },
         host::{build_initial_engine, build_initial_state},
         snapshot::SnapshotStore,
@@ -190,10 +173,10 @@ mod tests {
         let snapshot_dir = store.write_checkpoint(&engine).unwrap();
         let config = MatchConfig {
             players: vec![
-                SeatConfig::Lazy,
-                SeatConfig::Lazy,
-                SeatConfig::Lazy,
-                SeatConfig::Lazy,
+                BotConfig::Lazy,
+                BotConfig::Lazy,
+                BotConfig::Lazy,
+                BotConfig::Lazy,
             ],
             observers: Vec::new(),
             initial: InitialStateConfig::Snapshot { path: snapshot_dir },

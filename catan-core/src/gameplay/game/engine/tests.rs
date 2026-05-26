@@ -184,9 +184,8 @@ fn reducer_moves_active_lifecycle_to_finished_result() {
 
     reducer::apply_event(
         &mut lifecycle,
-        &GameEvent::GameFinished {
+        &GameEvent::GameEnded {
             result: crate::gameplay::game::run::GameResult::LimitReached { turns: 0 },
-            stats: None,
         },
     )
     .unwrap();

@@ -14,13 +14,13 @@ use catan_core::gameplay::{
     primitives::player::PlayerId,
 };
 
-use crate::run_stats::{GameRunStats, RunStatsCollector};
+use crate::sync_host::{ObserverFrame, OutputObserver};
 
 pub struct SimulationHost {
     engine: GameEngine,
     bots: Vec<Box<dyn BotPolicy>>,
     visibility: VisibilityConfig,
-    stats: RunStatsCollector,
+    observers: Vec<Box<dyn OutputObserver>>,
 }
 
 impl SimulationHost {
@@ -29,8 +29,12 @@ impl SimulationHost {
             engine: GameEngine::from_init(init, options),
             bots,
             visibility: VisibilityConfig::default(),
-            stats: RunStatsCollector::default(),
+            observers: Vec::new(),
         }
+    }
+
+    pub fn add_observer(&mut self, observer: Box<dyn OutputObserver>) {
+        self.observers.push(observer);
     }
 
     pub fn run(&mut self) -> GameResult {
@@ -43,8 +47,7 @@ impl SimulationHost {
                 };
             }
         };
-        self.stats.record_transaction(&transaction);
-        queue.extend(projector::project_transaction(&transaction));
+        self.project_and_deliver(&transaction, &mut queue);
 
         let mut steps = 0_u64;
         while self.engine.result().is_none() {
@@ -85,18 +88,13 @@ impl SimulationHost {
                     };
                 }
             };
-            self.stats.record_transaction(&transaction);
-            queue.extend(projector::project_transaction(&transaction));
+            self.project_and_deliver(&transaction, &mut queue);
         }
 
         self.engine
             .result()
             .cloned()
             .expect("loop exits only when result is available")
-    }
-
-    pub fn run_stats(&self) -> GameRunStats {
-        self.stats.stats()
     }
 
     fn command_for(
@@ -114,6 +112,33 @@ impl SimulationHost {
         let search = Some(SearchFactory::new(self.engine.table(), policy, player_id));
         let context = factory.player_decision_context(player_id, search);
         self.bots[player_id.index()].command_for(decision, context)
+    }
+
+    fn project_and_deliver(
+        &mut self,
+        transaction: &catan_core::gameplay::game::event::EventTransaction,
+        queue: &mut VecDeque<GameOutput>,
+    ) {
+        for output in projector::project_transaction(transaction) {
+            self.deliver_output(&output);
+            queue.push_back(output);
+        }
+    }
+
+    fn deliver_output(&mut self, output: &GameOutput) {
+        let factory = ContextFactory {
+            state: self.engine.table(),
+            index: self.engine.index(),
+            visibility: &self.visibility,
+            trade_sessions: self.engine.trade_sessions(),
+        };
+        for observer in &mut self.observers {
+            observer.on_output(ObserverFrame {
+                output,
+                factory: &factory,
+                engine: &self.engine,
+            });
+        }
     }
 }
 
@@ -141,9 +166,11 @@ mod tests {
                 ..RunOptions::default()
             },
         );
+        let (stats_observer, stats_handle) = crate::run_stats::RunStatsObserver::new();
+        host.add_observer(Box::new(stats_observer));
 
         assert!(matches!(host.run(), GameResult::LimitReached { turns: 3 }));
-        let stats = host.run_stats();
+        let stats = stats_handle.stats();
         assert_eq!(stats.game_started, 1);
         assert_eq!(stats.turns_started, 3);
         assert_eq!(stats.games_interrupted, 1);

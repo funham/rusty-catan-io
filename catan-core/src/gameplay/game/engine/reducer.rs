@@ -36,7 +36,7 @@ pub enum EngineApplyError {
 #[inline]
 pub fn apply_event(lifecycle: &mut EngineState, event: &GameEvent) -> Result<(), EngineApplyError> {
     match event {
-        GameEvent::GameFinished { result, .. } => finish(lifecycle, result),
+        GameEvent::GameEnded { result } => finish(lifecycle, result),
         GameEvent::GameStarted => game_started(lifecycle),
         GameEvent::CommandRejected {
             counts_toward_limit,
@@ -171,7 +171,7 @@ fn apply_playing(active: &mut PlayingEngine, event: &GameEvent) -> Result<(), En
             resources,
         } => player_discarded(active, *player_id, *resources)?,
         GameEvent::RobberMoved { hex, .. } => robber_moved(active, *hex),
-        GameEvent::GameFinished { .. } => {}
+        GameEvent::GameEnded { .. } => {}
     }
     Ok(())
 }

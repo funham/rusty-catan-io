@@ -8,7 +8,10 @@
   "observers": [
     { "kind": "cli_omniscient" }
   ],
-  "field": { "kind": "layout_ref", "path": "../layouts/standard-4p.layout.json" },
+  "field": {
+    "kind": "layout_ref",
+    "path": "../../../catan-runtime/data/layouts/standard-4p.layout.json"
+  },
   "dice": { "kind": "random" },
   "limits": { "max_turns": 500 }
 }

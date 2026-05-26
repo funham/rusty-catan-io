@@ -13,6 +13,7 @@ use catan_core::{
         primitives::player::PlayerId,
     },
 };
+use catan_runtime::run_stats::GameSummary;
 use serde::{Deserialize, Serialize};
 
 pub use catan_core::gameplay::game::projection::{
@@ -81,6 +82,9 @@ pub enum HostMessage {
     Event {
         event: GameEvent,
         view: GameProjection,
+    },
+    GameSummary {
+        summary: GameSummary,
     },
     SnapshotSaved {
         path: String,
@@ -199,5 +203,20 @@ impl From<RemoteLogLevel> for log::Level {
             RemoteLogLevel::Debug => Self::Debug,
             RemoteLogLevel::Trace => Self::Trace,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn game_summary_message_round_trips() {
+        let message = HostMessage::GameSummary {
+            summary: GameSummary::default(),
+        };
+        let encoded = serde_json::to_string(&message).unwrap();
+        let decoded: HostMessage = serde_json::from_str(&encoded).unwrap();
+        assert!(matches!(decoded, HostMessage::GameSummary { .. }));
     }
 }

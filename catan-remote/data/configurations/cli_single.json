@@ -1,14 +1,17 @@
 {
   "players": [
-    { "kind": "cli" },
+    { "kind": "remote" },
     { "kind": "lazy" },
     { "kind": "greedy" },
     { "kind": "random" }
   ],
   "observers": [
-    { "kind": "snapshot_observer" }
+    { "kind": "tui_snapshot" }
   ],
-  "field": { "kind": "layout_ref", "path": "../layouts/standard-4p.layout.json" },
+  "field": {
+    "kind": "layout_ref",
+    "path": "../../../catan-runtime/data/layouts/standard-4p.layout.json"
+  },
   "dice": { "kind": "random" },
   "limits": { "max_turns": 500 }
 }
