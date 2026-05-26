@@ -97,7 +97,6 @@ impl Seat for BotSeat {
 pub struct SyncGameHost {
     engine: GameEngine,
     seats: Vec<Box<dyn Seat>>,
-    observers: Vec<Box<dyn OutputObserver>>,
     visibility: VisibilityConfig,
     outputs: VecDeque<GameOutput>,
     inputs: VecDeque<SeatCommand>,
@@ -112,15 +111,10 @@ impl SyncGameHost {
         Self {
             engine,
             seats,
-            observers: Vec::new(),
             visibility: VisibilityConfig::default(),
             outputs: VecDeque::new(),
             inputs: VecDeque::new(),
         }
-    }
-
-    pub fn add_observer(&mut self, observer: Box<dyn OutputObserver>) {
-        self.observers.push(observer);
     }
 
     pub fn start(&mut self) {
@@ -142,6 +136,14 @@ impl SyncGameHost {
     }
 
     pub fn run_until_waiting(&mut self) -> Option<GameResult> {
+        let mut observers: [&mut dyn OutputObserver; 0] = [];
+        self.run_until_waiting_observed(&mut observers)
+    }
+
+    pub fn run_until_waiting_observed(
+        &mut self,
+        observers: &mut [&mut dyn OutputObserver],
+    ) -> Option<GameResult> {
         loop {
             if let Some(input) = self.inputs.pop_front() {
                 let transaction = self
@@ -153,7 +155,7 @@ impl SyncGameHost {
                 continue;
             }
             if let Some(output) = self.outputs.pop_front() {
-                self.deliver_output(&output);
+                self.deliver_output(&output, observers);
                 continue;
             }
             if let Some(result) = self.engine.result().cloned() {
@@ -164,20 +166,28 @@ impl SyncGameHost {
     }
 
     pub fn run_to_result(&mut self) -> GameResult {
-        self.run_until_waiting()
+        let mut observers: [&mut dyn OutputObserver; 0] = [];
+        self.run_to_result_observed(&mut observers)
+    }
+
+    pub fn run_to_result_observed(
+        &mut self,
+        observers: &mut [&mut dyn OutputObserver],
+    ) -> GameResult {
+        self.run_until_waiting_observed(observers)
             .unwrap_or_else(|| GameResult::Interrupted {
                 reason: "host is waiting for external input".to_owned(),
             })
     }
 
-    fn deliver_output(&mut self, output: &GameOutput) {
+    fn deliver_output(&mut self, output: &GameOutput, observers: &mut [&mut dyn OutputObserver]) {
         let factory = ContextFactory {
             state: self.engine.table(),
             index: self.engine.index(),
             visibility: &self.visibility,
             trade_sessions: self.engine.trade_sessions(),
         };
-        for observer in &mut self.observers {
+        for observer in observers.iter_mut() {
             observer.on_output(ObserverFrame {
                 output,
                 factory: &factory,
@@ -270,15 +280,15 @@ mod tests {
                 ..RunOptions::default()
             },
         );
-        let (stats_observer, stats_handle) = crate::run_stats::RunStatsObserver::new();
-        host.add_observer(Box::new(stats_observer));
+        let mut stats_observer = crate::run_stats::RunStatsObserver::new();
+        let mut observers: [&mut dyn OutputObserver; 1] = [&mut stats_observer];
 
         host.start();
         assert!(matches!(
-            host.run_to_result(),
+            host.run_to_result_observed(&mut observers),
             GameResult::LimitReached { turns: 1 }
         ));
-        let stats = stats_handle.stats();
+        let stats = stats_observer.stats();
         assert_eq!(stats.game_started, 1);
         assert_eq!(stats.games_interrupted, 1);
     }
@@ -372,13 +382,14 @@ mod tests {
         };
     }
 
+    #[derive(Default)]
     struct CountingObserver {
-        outputs: std::rc::Rc<std::cell::Cell<usize>>,
+        outputs: usize,
     }
 
     impl OutputObserver for CountingObserver {
         fn on_output(&mut self, _frame: ObserverFrame<'_>) {
-            self.outputs.set(self.outputs.get() + 1);
+            self.outputs += 1;
         }
     }
 
@@ -393,10 +404,8 @@ mod tests {
                 )))
             })
             .collect();
-        let output_count = std::rc::Rc::new(std::cell::Cell::new(0));
-        let observer = Box::new(CountingObserver {
-            outputs: output_count.clone(),
-        });
+        let mut observer = CountingObserver::default();
+        let mut observers: [&mut dyn OutputObserver; 1] = [&mut observer];
         let mut host = SyncGameHost::new(
             init,
             seats,
@@ -406,11 +415,10 @@ mod tests {
             },
         );
 
-        host.add_observer(observer);
         host.start();
-        let _ = host.run_until_waiting();
+        let _ = host.run_until_waiting_observed(&mut observers);
 
-        assert!(output_count.get() > 0);
+        assert!(observer.outputs > 0);
     }
 
     #[test]
@@ -424,10 +432,8 @@ mod tests {
                 )))
             })
             .collect();
-        let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
-        let observer = Box::new(EventRecordingObserver {
-            events: events.clone(),
-        });
+        let mut observer = EventRecordingObserver::default();
+        let mut observers: [&mut dyn OutputObserver; 1] = [&mut observer];
         let mut host = SyncGameHost::new(
             init,
             seats,
@@ -438,11 +444,10 @@ mod tests {
             },
         );
 
-        host.add_observer(observer);
         host.start();
-        let _ = host.run_until_waiting();
+        let _ = host.run_until_waiting_observed(&mut observers);
 
-        let events = events.borrow();
+        let events = &observer.events;
         assert!(
             events
                 .iter()
@@ -563,14 +568,15 @@ mod tests {
         assert_eq!(owner_action_saw_responses.get(), 3);
     }
 
+    #[derive(Default)]
     struct EventRecordingObserver {
-        events: std::rc::Rc<std::cell::RefCell<Vec<GameEvent>>>,
+        events: Vec<GameEvent>,
     }
 
     impl OutputObserver for EventRecordingObserver {
         fn on_output(&mut self, frame: ObserverFrame<'_>) {
             if let GameOutput::Event(record) = frame.output {
-                self.events.borrow_mut().push(record.event.clone());
+                self.events.push(record.event.clone());
             }
         }
     }
@@ -586,10 +592,8 @@ mod tests {
                 )))
             })
             .collect();
-        let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
-        let observer = Box::new(EventRecordingObserver {
-            events: events.clone(),
-        });
+        let mut observer = EventRecordingObserver::default();
+        let mut observers: [&mut dyn OutputObserver; 1] = [&mut observer];
         let mut host = SyncGameHost::new(
             init,
             seats,
@@ -600,11 +604,10 @@ mod tests {
             },
         );
 
-        host.add_observer(observer);
         host.start();
-        let _ = host.run_to_result();
+        let _ = host.run_to_result_observed(&mut observers);
 
-        assert!(events.borrow().iter().any(|event| matches!(
+        assert!(observer.events.iter().any(|event| matches!(
             event,
             GameEvent::GameEnded {
                 result: GameResult::LimitReached { turns: 0 },

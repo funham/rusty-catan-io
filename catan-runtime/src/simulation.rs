@@ -20,7 +20,6 @@ pub struct SimulationHost {
     engine: GameEngine,
     bots: Vec<Box<dyn BotPolicy>>,
     visibility: VisibilityConfig,
-    observers: Vec<Box<dyn OutputObserver>>,
 }
 
 impl SimulationHost {
@@ -29,15 +28,15 @@ impl SimulationHost {
             engine: GameEngine::from_init(init, options),
             bots,
             visibility: VisibilityConfig::default(),
-            observers: Vec::new(),
         }
     }
 
-    pub fn add_observer(&mut self, observer: Box<dyn OutputObserver>) {
-        self.observers.push(observer);
+    pub fn run(&mut self) -> GameResult {
+        let mut observers: [&mut dyn OutputObserver; 0] = [];
+        self.run_observed(&mut observers)
     }
 
-    pub fn run(&mut self) -> GameResult {
+    pub fn run_observed(&mut self, observers: &mut [&mut dyn OutputObserver]) -> GameResult {
         let mut queue = VecDeque::new();
         let transaction = match self.engine.start() {
             Ok(transaction) => transaction,
@@ -47,7 +46,7 @@ impl SimulationHost {
                 };
             }
         };
-        self.project_and_deliver(&transaction, &mut queue);
+        self.project_and_deliver(&transaction, &mut queue, observers);
 
         let mut steps = 0_u64;
         while self.engine.result().is_none() {
@@ -88,7 +87,7 @@ impl SimulationHost {
                     };
                 }
             };
-            self.project_and_deliver(&transaction, &mut queue);
+            self.project_and_deliver(&transaction, &mut queue, observers);
         }
 
         self.engine
@@ -118,21 +117,22 @@ impl SimulationHost {
         &mut self,
         transaction: &catan_core::gameplay::game::event::EventTransaction,
         queue: &mut VecDeque<GameOutput>,
+        observers: &mut [&mut dyn OutputObserver],
     ) {
         for output in projector::project_transaction(transaction) {
-            self.deliver_output(&output);
+            self.deliver_output(&output, observers);
             queue.push_back(output);
         }
     }
 
-    fn deliver_output(&mut self, output: &GameOutput) {
+    fn deliver_output(&mut self, output: &GameOutput, observers: &mut [&mut dyn OutputObserver]) {
         let factory = ContextFactory {
             state: self.engine.table(),
             index: self.engine.index(),
             visibility: &self.visibility,
             trade_sessions: self.engine.trade_sessions(),
         };
-        for observer in &mut self.observers {
+        for observer in observers.iter_mut() {
             observer.on_output(ObserverFrame {
                 output,
                 factory: &factory,
@@ -166,11 +166,14 @@ mod tests {
                 ..RunOptions::default()
             },
         );
-        let (stats_observer, stats_handle) = crate::run_stats::RunStatsObserver::new();
-        host.add_observer(Box::new(stats_observer));
+        let mut stats_observer = crate::run_stats::RunStatsObserver::new();
+        let mut observers: [&mut dyn OutputObserver; 1] = [&mut stats_observer];
 
-        assert!(matches!(host.run(), GameResult::LimitReached { turns: 3 }));
-        let stats = stats_handle.stats();
+        assert!(matches!(
+            host.run_observed(&mut observers),
+            GameResult::LimitReached { turns: 3 }
+        ));
+        let stats = stats_observer.stats();
         assert_eq!(stats.game_started, 1);
         assert_eq!(stats.turns_started, 3);
         assert_eq!(stats.games_interrupted, 1);

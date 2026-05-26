@@ -19,6 +19,7 @@ use catan_runtime::{
     config::{self, BotConfig, FieldConfig, MatchConfig},
     run_stats::{GameRunStats, RunStatsObserver},
     simulation::SimulationHost,
+    sync_host::OutputObserver,
 };
 use serde::Serialize;
 
@@ -288,13 +289,13 @@ fn run_one_game(
             random: GameRandom::seeded(seed),
         },
     );
-    let (stats_observer, stats_handle) = RunStatsObserver::new();
-    host.add_observer(Box::new(stats_observer));
-    let result = host.run();
+    let mut stats_observer = RunStatsObserver::new();
+    let mut observers: [&mut dyn OutputObserver; 1] = [&mut stats_observer];
+    let result = host.run_observed(&mut observers);
 
     Ok(GameOutcome {
         result,
-        stats: stats_handle.stats(),
+        stats: stats_observer.stats(),
     })
 }
 

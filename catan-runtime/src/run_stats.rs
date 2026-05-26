@@ -1,5 +1,3 @@
-use std::{cell::RefCell, rc::Rc};
-
 use catan_core::gameplay::{
     game::{
         decision::DecisionKind,
@@ -94,70 +92,58 @@ pub struct RunStatsCollector {
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct RunStatsHandle {
-    inner: Rc<RefCell<GameSummary>>,
-}
-
-impl RunStatsHandle {
-    pub fn summary(&self) -> GameSummary {
-        self.inner.borrow().clone()
-    }
-
-    pub fn stats(&self) -> GameRunStats {
-        self.inner.borrow().run
-    }
-}
-
-#[derive(Debug, Clone)]
 pub struct RunStatsObserver {
-    inner: Rc<RefCell<GameSummary>>,
+    summary: GameSummary,
     collector: RunStatsCollector,
 }
 
 impl RunStatsObserver {
-    pub fn new() -> (Self, RunStatsHandle) {
-        let inner = Rc::new(RefCell::new(GameSummary::default()));
-        (
-            Self {
-                inner: inner.clone(),
-                collector: RunStatsCollector::default(),
-            },
-            RunStatsHandle { inner },
-        )
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn summary(&self) -> &GameSummary {
+        &self.summary
+    }
+
+    pub fn summary_owned(&self) -> GameSummary {
+        self.summary.clone()
+    }
+
+    pub fn stats(&self) -> GameRunStats {
+        self.summary.run
     }
 
     fn record_event(&mut self, event: &GameEvent, frame: &ObserverFrame<'_>) {
         self.collector.record_event(event);
-
-        let mut summary = self.inner.borrow_mut();
-        summary.run = self.collector.stats();
+        self.summary.run = self.collector.stats();
 
         match event {
-            GameEvent::DiceRolled { value, .. } => summary.dice.record(*value),
+            GameEvent::DiceRolled { value, .. } => self.summary.dice.record(*value),
             GameEvent::ResourcesDistributed { by_player } => {
                 for (_, resources) in by_player {
-                    summary.resources.distributed += *resources;
+                    self.summary.resources.distributed += *resources;
                 }
             }
             GameEvent::PlayerDiscarded { resources, .. } => {
-                summary.resources.discarded += *resources;
+                self.summary.resources.discarded += *resources;
             }
             GameEvent::ResourceStolen { resource, .. } => {
-                summary.resources.stolen[*resource] += 1;
+                self.summary.resources.stolen[*resource] += 1;
             }
             GameEvent::Built { build, .. } => match build {
-                Build::Road(_) => summary.builds.roads += 1,
+                Build::Road(_) => self.summary.builds.roads += 1,
                 Build::Establishment(establishment) => match establishment.stage {
-                    EstablishmentType::Settlement => summary.builds.settlements += 1,
-                    EstablishmentType::City => summary.builds.cities += 1,
+                    EstablishmentType::Settlement => self.summary.builds.settlements += 1,
+                    EstablishmentType::City => self.summary.builds.cities += 1,
                 },
             },
             GameEvent::DevCardUsed { usage, .. } => {
-                summary.dev_cards_used[usage.card_kind()] += 1;
+                self.summary.dev_cards_used[usage.card_kind()] += 1;
             }
             GameEvent::GameEnded { result } => {
-                summary.result = Some(result.clone());
-                summary.final_view = Some(GameProjection::from_observer(
+                self.summary.result = Some(result.clone());
+                self.summary.final_view = Some(GameProjection::from_observer(
                     ObserverNotificationContext::Omniscient {
                         public: frame.factory.public_view(VisibilityPolicy::Omniscient),
                         full: frame.factory.omniscient_view(),
@@ -376,7 +362,7 @@ mod tests {
             visibility: &visibility,
             trade_sessions: engine.trade_sessions(),
         };
-        let (mut observer, handle) = RunStatsObserver::new();
+        let mut observer = RunStatsObserver::new();
 
         observer.on_output(ObserverFrame {
             output: &GameOutput::event(GameEventRecord {
@@ -400,10 +386,17 @@ mod tests {
             engine: &engine,
         });
 
-        let summary = handle.summary();
+        let summary = observer.summary();
         assert_eq!(summary.dice.count(dice_roll!(8)), 1);
         assert!(matches!(summary.result, Some(GameResult::Win(_))));
         assert!(summary.final_view.is_some());
-        assert!(summary.final_view.unwrap().snapshot_state.is_none());
+        assert!(
+            summary
+                .final_view
+                .as_ref()
+                .expect("final view should be captured")
+                .snapshot_state
+                .is_none()
+        );
     }
 }

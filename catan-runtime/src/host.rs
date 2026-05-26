@@ -43,13 +43,14 @@ pub fn run_match(config: MatchConfig) -> Result<(), String> {
     if !config.observers.is_empty() {
         log::debug!("runtime-local observers are not wired to visible output yet");
     }
-    if let Some(observer) = PersistenceObserver::from_config(&config.persistence)
-        .map_err(|err| format!("failed to initialize persistence: {err}"))?
-    {
-        host.add_observer(Box::new(observer));
+    let mut persistence_observer = PersistenceObserver::from_config(&config.persistence)
+        .map_err(|err| format!("failed to initialize persistence: {err}"))?;
+    let mut observers: Vec<&mut dyn crate::sync_host::OutputObserver> = Vec::new();
+    if let Some(observer) = persistence_observer.as_mut() {
+        observers.push(observer);
     }
     host.start();
-    let result = host.run_to_result();
+    let result = host.run_to_result_observed(&mut observers);
     log::info!("match result: {result:?}");
     Ok(())
 }

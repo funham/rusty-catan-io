@@ -96,20 +96,22 @@ fn run_unix_host(config: RemoteMatchConfig, socket_path: &Path) -> Result<(), St
     }
 
     let mut game_host = SyncGameHost::from_engine(engine, remote_seats.host_seats);
-    let (stats_observer, stats_handle) = RunStatsObserver::new();
-    game_host.add_observer(Box::new(stats_observer));
-    let remote_observers = build_remote_observers(&config, &listener)?;
-    for observer in remote_observers.host_observers {
-        game_host.add_observer(observer);
+    let mut stats_observer = RunStatsObserver::new();
+    let mut remote_observers = build_remote_observers(&config, &listener)?;
+    let mut persistence_observer = PersistenceObserver::from_config(&config.persistence)
+        .map_err(|err| format!("failed to initialize persistence: {err}"))?;
+    let mut observers: Vec<&mut dyn OutputObserver> = vec![&mut stats_observer];
+    for observer in &mut remote_observers.host_observers {
+        observers.push(observer.as_mut());
     }
-    if let Some(observer) = PersistenceObserver::from_config(&config.persistence)
-        .map_err(|err| format!("failed to initialize persistence: {err}"))?
-    {
-        game_host.add_observer(Box::new(observer));
+    if let Some(observer) = persistence_observer.as_mut() {
+        observers.push(observer);
     }
     game_host.start();
-    let result = game_host.run_to_result();
-    let mut summary = stats_handle.summary();
+    let result = game_host.run_to_result_observed(&mut observers);
+    drop(observers);
+
+    let mut summary = stats_observer.summary_owned();
     if summary.result.is_none() {
         summary.result = Some(result.clone());
     }
