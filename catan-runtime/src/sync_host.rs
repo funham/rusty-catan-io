@@ -211,7 +211,11 @@ impl SyncGameHost {
         }
     }
 
-    fn prepend_outputs(&mut self, outputs: Vec<GameOutput>) {
+    fn prepend_outputs<I>(&mut self, outputs: I)
+    where
+        I: IntoIterator<Item = GameOutput>,
+        I::IntoIter: DoubleEndedIterator,
+    {
         for output in outputs.into_iter().rev() {
             self.outputs.push_front(output);
         }

@@ -26,12 +26,13 @@ use rand::{
     rngs::SmallRng,
     seq::{IndexedRandom, IteratorRandom},
 };
+use smallvec::SmallVec;
 
 #[derive(Debug)]
 pub struct RandomAgent<R = SmallRng> {
     id: PlayerId,
     rng: R,
-    attempted_trades: Vec<(ResourceSet, ResourceSet)>,
+    attempted_trades: SmallVec<[(ResourceSet, ResourceSet); 16]>,
 }
 
 impl Default for RandomAgent {
@@ -58,7 +59,7 @@ impl<R> RandomAgent<R> {
         Self {
             id,
             rng,
-            attempted_trades: Vec::new(),
+            attempted_trades: SmallVec::new(),
         }
     }
 }
@@ -200,14 +201,14 @@ pub fn rand_regular_action(
     context: PlayerDecisionContext<'_>,
     rng: &mut impl Rng,
 ) -> RegularCommand {
-    let mut attempted = Vec::new();
+    let mut attempted = SmallVec::new();
     rand_regular_action_with_trades(context, rng, &mut attempted)
 }
 
 fn rand_regular_action_with_trades(
     context: PlayerDecisionContext<'_>,
     rng: &mut impl Rng,
-    attempted_trades: &mut Vec<(ResourceSet, ResourceSet)>,
+    attempted_trades: &mut SmallVec<[(ResourceSet, ResourceSet); 16]>,
 ) -> RegularCommand {
     let categories = [
         RandomRegularCommandCategory::EndMove,
@@ -275,7 +276,7 @@ fn rand_regular_action_in_category(
     context: &PlayerDecisionContext<'_>,
     category: RandomRegularCommandCategory,
     rng: &mut impl Rng,
-    attempted_trades: &mut Vec<(ResourceSet, ResourceSet)>,
+    attempted_trades: &mut SmallVec<[(ResourceSet, ResourceSet); 16]>,
 ) -> Option<RegularCommand> {
     match category {
         RandomRegularCommandCategory::EndMove => Some(RegularCommand::EndMove),
@@ -309,10 +310,9 @@ fn rand_regular_action_in_category(
 fn rand_player_trade(
     context: &PlayerDecisionContext<'_>,
     rng: &mut impl Rng,
-    attempted_trades: &mut Vec<(ResourceSet, ResourceSet)>,
+    attempted_trades: &mut SmallVec<[(ResourceSet, ResourceSet); 16]>,
 ) -> Option<RegularCommand> {
     let candidates = trade::one_card_trade_candidates(context)
-        .into_iter()
         .filter(|offer| {
             if attempted_trades.contains(&(offer.give, offer.take)) {
                 return false;
@@ -362,7 +362,6 @@ pub fn rand_trade_owner_action(
         return TradeCommand::Cancel;
     };
     trade::committable_offers(&context, session)
-        .into_iter()
         .map(|(offer_id, _)| offer_id)
         .choose(rng)
         .filter(|_| rng.random_bool(0.8))

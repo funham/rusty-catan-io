@@ -1,5 +1,7 @@
 use std::{cmp::Ordering, collections::BTreeSet};
 
+use smallvec::SmallVec;
+
 use catan_core::{
     gameplay::{
         constants,
@@ -32,7 +34,7 @@ use crate::{bot::BotPolicy, legal, trade};
 pub struct GreedyAgent {
     id: PlayerId,
     first_initial_resources: Option<BTreeSet<Resource>>,
-    attempted_trades: Vec<(ResourceSet, ResourceSet)>,
+    attempted_trades: SmallVec<[(ResourceSet, ResourceSet); 16]>,
 }
 
 impl GreedyAgent {
@@ -41,7 +43,7 @@ impl GreedyAgent {
         Self {
             id,
             first_initial_resources: None,
-            attempted_trades: Vec::new(),
+            attempted_trades: SmallVec::new(),
         }
     }
 }
@@ -264,14 +266,14 @@ pub fn greedy_regular_action(
     context: &PlayerDecisionContext<'_>,
     player_id: PlayerId,
 ) -> RegularCommand {
-    let mut attempted = Vec::new();
+    let mut attempted = SmallVec::new();
     greedy_regular_action_with_trades(context, player_id, &mut attempted)
 }
 
 fn greedy_regular_action_with_trades(
     context: &PlayerDecisionContext<'_>,
     player_id: PlayerId,
-    attempted_trades: &mut Vec<(ResourceSet, ResourceSet)>,
+    attempted_trades: &mut SmallVec<[(ResourceSet, ResourceSet); 16]>,
 ) -> RegularCommand {
     if let Some(build) = best_city_build(context, player_id) {
         return RegularCommand::Build(build);
@@ -303,7 +305,6 @@ fn best_player_trade(
     let current_score =
         next_objective_score_for_resources(context, player_id, context.private.resources);
     trade::one_card_trade_candidates(context)
-        .into_iter()
         .filter_map(|trade| {
             if attempted_trades.contains(&(trade.give, trade.take)) {
                 return None;
@@ -363,7 +364,6 @@ pub fn greedy_trade_owner_action(
         return TradeCommand::Cancel;
     };
     trade::committable_offers(&context, session)
-        .into_iter()
         .filter_map(|(offer_id, _)| {
             let offer = session.offer(offer_id)?;
             let after = if offer.proposer == session.proposer {

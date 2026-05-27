@@ -1,10 +1,14 @@
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 
 use crate::gameplay::primitives::{
     player::{PlayerId, player_ids},
     resource::{Resource, ResourceSet},
     trade::PlayerTrade,
 };
+
+type TradeOffers = SmallVec<[TradeOffer; 16]>;
+type TradeResponses = SmallVec<[Option<TradeResponseState>; 8]>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct TradeSessionId(pub u64);
@@ -37,8 +41,8 @@ pub enum TradeResponseState {
 pub struct TradeSession {
     pub id: TradeSessionId,
     pub proposer: PlayerId,
-    pub offers: Vec<TradeOffer>,
-    pub responses: Vec<Option<TradeResponseState>>,
+    pub offers: TradeOffers,
+    pub responses: TradeResponses,
     pub version: u64,
     pub open: bool,
 }
@@ -50,7 +54,7 @@ impl TradeSession {
         trade: PlayerTrade,
         player_count: usize,
     ) -> Self {
-        let mut responses = vec![None; player_count];
+        let mut responses = (0..player_count).map(|_| None).collect::<TradeResponses>();
         for player_id in player_ids(player_count) {
             if player_id == proposer {
                 continue;
@@ -61,11 +65,13 @@ impl TradeSession {
         Self {
             id,
             proposer,
-            offers: vec![TradeOffer {
+            offers: [TradeOffer {
                 id: TradeOfferId(0),
                 proposer,
                 trade,
-            }],
+            }]
+            .into_iter()
+            .collect(),
             responses,
             version: 0,
             open: true,

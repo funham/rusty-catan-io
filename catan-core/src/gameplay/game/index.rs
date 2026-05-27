@@ -3,25 +3,37 @@ use crate::{
     common::SmallSet,
     gameplay::{
         constants::capacities::PLAYER_PORTS_INLINE,
-        field::state::BuildCollection,
         game::state::{GameState, TableState},
         primitives::{
             PortKind,
-            build::{Build, Establishment, EstablishmentType, Road},
+            build::{
+                Build, Establishment, EstablishmentType, PathSet, PlayerBuildData,
+                road_extension_candidates_from_frontier,
+            },
             dev_card::DevCardUsage,
             player::{PlayerId, player_ids},
         },
     },
     topology::{Intersection, Path},
 };
+use smallvec::SmallVec;
+
+type PlayerIndexed<T> = SmallVec<[T; 8]>;
+type IntersectionSet = SmallSet<Intersection, 64>;
+type OpponentBlockers = SmallSet<Intersection, 32>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct GameIndex {
-    pub all_builds: Vec<BuildCollection>,
     pub longest_road_lengths: Vec<u16>,
     pub longest_road_owner: Option<PlayerId>,
     pub largest_army_owner: Option<PlayerId>,
     pub ports_acquired: Vec<SmallSet<PortKind, PLAYER_PORTS_INLINE>>,
+    pub occupied_roads: PathSet,
+    pub occupied_establishments: IntersectionSet,
+    pub deadzone_intersections: IntersectionSet,
+    pub opponent_establishments: PlayerIndexed<OpponentBlockers>,
+    pub road_frontiers: PlayerIndexed<IntersectionSet>,
+    pub legal_road_candidates: PlayerIndexed<PathSet>,
 }
 
 impl GameIndex {
@@ -33,18 +45,141 @@ impl GameIndex {
         let longest_road_lengths = Self::longest_road_lengths(state);
         let longest_road_owner =
             Self::longest_road_owner(state.builds.longest_road(), &longest_road_lengths);
+        let occupied_roads = Self::occupied_roads(state);
+        let occupied_establishments = Self::occupied_establishments(state);
+        let deadzone_intersections = Self::deadzone_intersections(&occupied_establishments);
+        let opponent_establishments = Self::opponent_establishments_by_player(state);
+        let road_frontiers = Self::road_frontiers(state, &opponent_establishments);
+        let legal_road_candidates =
+            Self::legal_road_candidates(state, &occupied_roads, &road_frontiers);
 
         Self {
-            all_builds: state.builds.query().all_builds(),
             longest_road_lengths,
             longest_road_owner,
             largest_army_owner: state.players.best_army(),
             ports_acquired: Self::get_ports_acquired(state),
+            occupied_roads,
+            occupied_establishments,
+            deadzone_intersections,
+            opponent_establishments,
+            road_frontiers,
+            legal_road_candidates,
         }
     }
 
     fn get_ports_acquired(state: &TableState) -> Vec<SmallSet<PortKind, PLAYER_PORTS_INLINE>> {
         algorithm::get_ports_acquired(state.board.ports_intersection(), &state.builds)
+    }
+
+    fn occupied_roads(state: &TableState) -> PathSet {
+        state
+            .builds
+            .players()
+            .iter()
+            .flat_map(|player| player.roads.edges().iter().copied())
+            .collect()
+    }
+
+    fn occupied_establishments(state: &TableState) -> IntersectionSet {
+        state
+            .builds
+            .players()
+            .iter()
+            .flat_map(|player| player.establishments.iter().map(|est| est.vtx))
+            .collect()
+    }
+
+    fn deadzone_intersections(occupied: &IntersectionSet) -> IntersectionSet {
+        let mut deadzone = IntersectionSet::new();
+        for &intersection in occupied {
+            deadzone.insert(intersection);
+            for neighbor in intersection.neighbors_arr() {
+                deadzone.insert(neighbor);
+            }
+        }
+        deadzone
+    }
+
+    fn opponent_establishments_by_player(state: &TableState) -> PlayerIndexed<OpponentBlockers> {
+        player_ids(state.players.count())
+            .map(|player_id| Self::opponent_establishments(state, player_id))
+            .collect()
+    }
+
+    fn road_frontiers(
+        state: &TableState,
+        opponent_establishments: &[OpponentBlockers],
+    ) -> PlayerIndexed<IntersectionSet> {
+        player_ids(state.players.count())
+            .map(|player_id| {
+                let mut frontier = IntersectionSet::new();
+                for road in state.builds[player_id].roads.edges() {
+                    for intersection in road.intersections() {
+                        if !opponent_establishments[player_id.index()].contains(&intersection) {
+                            frontier.insert(intersection);
+                        }
+                    }
+                }
+                frontier
+            })
+            .collect()
+    }
+
+    fn legal_road_candidates(
+        state: &TableState,
+        occupied_roads: &PathSet,
+        road_frontiers: &[IntersectionSet],
+    ) -> PlayerIndexed<PathSet> {
+        player_ids(state.players.count())
+            .map(|player_id| {
+                if state.builds[player_id].roads_count() >= PlayerBuildData::ROAD_LIMIT {
+                    return PathSet::new();
+                }
+
+                road_extension_candidates_from_frontier(
+                    &road_frontiers[player_id.index()],
+                    occupied_roads,
+                    |intersection| state.board.incident_paths(intersection),
+                )
+            })
+            .collect()
+    }
+
+    fn refresh_build_legality_cache(&mut self, state: &TableState) {
+        self.occupied_roads = Self::occupied_roads(state);
+        self.occupied_establishments = Self::occupied_establishments(state);
+        self.deadzone_intersections = Self::deadzone_intersections(&self.occupied_establishments);
+        self.opponent_establishments = Self::opponent_establishments_by_player(state);
+        self.road_frontiers = Self::road_frontiers(state, &self.opponent_establishments);
+        self.legal_road_candidates =
+            Self::legal_road_candidates(state, &self.occupied_roads, &self.road_frontiers);
+    }
+
+    pub fn legal_road_candidates_with_extra_roads(
+        &self,
+        state: &TableState,
+        player_id: PlayerId,
+        extra_roads: &[Path],
+    ) -> PathSet {
+        if state.builds[player_id].roads_count() + extra_roads.len() >= PlayerBuildData::ROAD_LIMIT
+        {
+            return PathSet::new();
+        }
+
+        let extra_roads_set = extra_roads.iter().copied().collect::<PathSet>();
+        let occupied = self.occupied_roads.union(&extra_roads_set);
+        let mut frontier = self.road_frontiers[player_id.index()].clone();
+        for road in extra_roads_set.iter() {
+            for intersection in road.intersections() {
+                if !self.opponent_establishments[player_id.index()].contains(&intersection) {
+                    frontier.insert(intersection);
+                }
+            }
+        }
+
+        road_extension_candidates_from_frontier(&frontier, &occupied, |intersection| {
+            state.board.incident_paths(intersection)
+        })
     }
 
     pub fn refresh_after_build(
@@ -55,12 +190,10 @@ impl GameIndex {
     ) {
         let player_id = player_id.into();
         match build {
-            Build::Road(road) => {
-                self.insert_road(player_id, road);
+            Build::Road(_) => {
                 self.refresh_longest_road_length(state, player_id);
             }
             Build::Establishment(establishment) => {
-                self.upsert_establishment(player_id, establishment);
                 if establishment.stage == EstablishmentType::Settlement {
                     self.refresh_player_ports_after_settlement(state, player_id, establishment);
                     self.refresh_opponents_blocked_by_settlement(state, player_id, establishment);
@@ -69,21 +202,20 @@ impl GameIndex {
         }
 
         self.refresh_longest_road_owner();
+        self.refresh_build_legality_cache(state);
     }
 
     pub fn refresh_after_roadbuild(
         &mut self,
         state: &GameState,
         player_id: impl Into<PlayerId>,
-        roads: [Path; 2],
+        _roads: [Path; 2],
     ) {
         let player_id = player_id.into();
-        for pos in roads {
-            self.insert_road(player_id, Road { path: pos });
-        }
         self.refresh_longest_road_length(state, player_id);
         self.longest_road_owner =
             Self::longest_road_owner(state.builds.longest_road(), &self.longest_road_lengths);
+        self.refresh_build_legality_cache(state);
     }
 
     pub fn refresh_after_dev_card(
@@ -134,26 +266,6 @@ impl GameIndex {
             .roads
             .find_longest_trail_length_with_blockers(&blockers)
             as u16;
-    }
-
-    fn insert_road(&mut self, player_id: PlayerId, road: Road) {
-        let roads = &mut self.all_builds[player_id.index()].roads;
-        if let Err(index) = roads.binary_search(&road) {
-            roads.insert(index, road);
-        }
-    }
-
-    fn upsert_establishment(&mut self, player_id: PlayerId, establishment: Establishment) {
-        let establishments = &mut self.all_builds[player_id.index()].establishments;
-        if let Some(existing) = establishments
-            .iter_mut()
-            .find(|existing| existing.vtx == establishment.vtx)
-        {
-            *existing = establishment;
-        } else if let Err(index) = establishments.binary_search(&establishment) {
-            establishments.insert(index, establishment);
-        }
-        establishments.sort_unstable();
     }
 
     fn refresh_player_ports_after_settlement(
@@ -400,6 +512,66 @@ mod tests {
     }
 
     #[test]
+    fn indexed_road_candidates_match_direct_generation_after_rebuild() {
+        let mut state = SetupGameState::default().finish();
+        let road = Road {
+            path: path(h(0, 0), h(1, 0)),
+        };
+        let mut builds = empty_build_collections();
+        builds[0].roads.push(road);
+        state.builds = BoardBuildData::from_build_collections(builds);
+
+        let index = GameIndex::rebuild(&state);
+        let direct = state
+            .builds
+            .road_extension_candidates(P0, state.board.paths());
+
+        assert_eq!(index.legal_road_candidates[P0.index()], direct);
+    }
+
+    #[test]
+    fn indexed_road_candidates_match_direct_generation_after_incremental_road() {
+        let mut state = SetupGameState::default().finish();
+        let mut index = GameIndex::rebuild(&state);
+        let road = Road {
+            path: path(h(0, 0), h(1, 0)),
+        };
+        let mut builds = empty_build_collections();
+        builds[0].roads.push(road);
+        state.builds = BoardBuildData::from_build_collections(builds);
+
+        index.refresh_after_build(&state, P0, Build::Road(road));
+
+        assert_matches_rebuild(&index, &state);
+        assert_eq!(
+            index.legal_road_candidates[P0.index()],
+            state
+                .builds
+                .road_extension_candidates(P0, state.board.paths())
+        );
+    }
+
+    #[test]
+    fn indexed_deadzone_contains_settlement_and_neighbors() {
+        let mut state = SetupGameState::default().finish();
+        let pos = path(h(0, 0), h(1, 0)).intersections()[0];
+        let settlement = Establishment {
+            vtx: pos,
+            stage: EstablishmentType::Settlement,
+        };
+        let mut builds = empty_build_collections();
+        builds[0].establishments.push(settlement);
+        state.builds = BoardBuildData::from_build_collections(builds);
+
+        let index = GameIndex::rebuild(&state);
+
+        assert!(index.deadzone_intersections.contains(&pos));
+        for neighbor in pos.neighbors_arr() {
+            assert!(index.deadzone_intersections.contains(&neighbor));
+        }
+    }
+
+    #[test]
     fn incremental_settlement_refresh_updates_ports_and_matches_full_rebuild() {
         let mut state = SetupGameState::default().finish();
         let mut incremental = GameIndex::rebuild(&state);
@@ -488,7 +660,6 @@ mod tests {
     fn knight_refresh_updates_largest_army_only() {
         let mut state = SetupGameState::default().finish();
         let mut incremental = GameIndex::rebuild(&state);
-        let before_builds = incremental.all_builds.clone();
         let before_roads = incremental.longest_road_lengths.clone();
         let before_ports = incremental.ports_acquired.clone();
 
@@ -517,7 +688,6 @@ mod tests {
         );
 
         assert_eq!(incremental.largest_army_owner, Some(P0));
-        assert_eq!(incremental.all_builds, before_builds);
         assert_eq!(incremental.longest_road_lengths, before_roads);
         assert_eq!(incremental.ports_acquired, before_ports);
         assert_matches_rebuild(&incremental, &state);

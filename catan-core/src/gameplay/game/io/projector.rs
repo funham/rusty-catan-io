@@ -1,7 +1,7 @@
 use crate::gameplay::game::{
     event::{EventTransaction, EventVisibility, GameEvent},
     input::DecisionRequest,
-    output::{GameEventRecord, GameOutput},
+    output::{GameEventRecord, GameOutput, GameOutputBatch},
 };
 
 pub fn project_event(event: GameEvent) -> GameOutput {
@@ -11,23 +11,28 @@ pub fn project_event(event: GameEvent) -> GameOutput {
     })
 }
 
-pub fn project_transaction(transaction: &EventTransaction) -> Vec<GameOutput> {
-    let mut outputs = Vec::new();
+pub fn project_transaction(transaction: &EventTransaction) -> GameOutputBatch {
+    let mut outputs = GameOutputBatch::new();
+    project_transaction_into(transaction, |output| outputs.push(output));
+    outputs
+}
+
+pub fn project_transaction_into(transaction: &EventTransaction, mut emit: impl FnMut(GameOutput)) {
     for event in &transaction.events {
-        outputs.push(project_event(event.clone()));
+        emit(project_event(event.clone()));
         match event {
             GameEvent::DecisionOpened(decision) => {
-                outputs.push(GameOutput::DecisionOpened(
+                emit(GameOutput::DecisionOpened(
                     DecisionRequest::from_open_decision(decision),
                 ));
             }
             GameEvent::DecisionClosed { decision_id } => {
-                outputs.push(GameOutput::DecisionClosed {
+                emit(GameOutput::DecisionClosed {
                     decision_id: *decision_id,
                 });
             }
             GameEvent::CommandRejected { token, reason, .. } => {
-                outputs.push(GameOutput::CommandRejected {
+                emit(GameOutput::CommandRejected {
                     token: *token,
                     reason: reason.clone(),
                 });
@@ -35,7 +40,6 @@ pub fn project_transaction(transaction: &EventTransaction) -> Vec<GameOutput> {
             _ => {}
         }
     }
-    outputs
 }
 
 #[cfg(test)]

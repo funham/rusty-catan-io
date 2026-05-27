@@ -204,6 +204,7 @@ pub struct PublicGameView<'a> {
     pub bank: PublicBankView,
     pub players: PublicPlayerViews,
     pub builds: &'a BoardBuildData,
+    pub index: &'a GameIndex,
     pub trade_sessions: &'a [TradeSession],
     pub longest_road_owner: Option<PlayerId>,
     pub largest_army_owner: Option<PlayerId>,
@@ -287,6 +288,17 @@ impl<'a> PublicGameView<'a> {
     ) -> &'a SmallSet<PortKind, PLAYER_PORTS_INLINE> {
         &self.ports_acquired[player_id.index()]
     }
+
+    pub fn legal_road_candidates_for(
+        &self,
+        player_id: PlayerId,
+    ) -> &crate::gameplay::primitives::build::PathSet {
+        &self.index.legal_road_candidates[player_id.index()]
+    }
+
+    pub fn has_establishment_in_deadzone(&self, pos: crate::topology::Intersection) -> bool {
+        self.index.deadzone_intersections.contains(&pos)
+    }
 }
 
 impl<'a> SearchFactory<'a> {
@@ -362,6 +374,7 @@ impl<'a> ContextFactory<'a> {
             bank: self.project_bank(policy),
             players: self.project_players(policy),
             builds: &self.state.builds,
+            index: self.index,
             trade_sessions: self.trade_sessions,
             longest_road_owner: query.longest_road_owner(),
             largest_army_owner: query.largest_army_owner(),

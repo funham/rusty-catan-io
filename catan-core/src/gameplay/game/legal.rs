@@ -104,7 +104,43 @@ pub fn legal_builds(context: &PlayerDecisionContext<'_>, class: BuildClass) -> V
 }
 
 pub fn legal_city_spots(context: &PlayerDecisionContext<'_>, player_id: PlayerId) -> Vec<Build> {
-    legal_city_spots_iter(context, player_id).collect()
+    let mut builds = Vec::new();
+    for_each_legal_city_spot(context, player_id, |build| builds.push(build));
+    builds
+}
+
+pub fn for_each_legal_city_spot(
+    context: &PlayerDecisionContext<'_>,
+    player_id: PlayerId,
+    mut visit: impl FnMut(Build),
+) {
+    if context.search.is_none() {
+        log::debug!("legal city spots require search context");
+        return;
+    }
+    if !context.private.resources.has_enough(&costs::CITY)
+        || context.public.builds.by_player(player_id).cities_count() >= PlayerBuildData::CITY_LIMIT
+    {
+        return;
+    }
+
+    for est in context
+        .public
+        .builds
+        .by_player(player_id)
+        .establishments
+        .iter()
+        .copied()
+    {
+        if est.stage == EstablishmentType::Settlement {
+            #[cfg(feature = "bench-counters")]
+            counters::city_candidate();
+            visit(Build::Establishment(Establishment {
+                vtx: est.vtx,
+                stage: EstablishmentType::City,
+            }));
+        }
+    }
 }
 
 pub fn legal_city_spots_iter<'a>(
@@ -182,6 +218,28 @@ pub fn legal_settlement_spots(
     legal_settlement_spots_iter(context, player_id).collect()
 }
 
+pub fn for_each_legal_settlement_spot(
+    context: &PlayerDecisionContext<'_>,
+    player_id: PlayerId,
+    mut visit: impl FnMut(Build),
+) {
+    if !can_search_settlement_with_resources(context, player_id, context.private.resources) {
+        return;
+    }
+
+    let frontier = &context.public.index.road_frontiers[player_id.index()];
+    for &pos in context.public.board.intersections() {
+        #[cfg(feature = "bench-counters")]
+        counters::settlement_candidate();
+        if frontier.contains(&pos) && !context.public.has_establishment_in_deadzone(pos) {
+            visit(Build::Establishment(Establishment {
+                vtx: pos,
+                stage: EstablishmentType::Settlement,
+            }));
+        }
+    }
+}
+
 pub fn legal_settlement_spots_iter<'a>(
     context: &'a PlayerDecisionContext<'_>,
     player_id: PlayerId,
@@ -231,22 +289,15 @@ pub fn legal_settlement_spots_count_with_resources(
         return 0;
     }
 
-    context
-        .public
-        .board
-        .intersections()
-        .iter()
-        .copied()
-        .filter(move |&pos| {
-            #[cfg(feature = "bench-counters")]
-            counters::settlement_candidate();
-            context
-                .public
-                .builds
-                .can_place_settlement(player_id, pos)
-                .is_ok()
-        })
-        .count()
+    let mut count = 0;
+    for &pos in context.public.index.road_frontiers[player_id.index()].as_slice() {
+        #[cfg(feature = "bench-counters")]
+        counters::settlement_candidate();
+        if !context.public.has_establishment_in_deadzone(pos) {
+            count += 1;
+        }
+    }
+    count
 }
 
 pub fn legal_settlement_spots_count_with_extra_road(
@@ -281,6 +332,22 @@ pub fn legal_road_spots(context: &PlayerDecisionContext<'_>, player_id: PlayerId
     legal_road_spots_iter(context, player_id).collect()
 }
 
+pub fn for_each_legal_road_spot(
+    context: &PlayerDecisionContext<'_>,
+    player_id: PlayerId,
+    mut visit: impl FnMut(Build),
+) {
+    if !can_search_road_with_resources(context, player_id, context.private.resources) {
+        return;
+    }
+
+    for &path in context.public.legal_road_candidates_for(player_id) {
+        #[cfg(feature = "bench-counters")]
+        counters::road_candidate();
+        visit(Build::Road(Road { path }));
+    }
+}
+
 pub fn legal_road_spots_iter<'a>(
     context: &'a PlayerDecisionContext<'_>,
     player_id: PlayerId,
@@ -292,9 +359,9 @@ pub fn legal_road_spots_iter<'a>(
     Box::new(
         context
             .public
-            .builds
-            .road_extension_candidates(player_id, context.public.board.paths())
-            .into_iter()
+            .legal_road_candidates_for(player_id)
+            .iter()
+            .copied()
             .inspect(move |_| {
                 #[cfg(feature = "bench-counters")]
                 counters::road_candidate();
@@ -316,16 +383,12 @@ pub fn legal_road_spots_count_with_resources(
         return 0;
     }
 
-    context
-        .public
-        .builds
-        .road_extension_candidates(player_id, context.public.board.paths())
-        .into_iter()
-        .inspect(|_| {
-            #[cfg(feature = "bench-counters")]
-            counters::road_candidate();
-        })
-        .count()
+    let count = context.public.legal_road_candidates_for(player_id).len();
+    #[cfg(feature = "bench-counters")]
+    for _ in 0..count {
+        counters::road_candidate();
+    }
+    count
 }
 
 fn can_search_settlement_with_resources(
@@ -559,6 +622,13 @@ pub fn legal_roadbuild_usages_iter<'a>(
     .map(DevCardUsage::RoadBuild)
 }
 
+pub fn legal_k_road_extensions_for_context<'a, 'b, const K: usize>(
+    context: &'a PlayerDecisionContext<'b>,
+    player_id: PlayerId,
+) -> IndexedRoadExtensionIter<'a, 'b, K> {
+    IndexedRoadExtensionIter::new(context, player_id)
+}
+
 pub fn legal_k_road_extensions<'a, const K: usize>(
     builds: &'a BoardBuildData,
     player_id: PlayerId,
@@ -640,6 +710,91 @@ impl<const K: usize> Iterator for RoadExtensionIter<'_, K> {
             }
 
             let candidate = candidates[self.next_indices[self.depth]];
+            self.next_indices[self.depth] += 1;
+
+            #[cfg(feature = "bench-counters")]
+            counters::roadbuild_candidate();
+
+            self.chosen[self.depth] = Some(candidate);
+            self.depth += 1;
+            if self.depth < K {
+                self.next_indices[self.depth] = 0;
+            }
+        }
+    }
+}
+
+pub struct IndexedRoadExtensionIter<'a, 'b, const K: usize> {
+    context: &'a PlayerDecisionContext<'b>,
+    player_id: PlayerId,
+    chosen: [Option<Path>; K],
+    next_indices: [usize; K],
+    depth: usize,
+    done: bool,
+}
+
+impl<'a, 'b, const K: usize> IndexedRoadExtensionIter<'a, 'b, K> {
+    fn new(context: &'a PlayerDecisionContext<'b>, player_id: PlayerId) -> Self {
+        Self {
+            context,
+            player_id,
+            chosen: [None; K],
+            next_indices: [0; K],
+            depth: 0,
+            done: false,
+        }
+    }
+}
+
+impl<const K: usize> Iterator for IndexedRoadExtensionIter<'_, '_, K> {
+    type Item = [Path; K];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.done {
+            return None;
+        }
+
+        loop {
+            if self.depth == K {
+                let result = std::array::from_fn(|idx| {
+                    self.chosen[idx].expect("complete road extension should have every path")
+                });
+                if self.depth == 0 {
+                    self.done = true;
+                } else {
+                    self.depth -= 1;
+                    self.chosen[self.depth] = None;
+                }
+                return Some(result);
+            }
+
+            let prefix = self.chosen[..self.depth]
+                .iter()
+                .copied()
+                .flatten()
+                .collect::<smallvec::SmallVec<[Path; 2]>>();
+            let candidates = self
+                .context
+                .public
+                .index
+                .legal_road_candidates_with_extra_roads(
+                    self.context.search.as_ref()?.state(),
+                    self.player_id,
+                    prefix.as_slice(),
+                );
+
+            if self.next_indices[self.depth] >= candidates.len() {
+                self.next_indices[self.depth] = 0;
+                if self.depth == 0 {
+                    self.done = true;
+                    return None;
+                }
+                self.depth -= 1;
+                self.chosen[self.depth] = None;
+                continue;
+            }
+
+            let candidate = candidates.as_slice()[self.next_indices[self.depth]];
             self.next_indices[self.depth] += 1;
 
             #[cfg(feature = "bench-counters")]
@@ -875,9 +1030,15 @@ pub fn legal_regular_action_at(
     if can_buy_road(context) {
         let count = legal_road_spots_count(context, context.actor);
         if index < count {
-            return legal_road_spots_iter(context, context.actor)
-                .nth(index)
-                .map(RegularCommand::Build);
+            let mut seen = 0;
+            let mut selected = None;
+            for_each_legal_road_spot(context, context.actor, |build| {
+                if seen == index && selected.is_none() {
+                    selected = Some(build);
+                }
+                seen += 1;
+            });
+            return selected.map(RegularCommand::Build);
         }
         index -= count;
     }
@@ -885,9 +1046,15 @@ pub fn legal_regular_action_at(
     if can_buy_settlement(context) {
         let count = legal_settlement_spots_count(context, context.actor);
         if index < count {
-            return legal_settlement_spots_iter(context, context.actor)
-                .nth(index)
-                .map(RegularCommand::Build);
+            let mut seen = 0;
+            let mut selected = None;
+            for_each_legal_settlement_spot(context, context.actor, |build| {
+                if seen == index && selected.is_none() {
+                    selected = Some(build);
+                }
+                seen += 1;
+            });
+            return selected.map(RegularCommand::Build);
         }
         index -= count;
     }
@@ -895,9 +1062,15 @@ pub fn legal_regular_action_at(
     if can_buy_city(context) {
         let count = legal_city_spots_count(context, context.actor);
         if index < count {
-            return legal_city_spots_iter(context, context.actor)
-                .nth(index)
-                .map(RegularCommand::Build);
+            let mut seen = 0;
+            let mut selected = None;
+            for_each_legal_city_spot(context, context.actor, |build| {
+                if seen == index && selected.is_none() {
+                    selected = Some(build);
+                }
+                seen += 1;
+            });
+            return selected.map(RegularCommand::Build);
         }
         index -= count;
     }
@@ -1361,6 +1534,58 @@ mod tests {
                 legal_road_spots_count(&context, P0),
                 clone_apply_road_spots(&context, P0).len()
             );
+        });
+    }
+
+    #[test]
+    fn indexed_road_count_matches_direct_road_generation() {
+        let mut state = initialized_state();
+        state
+            .transfer_from_bank(
+                ResourceSet {
+                    brick: 5,
+                    wood: 5,
+                    wheat: 5,
+                    sheep: 5,
+                    ore: 5,
+                },
+                0,
+            )
+            .expect("bank should fund test player");
+
+        with_decision_context(&state, P0, |context| {
+            let indexed = legal_road_spots_count(&context, P0);
+            let direct = context
+                .public
+                .builds
+                .road_extension_candidates(P0, context.public.board.paths())
+                .len();
+
+            assert_eq!(indexed, direct);
+        });
+    }
+
+    #[test]
+    fn indexed_settlement_count_matches_direct_generation() {
+        let mut state = initialized_state();
+        state
+            .transfer_from_bank(
+                ResourceSet {
+                    brick: 5,
+                    wood: 5,
+                    wheat: 5,
+                    sheep: 5,
+                    ore: 5,
+                },
+                0,
+            )
+            .expect("bank should fund test player");
+
+        with_decision_context(&state, P0, |context| {
+            let indexed = legal_settlement_spots_count(&context, P0);
+            let direct = legal_settlement_spots(&context, P0).len();
+
+            assert_eq!(indexed, direct);
         });
     }
 

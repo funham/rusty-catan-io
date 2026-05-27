@@ -1,10 +1,16 @@
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 
 use super::{
     event::{EventTransaction, EventVisibility, GameEvent},
     input::{DecisionRequest, DecisionToken},
 };
-use crate::gameplay::{game::decision::DecisionId, primitives::player::PlayerId};
+use crate::gameplay::{
+    constants::capacities::EVENT_BATCH_INLINE, game::decision::DecisionId,
+    primitives::player::PlayerId,
+};
+
+pub type GameOutputBatch = SmallVec<[GameOutput; EVENT_BATCH_INLINE]>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameEventRecord {
@@ -28,7 +34,7 @@ impl GameEventRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GameOutput {
-    Event(Box<GameEventRecord>),
+    Event(GameEventRecord),
     DecisionOpened(DecisionRequest),
     DecisionClosed {
         decision_id: DecisionId,
@@ -50,7 +56,7 @@ pub enum CommandRejectionReason {
 
 impl GameOutput {
     pub fn event(record: GameEventRecord) -> Self {
-        Self::Event(Box::new(record))
+        Self::Event(record)
     }
 }
 

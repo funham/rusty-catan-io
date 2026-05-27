@@ -119,10 +119,10 @@ impl SimulationHost {
         queue: &mut VecDeque<GameOutput>,
         observers: &mut [&mut dyn OutputObserver],
     ) {
-        for output in projector::project_transaction(transaction) {
+        projector::project_transaction_into(transaction, |output| {
             self.deliver_output(&output, observers);
             queue.push_back(output);
-        }
+        });
     }
 
     fn deliver_output(&mut self, output: &GameOutput, observers: &mut [&mut dyn OutputObserver]) {

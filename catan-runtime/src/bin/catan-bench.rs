@@ -23,6 +23,83 @@ use catan_runtime::{
 };
 use serde::Serialize;
 
+#[cfg(feature = "bench-allocs")]
+mod alloc_counters {
+    use std::{
+        alloc::{GlobalAlloc, Layout, System},
+        sync::atomic::{AtomicU64, Ordering},
+    };
+
+    #[derive(Debug, Clone, Copy, serde::Serialize)]
+    pub struct AllocationSummary {
+        pub alloc_calls: u64,
+        pub dealloc_calls: u64,
+        pub realloc_calls: u64,
+        pub alloc_bytes: u64,
+        pub dealloc_bytes: u64,
+        pub realloc_new_bytes: u64,
+    }
+
+    pub struct CountingAllocator;
+
+    static ALLOC_CALLS: AtomicU64 = AtomicU64::new(0);
+    static DEALLOC_CALLS: AtomicU64 = AtomicU64::new(0);
+    static REALLOC_CALLS: AtomicU64 = AtomicU64::new(0);
+    static ALLOC_BYTES: AtomicU64 = AtomicU64::new(0);
+    static DEALLOC_BYTES: AtomicU64 = AtomicU64::new(0);
+    static REALLOC_NEW_BYTES: AtomicU64 = AtomicU64::new(0);
+
+    unsafe impl GlobalAlloc for CountingAllocator {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            ALLOC_CALLS.fetch_add(1, Ordering::Relaxed);
+            ALLOC_BYTES.fetch_add(layout.size() as u64, Ordering::Relaxed);
+            unsafe { System.alloc(layout) }
+        }
+
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            DEALLOC_CALLS.fetch_add(1, Ordering::Relaxed);
+            DEALLOC_BYTES.fetch_add(layout.size() as u64, Ordering::Relaxed);
+            unsafe { System.dealloc(ptr, layout) }
+        }
+
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+            REALLOC_CALLS.fetch_add(1, Ordering::Relaxed);
+            REALLOC_NEW_BYTES.fetch_add(new_size as u64, Ordering::Relaxed);
+            unsafe { System.realloc(ptr, layout, new_size) }
+        }
+    }
+
+    pub fn reset() {
+        ALLOC_CALLS.store(0, Ordering::Relaxed);
+        DEALLOC_CALLS.store(0, Ordering::Relaxed);
+        REALLOC_CALLS.store(0, Ordering::Relaxed);
+        ALLOC_BYTES.store(0, Ordering::Relaxed);
+        DEALLOC_BYTES.store(0, Ordering::Relaxed);
+        REALLOC_NEW_BYTES.store(0, Ordering::Relaxed);
+    }
+
+    pub fn snapshot() -> AllocationSummary {
+        AllocationSummary {
+            alloc_calls: ALLOC_CALLS.load(Ordering::Relaxed),
+            dealloc_calls: DEALLOC_CALLS.load(Ordering::Relaxed),
+            realloc_calls: REALLOC_CALLS.load(Ordering::Relaxed),
+            alloc_bytes: ALLOC_BYTES.load(Ordering::Relaxed),
+            dealloc_bytes: DEALLOC_BYTES.load(Ordering::Relaxed),
+            realloc_new_bytes: REALLOC_NEW_BYTES.load(Ordering::Relaxed),
+        }
+    }
+}
+
+#[cfg(feature = "bench-allocs")]
+#[global_allocator]
+static GLOBAL_ALLOCATOR: alloc_counters::CountingAllocator = alloc_counters::CountingAllocator;
+
+#[cfg(feature = "bench-allocs")]
+use alloc_counters::AllocationSummary;
+
+#[cfg(not(feature = "bench-allocs"))]
+type AllocationSummary = ();
+
 #[derive(Debug)]
 struct Args {
     config: PathBuf,
@@ -117,6 +194,7 @@ struct Environment {
     os: Option<String>,
     profile: &'static str,
     bench_counters_enabled: bool,
+    bench_allocs_enabled: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -131,6 +209,7 @@ struct Summary {
     totals: Totals,
     rates: Rates,
     legal_counters: Option<LegalCounterSummary>,
+    allocations: Option<AllocationSummary>,
     environment: Environment,
 }
 
@@ -164,6 +243,9 @@ fn run() -> Result<(), String> {
 
     #[cfg(feature = "bench-counters")]
     catan_core::gameplay::game::legal::counters::reset();
+
+    #[cfg(feature = "bench-allocs")]
+    alloc_counters::reset();
 
     let started = Instant::now();
     let mut totals = Totals::default();
@@ -384,6 +466,7 @@ fn build_summary(
         totals,
         result_counts,
         legal_counters,
+        allocations: allocation_summary(),
         environment: Environment {
             git_commit: command_output("git", &["rev-parse", "HEAD"]),
             rustc: command_output("rustc", &["-Vv"]),
@@ -393,6 +476,7 @@ fn build_summary(
             os: command_output("uname", &["-a"]).or_else(|| command_output("ver", &[])),
             profile: "release",
             bench_counters_enabled: cfg!(feature = "bench-counters"),
+            bench_allocs_enabled: cfg!(feature = "bench-allocs"),
         },
     }
 }
@@ -425,6 +509,18 @@ fn legal_counter_summary() -> Option<LegalCounterSummary> {
     }
 
     #[cfg(not(feature = "bench-counters"))]
+    {
+        None
+    }
+}
+
+fn allocation_summary() -> Option<AllocationSummary> {
+    #[cfg(feature = "bench-allocs")]
+    {
+        Some(alloc_counters::snapshot())
+    }
+
+    #[cfg(not(feature = "bench-allocs"))]
     {
         None
     }
@@ -480,6 +576,27 @@ fn print_human_summary(summary: &Summary) {
     } else {
         println!("legal_candidates: disabled; rebuild with --features bench-counters");
     }
+    print_allocation_summary(summary);
+}
+
+#[cfg(feature = "bench-allocs")]
+fn print_allocation_summary(summary: &Summary) {
+    if let Some(allocations) = &summary.allocations {
+        println!(
+            "allocations: alloc_calls={} realloc_calls={} dealloc_calls={} alloc_bytes={} realloc_new_bytes={} dealloc_bytes={}",
+            allocations.alloc_calls,
+            allocations.realloc_calls,
+            allocations.dealloc_calls,
+            allocations.alloc_bytes,
+            allocations.realloc_new_bytes,
+            allocations.dealloc_bytes
+        );
+    }
+}
+
+#[cfg(not(feature = "bench-allocs"))]
+fn print_allocation_summary(_summary: &Summary) {
+    println!("allocations: disabled; rebuild with --features bench-allocs");
 }
 
 #[cfg(test)]

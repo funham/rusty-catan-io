@@ -80,6 +80,54 @@ target/release/catan-bench \
   --no-log
 ```
 
+For allocation accounting in the benchmark loop:
+
+```sh
+cargo build --release -p catan-runtime --bin catan-bench --features bench-counters,bench-allocs
+target/release/catan-bench \
+  --config catan-runtime/data/configurations/greedy_brawl.json \
+  --games 1000 \
+  --seed 0 \
+  --seed-stride 1 \
+  --json-summary \
+  --no-log | jq '.allocations'
+```
+
+The allocation counter resets after argument/config setup and before the
+simulated game loop.
+
+## 2026-05-27 Core Hot Loop Allocation Pass
+
+Measured with:
+
+```sh
+cargo build --release -p catan-runtime --bin catan-bench --features bench-counters,bench-allocs
+target/release/catan-bench \
+  --config catan-runtime/data/configurations/greedy_brawl.json \
+  --games 100 \
+  --seed 0 \
+  --seed-stride 1 \
+  --json-summary \
+  --no-log
+```
+
+Current 100-game allocation summary:
+
+```json
+{
+  "alloc_calls": 436744,
+  "dealloc_calls": 436743,
+  "realloc_calls": 6334,
+  "alloc_bytes": 217220332,
+  "dealloc_bytes": 227588121,
+  "realloc_new_bytes": 20735380
+}
+```
+
+Active deterministic seed-zero benchmark test still matches its golden summary.
+The ignored 5-game and 100-game macro guards currently produce different totals
+and should be re-baselined or investigated before using them as release gates.
+
 ## Profiling Builds
 
 Keep optimization enabled and add debug symbols:

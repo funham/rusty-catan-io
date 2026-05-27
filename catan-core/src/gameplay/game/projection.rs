@@ -301,7 +301,7 @@ impl PublicGameProjection {
                             trade: offer.trade,
                         })
                         .collect(),
-                    responses: session.responses.clone(),
+                    responses: session.responses.to_vec(),
                     version: session.version,
                     open: session.open,
                 })

@@ -32,6 +32,22 @@ pub use data::*;
 pub use occupancy::*;
 pub use query::*;
 
+pub fn road_extension_candidates_from_frontier(
+    frontier: &SmallSet<Intersection, 64>,
+    occupied_roads: &PathSet,
+    incident_paths: impl Fn(Intersection) -> SmallSet<Path, 3>,
+) -> PathSet {
+    let mut candidates = PathSet::new();
+    for &intersection in frontier {
+        for candidate in incident_paths(intersection) {
+            if !occupied_roads.contains(&candidate) {
+                candidates.insert(candidate);
+            }
+        }
+    }
+    candidates
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Builds
 ////////////////////////////////////////////////////////////////////////////////////////////////////

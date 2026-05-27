@@ -2,9 +2,9 @@ use crate::{
     algorithm, constants,
     gameplay::{
         game::{index::GameIndex, state::TableState},
-        primitives::{build::EstablishmentType, player::PlayerId},
+        primitives::{build::EstablishmentType, build::PathSet, player::PlayerId},
     },
-    topology::Hex,
+    topology::{Hex, Intersection},
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -40,6 +40,22 @@ impl<'a> GameQuery<'a> {
 
     pub fn count_max_tract_length(&self, player_id: PlayerId) -> u16 {
         self.index.longest_road_lengths[player_id.index()]
+    }
+
+    pub fn legal_road_candidates(&self, player_id: PlayerId) -> &PathSet {
+        &self.index.legal_road_candidates[player_id.index()]
+    }
+
+    pub fn occupied_roads(&self) -> &PathSet {
+        &self.index.occupied_roads
+    }
+
+    pub fn deadzone_intersections(&self) -> &[Intersection] {
+        self.index.deadzone_intersections.as_slice()
+    }
+
+    pub fn has_establishment_in_deadzone(&self, pos: Intersection) -> bool {
+        self.index.deadzone_intersections.contains(&pos)
     }
 
     pub fn has_longest_road(&self, player_id: PlayerId) -> bool {

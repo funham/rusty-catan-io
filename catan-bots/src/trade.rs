@@ -71,22 +71,18 @@ pub fn first_funded_offer_for_peer(
         .map(|offer| offer.id)
 }
 
-pub fn committable_offers(
-    context: &PlayerDecisionContext<'_>,
-    session: &TradeSession,
-) -> Vec<(TradeOfferId, PlayerId)> {
-    session
-        .offers
-        .iter()
-        .filter_map(move |offer| {
-            let peer_id = if offer.proposer == session.proposer {
-                session.accepted_peer_for_offer(offer.id)?
-            } else {
-                offer.proposer
-            };
-            offer_is_funded(context, session, offer.id, peer_id).then_some((offer.id, peer_id))
-        })
-        .collect()
+pub fn committable_offers<'a>(
+    context: &'a PlayerDecisionContext<'_>,
+    session: &'a TradeSession,
+) -> impl Iterator<Item = (TradeOfferId, PlayerId)> + 'a {
+    session.offers.iter().filter_map(move |offer| {
+        let peer_id = if offer.proposer == session.proposer {
+            session.accepted_peer_for_offer(offer.id)?
+        } else {
+            offer.proposer
+        };
+        offer_is_funded(context, session, offer.id, peer_id).then_some((offer.id, peer_id))
+    })
 }
 
 pub fn resources_after_as_peer(
@@ -114,13 +110,15 @@ pub fn one_card_trade(give: Resource, take: Resource) -> PlayerTrade {
     }
 }
 
-pub fn one_card_trade_candidates(context: &PlayerDecisionContext<'_>) -> Vec<PlayerTrade> {
+pub fn one_card_trade_candidates(
+    context: &PlayerDecisionContext<'_>,
+) -> impl Iterator<Item = PlayerTrade> {
+    let resources = *context.private.resources;
     Resource::iter()
-        .filter(|give| context.private.resources[*give] > 0)
+        .filter(move |give| resources[*give] > 0)
         .flat_map(move |give| {
             Resource::iter()
                 .filter(move |take| *take != give)
                 .map(move |take| one_card_trade(give, take))
         })
-        .collect()
 }

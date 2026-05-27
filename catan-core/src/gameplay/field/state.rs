@@ -6,7 +6,7 @@ use super::{BoardArrangement, index::FieldIndex};
 use crate::common::SmallSet;
 use crate::gameplay::primitives::{
     PortKind,
-    build::{Establishment, Road},
+    build::{Establishment, PathSet, Road},
 };
 use crate::math::dice::TileNum;
 use crate::topology::*;
@@ -145,6 +145,14 @@ impl BoardLayout {
 
     pub fn paths(&self) -> &[Path] {
         self.index.paths()
+    }
+
+    pub fn path_set(&self) -> &PathSet {
+        self.index.path_set()
+    }
+
+    pub fn incident_paths(&self, intersection: Intersection) -> SmallSet<Path, 3> {
+        self.index.incident_paths(intersection)
     }
 }
 

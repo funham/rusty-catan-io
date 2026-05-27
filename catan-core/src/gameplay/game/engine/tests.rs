@@ -74,7 +74,7 @@ fn started_engine() -> (GameEngine, Vec<GameOutput>) {
 
 fn start_outputs(engine: &mut GameEngine) -> Vec<GameOutput> {
     let transaction = engine.start().expect("start should reduce");
-    projector::project_transaction(&transaction)
+    projector::project_transaction(&transaction).to_vec()
 }
 
 fn submit(player_id: PlayerId, decision_id: DecisionId, command: PlayerCommand) -> GameInput {
@@ -94,7 +94,7 @@ fn apply_outputs(
     let transaction = engine.apply(input).expect("submit should reduce");
     (
         engine.result().cloned(),
-        projector::project_transaction(&transaction),
+        projector::project_transaction(&transaction).to_vec(),
     )
 }
 
