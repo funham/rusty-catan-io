@@ -193,6 +193,8 @@ pub enum GameEvent {
         proposer_id: PlayerId,
         peer_id: PlayerId,
         offer_id: TradeOfferId,
+        offer_proposer_id: PlayerId,
+        trade: PlayerTrade,
     },
     TradeCancelled {
         session_id: TradeSessionId,

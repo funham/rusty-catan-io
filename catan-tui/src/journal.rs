@@ -188,7 +188,7 @@ fn meaningful_event_entries(
             };
         }
         GameEvent::DevCardBought { player_id } => {
-            format!("p{player_id} bought a development card")
+            format!("p{player_id} bought a [?]")
         }
         GameEvent::DevCardUsed { player_id, usage } => {
             format!("p{player_id} used {}", dev_card_usage_label(usage))
@@ -227,8 +227,13 @@ fn meaningful_event_entries(
         GameEvent::TradeCompleted {
             proposer_id,
             peer_id,
+            offer_proposer_id,
+            trade,
             ..
-        } => format!("p{proposer_id} traded with p{peer_id}"),
+        } => format!(
+            "p{proposer_id} traded {} with p{peer_id}",
+            completed_player_trade_label(*proposer_id, *offer_proposer_id, trade)
+        ),
         GameEvent::TradeCancelled { proposer_id, .. } => {
             format!("p{proposer_id} cancelled a trade")
         }
@@ -354,6 +359,23 @@ fn player_trade_label(trade: &PlayerTrade) -> String {
     )
 }
 
+fn completed_player_trade_label(
+    proposer_id: PlayerId,
+    offer_proposer_id: PlayerId,
+    trade: &PlayerTrade,
+) -> String {
+    let (give, take) = if proposer_id == offer_proposer_id {
+        (&trade.give, &trade.take)
+    } else {
+        (&trade.take, &trade.give)
+    };
+    format!(
+        "{} for {}",
+        resource_set_mini_marker_label(give),
+        resource_set_mini_marker_label(take)
+    )
+}
+
 fn resource_set_mini_marker_label(resources: &ResourceSet) -> String {
     let parts = Resource::iter()
         .filter_map(|resource| {
@@ -468,7 +490,7 @@ mod tests {
         assert_eq!(meaningful_event_line(&dice), Some("p1 rolled 7".to_owned()));
         assert_eq!(
             meaningful_event_line(&bought),
-            Some("p0 bought a development card".to_owned())
+            Some("p0 bought a [?]".to_owned())
         );
         assert_eq!(
             meaningful_event_line(&used),
@@ -579,6 +601,36 @@ mod tests {
                 },
             }),
             Some("p1 discarded [1W]".to_owned())
+        );
+    }
+
+    #[test]
+    fn journal_renders_completed_trade_exchange() {
+        use catan_core::gameplay::{
+            game::trade::{TradeOfferId, TradeSessionId},
+            primitives::{resource::ResourceSet, trade::PlayerTrade},
+        };
+
+        assert_eq!(
+            meaningful_event_line(&GameEvent::TradeCompleted {
+                session_id: TradeSessionId(0),
+                proposer_id: P0,
+                peer_id: P1,
+                offer_id: TradeOfferId(2),
+                offer_proposer_id: P0,
+                trade: PlayerTrade {
+                    give: ResourceSet {
+                        brick: 1,
+                        sheep: 3,
+                        ..ResourceSet::EMPTY
+                    },
+                    take: ResourceSet {
+                        wood: 2,
+                        ..ResourceSet::EMPTY
+                    },
+                },
+            }),
+            Some("p0 traded [1B][3S] for [2W] with p1".to_owned())
         );
     }
 
@@ -784,7 +836,7 @@ mod tests {
         assert_eq!(entries.len(), 4);
         assert_eq!(get_text(entries[0]), Some("p0 rolled 7"));
         assert_eq!(entries[0].player_id(), Some(P0));
-        assert_eq!(get_text(entries[1]), Some("p0 bought a development card"));
+        assert_eq!(get_text(entries[1]), Some("p0 bought a [?]"));
         assert!(entries[2].is_divider());
         assert_eq!(get_text(entries[3]), Some("p1 rolled 8"));
     }

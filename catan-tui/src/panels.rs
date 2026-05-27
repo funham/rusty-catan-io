@@ -21,7 +21,8 @@ use ratatui::{
 };
 
 use super::tui::{
-    CardGlyph, FinalGameSummaryView, InlineBadge, MiniCardGlyph, append_gap, join_lines_horizontal,
+    CardGlyph, FinalGameSummaryView, FinalPlayerSummaryView, InlineBadge, MiniCardGlyph,
+    append_gap, join_lines_horizontal,
 };
 
 #[cfg(test)]
@@ -114,50 +115,196 @@ fn add_bank_legend_if_fits(card_lines: Vec<Line<'static>>, width: usize) -> Vec<
         .collect()
 }
 
-pub fn game_summary_lines(summary: &FinalGameSummaryView) -> Vec<Line<'static>> {
+pub fn game_summary_title_lines(summary: &FinalGameSummaryView) -> Vec<Line<'static>> {
+    vec![
+        Line::from(vec![
+            Span::styled(
+                "★ Game ended",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled(summary.result.clone(), Style::default().fg(Color::Yellow)),
+        ]),
+        Line::from(vec![
+            Span::styled("turns ", subtle_box_style()),
+            Span::styled(
+                summary.turns_started.to_string(),
+                Style::default().fg(Color::White),
+            ),
+            Span::raw("  "),
+            Span::styled("[press esc to quit]", Style::default().fg(Color::Yellow)),
+        ]),
+    ]
+}
+
+pub fn game_summary_ranking_lines(summary: &FinalGameSummaryView) -> Vec<Line<'static>> {
     let mut lines = vec![
         Line::from(Span::styled(
-            "Game ended",
-            Style::default().fg(Color::Green),
-        )),
-        Line::from(format!("result: {}", summary.result)),
-        Line::from(format!("turns: {}", summary.turns_started)),
-        Line::from(""),
-        Line::from("dice"),
-    ];
-
-    for (roll, count) in &summary.dice_counts {
-        lines.push(Line::from(format!("{roll:>2}: {count}")));
-    }
-
-    lines.extend([
-        Line::from(""),
-        Line::from(format!(
-            "resources distributed: {}",
-            summary.resources_distributed
-        )),
-        Line::from(format!(
-            "resources discarded: {}",
-            summary.resources_discarded
-        )),
-        Line::from(format!("resources stolen: {}", summary.resources_stolen)),
-        Line::from(format!(
-            "builds: roads {} settlements {} cities {}",
-            summary.roads_built, summary.settlements_built, summary.cities_built
-        )),
-        Line::from(format!(
-            "dev cards used: knights {} yp {} rb {} monopoly {}",
-            summary.knights_used,
-            summary.year_of_plenty_used,
-            summary.road_build_used,
-            summary.monopoly_used
+            "RK  PLAYER  VP  BLD  DEV  ROAD  ARMY  RES  RDS  KNT  LR",
+            Style::default()
+                .fg(Color::Indexed(250))
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
-            "[press esc to quit]",
-            Style::default().fg(Color::Yellow),
+            "────────────────────────────────────────────────────",
+            subtle_box_style(),
         )),
-    ]);
+    ];
+
+    if summary.player_rankings.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "no final player projection",
+            subtle_box_style(),
+        )));
+        return lines;
+    }
+
+    for row in &summary.player_rankings {
+        lines.push(player_ranking_line(row));
+    }
     lines
+}
+
+fn player_ranking_line(row: &FinalPlayerSummaryView) -> Line<'static> {
+    let medal_style = match row.rank {
+        1 => Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+        2 => Style::default().fg(Color::Indexed(250)),
+        3 => Style::default().fg(Color::Indexed(172)),
+        _ => subtle_box_style(),
+    };
+    Line::from(vec![
+        Span::styled(format!("#{}", row.rank), medal_style),
+        Span::raw("  "),
+        Span::styled(
+            format!("p{}", row.player_id),
+            player_style(row.player_id).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("   "),
+        Span::styled(
+            format!("{:>2}", row.total_vp),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("   "),
+        Span::raw(format!("{:>2}", row.build_vp)),
+        Span::raw("   "),
+        Span::raw(format!("{:>2}", row.dev_card_vp)),
+        Span::raw("    "),
+        Span::styled(
+            format!("{:>2}", row.longest_road_vp),
+            achievement_style(row.longest_road_vp > 0),
+        ),
+        Span::raw("    "),
+        Span::styled(
+            format!("{:>2}", row.largest_army_vp),
+            achievement_style(row.largest_army_vp > 0),
+        ),
+        Span::raw("   "),
+        Span::raw(format!("{:>2}", row.resources)),
+        Span::raw("   "),
+        Span::raw(format!("{:>2}", row.roads)),
+        Span::raw("   "),
+        Span::raw(format!("{:>2}", row.army)),
+        Span::raw("  "),
+        Span::raw(format!("{:>2}", row.longest_road_len)),
+    ])
+}
+
+pub fn game_summary_dice_lines(summary: &FinalGameSummaryView, width: usize) -> Vec<Line<'static>> {
+    let max_count = summary
+        .dice_counts
+        .iter()
+        .map(|(_, count)| *count)
+        .max()
+        .unwrap_or(0);
+    let bar_width = width.saturating_sub(9).clamp(1, 32);
+    let mut lines = vec![Line::from(Span::styled(
+        "ROLL  COUNT  HISTOGRAM",
+        Style::default()
+            .fg(Color::Indexed(250))
+            .add_modifier(Modifier::BOLD),
+    ))];
+
+    for (roll, count) in &summary.dice_counts {
+        let filled = if max_count == 0 {
+            0
+        } else {
+            ((*count as usize * bar_width).saturating_add(max_count as usize - 1))
+                / max_count as usize
+        };
+        let empty = bar_width.saturating_sub(filled);
+        lines.push(Line::from(vec![
+            Span::styled(format!("{roll:>2}"), dice_roll_style(*roll)),
+            Span::raw("    "),
+            Span::styled(format!("{count:>3}"), Style::default().fg(Color::White)),
+            Span::raw("  "),
+            Span::styled("█".repeat(filled), dice_roll_style(*roll)),
+            Span::styled("░".repeat(empty), subtle_box_style()),
+        ]));
+    }
+
+    lines
+}
+
+pub fn game_summary_activity_lines(summary: &FinalGameSummaryView) -> Vec<Line<'static>> {
+    vec![
+        Line::from(vec![
+            Span::styled(
+                "◆ Resources",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(format!(
+                "  dealt {}  discarded {}  stolen {}",
+                summary.resources_distributed,
+                summary.resources_discarded,
+                summary.resources_stolen
+            )),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                "◆ Builds",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(format!(
+                "  roads {}  settlements {}  cities {}",
+                summary.roads_built, summary.settlements_built, summary.cities_built
+            )),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                "◆ Dev cards",
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(format!(
+                "  knights {}  YP {}  RB {}  monopoly {}",
+                summary.knights_used,
+                summary.year_of_plenty_used,
+                summary.road_build_used,
+                summary.monopoly_used
+            )),
+        ]),
+    ]
+}
+
+fn dice_roll_style(roll: u8) -> Style {
+    match roll {
+        6 | 8 => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        5 | 9 => Style::default().fg(Color::Yellow),
+        4 | 10 => Style::default().fg(Color::Green),
+        3 | 11 => Style::default().fg(Color::Cyan),
+        _ => Style::default().fg(Color::Indexed(245)),
+    }
 }
 
 pub fn personal_model_lines(model: &GameProjection) -> Vec<Line<'static>> {
@@ -1265,8 +1412,9 @@ mod tests {
 
     use super::{
         adjust_discard_selection, bank_panel_lines, bank_trade_menu_lines, dev_card_lines,
-        discard_personal_lines, personal_model_lines, player_style, player_trade_builder_lines,
-        public_model_lines, resource_card_lines, resource_secondary_style, snapshot_state_lines,
+        discard_personal_lines, game_summary_dice_lines, game_summary_ranking_lines,
+        personal_model_lines, player_style, player_trade_builder_lines, public_model_lines,
+        resource_card_lines, resource_secondary_style, snapshot_state_lines,
     };
 
     #[test]
@@ -1955,5 +2103,100 @@ mod tests {
         assert!(lines[1].spans.iter().any(|span| {
             span.content.as_ref() == " !" && span.style == super::dev_card_secondary_style()
         }));
+    }
+
+    #[test]
+    fn game_summary_renders_ranked_vp_sources() {
+        let summary = super::FinalGameSummaryView {
+            result: "Win(PlayerId(1))".to_owned(),
+            turns_started: 42,
+            player_rankings: vec![
+                super::FinalPlayerSummaryView {
+                    rank: 1,
+                    player_id: PlayerId::new(1),
+                    total_vp: 10,
+                    build_vp: 5,
+                    dev_card_vp: 1,
+                    longest_road_vp: 2,
+                    largest_army_vp: 2,
+                    resources: 8,
+                    roads: 9,
+                    army: 4,
+                    longest_road_len: 6,
+                },
+                super::FinalPlayerSummaryView {
+                    rank: 2,
+                    player_id: PlayerId::new(0),
+                    total_vp: 7,
+                    build_vp: 5,
+                    dev_card_vp: 0,
+                    longest_road_vp: 2,
+                    largest_army_vp: 0,
+                    resources: 3,
+                    roads: 7,
+                    army: 1,
+                    longest_road_len: 5,
+                },
+            ],
+            dice_counts: Vec::new(),
+            resources_distributed: 0,
+            resources_discarded: 0,
+            resources_stolen: 0,
+            roads_built: 0,
+            settlements_built: 0,
+            cities_built: 0,
+            knights_used: 0,
+            year_of_plenty_used: 0,
+            road_build_used: 0,
+            monopoly_used: 0,
+        };
+
+        let rendered = game_summary_ranking_lines(&summary)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("RK"));
+        assert!(rendered.contains("VP"));
+        assert!(rendered.contains("BLD"));
+        assert!(rendered.contains("DEV"));
+        assert!(rendered.contains("ROAD"));
+        assert!(rendered.contains("ARMY"));
+        assert!(rendered.contains("#1"));
+        assert!(rendered.contains("p1"));
+        assert!(rendered.contains("10"));
+    }
+
+    #[test]
+    fn game_summary_dice_histogram_draws_rotated_bars_and_counts() {
+        let summary = super::FinalGameSummaryView {
+            result: "Win(PlayerId(0))".to_owned(),
+            turns_started: 4,
+            player_rankings: Vec::new(),
+            dice_counts: vec![(2, 1), (3, 0), (4, 3)],
+            resources_distributed: 0,
+            resources_discarded: 0,
+            resources_stolen: 0,
+            roads_built: 0,
+            settlements_built: 0,
+            cities_built: 0,
+            knights_used: 0,
+            year_of_plenty_used: 0,
+            road_build_used: 0,
+            monopoly_used: 0,
+        };
+
+        let rendered = game_summary_dice_lines(&summary, 12)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains(" 2"));
+        assert!(rendered.contains(" 1"));
+        assert!(rendered.contains(" 4"));
+        assert!(rendered.contains(" 3"));
+        assert!(rendered.contains("█"));
     }
 }

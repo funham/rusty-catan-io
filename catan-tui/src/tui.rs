@@ -44,12 +44,16 @@ use ratatui::{
 use super::{
     journal::{EventJournal, JournalEntry},
     labels::{bank_trade_label, build_label, hex_label, intersection_label, path_label},
-    layout::{NormalLayoutAreas, SnapshotLayoutAreas, normal_layout_areas, snapshot_layout_areas},
+    layout::{
+        EndLayoutAreas, NormalLayoutAreas, SnapshotLayoutAreas, end_layout_areas,
+        normal_layout_areas, snapshot_layout_areas,
+    },
     panels::{
         adjust_discard_selection, bank_panel_lines, bank_trade_menu_lines, discard_personal_lines,
-        game_summary_lines, personal_model_lines, player_menu_lines, player_trade_builder_lines,
-        public_player_lines, resource_choice_lines, snapshot_state_lines, trade_panel_lines,
-        trade_tree_lines_for_viewer,
+        game_summary_activity_lines, game_summary_dice_lines, game_summary_ranking_lines,
+        game_summary_title_lines, personal_model_lines, player_menu_lines,
+        player_trade_builder_lines, public_player_lines, resource_choice_lines,
+        snapshot_state_lines, trade_panel_lines, trade_tree_lines_for_viewer,
     },
     render::{field_lines, field_lines_cropped_left, field_size},
     selectors::{
@@ -68,6 +72,7 @@ pub struct CliUi {
     interactive_override: Option<Vec<Line<'static>>>,
     observer_event_count: u64,
     observer_summary: Option<String>,
+    final_summary: Option<FinalGameSummaryView>,
     journal: EventJournal,
     active_player: Option<PlayerId>,
     show_command_help: bool,
@@ -77,6 +82,7 @@ pub struct CliUi {
 pub struct FinalGameSummaryView {
     pub result: String,
     pub turns_started: u64,
+    pub player_rankings: Vec<FinalPlayerSummaryView>,
     pub dice_counts: Vec<(u8, u64)>,
     pub resources_distributed: u16,
     pub resources_discarded: u16,
@@ -88,6 +94,21 @@ pub struct FinalGameSummaryView {
     pub year_of_plenty_used: u16,
     pub road_build_used: u16,
     pub monopoly_used: u16,
+}
+
+#[derive(Debug, Clone)]
+pub struct FinalPlayerSummaryView {
+    pub rank: usize,
+    pub player_id: PlayerId,
+    pub total_vp: u16,
+    pub build_vp: u16,
+    pub dev_card_vp: u16,
+    pub longest_road_vp: u16,
+    pub largest_army_vp: u16,
+    pub resources: u16,
+    pub roads: u16,
+    pub army: u16,
+    pub longest_road_len: u16,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -344,6 +365,7 @@ impl CliUi {
             interactive_override: None,
             observer_event_count: 0,
             observer_summary: None,
+            final_summary: None,
             journal: EventJournal::new(64),
             active_player: None,
             show_command_help: false,
@@ -359,6 +381,7 @@ impl CliUi {
         self.public_override = None;
         self.personal_override = None;
         self.interactive_override = None;
+        self.final_summary = None;
         self.show_command_help = false;
         self.draw(None, "", "")
     }
@@ -376,6 +399,7 @@ impl CliUi {
         self.public_override = None;
         self.personal_override = None;
         self.interactive_override = None;
+        self.final_summary = None;
         self.show_command_help = false;
         self.draw(Some(model), "", "")
     }
@@ -425,7 +449,8 @@ impl CliUi {
         self.overlay.selected = None;
         self.overlay.status = SelectionStatus::Neutral;
         self.overlay.preview.clear();
-        self.public_override = Some(game_summary_lines(summary));
+        self.public_override = None;
+        self.final_summary = Some(summary.clone());
         self.personal_override = None;
         self.interactive_override = None;
         self.show_command_help = false;
@@ -435,7 +460,7 @@ impl CliUi {
                 && key.kind == KeyEventKind::Press
                 && key.code == KeyCode::Esc
             {
-                self.public_override = None;
+                self.final_summary = None;
                 return Ok(());
             }
         }
@@ -451,6 +476,7 @@ impl CliUi {
         self.public_override = None;
         self.personal_override = None;
         self.interactive_override = None;
+        self.final_summary = None;
         self.show_command_help = false;
         loop {
             self.draw(Some(model), prompt, &input)?;
@@ -1338,16 +1364,15 @@ impl CliUi {
         let view_mode = self.view_mode;
         let observer_event_count = self.observer_event_count;
         let observer_summary = self.observer_summary.clone();
+        let final_summary = self.final_summary.clone();
         let journal_entries = self.journal.entries().cloned().collect::<Vec<_>>();
         let active_player = self.active_player;
         let show_command_help = self.show_command_help;
         self.terminal.draw(|frame| match view_mode {
             CliViewMode::Normal => {
-                let layout = normal_layout_areas(
-                    frame.area(),
-                    field_size(),
-                    command_panel_line_count(view_mode, prompt, input, show_command_help),
-                );
+                let command_lines =
+                    command_panel_line_count(view_mode, prompt, input, show_command_help);
+                let layout = normal_layout_areas(frame.area(), field_size(), command_lines);
 
                 render_status(
                     frame,
@@ -1357,21 +1382,26 @@ impl CliUi {
                     observer_summary.as_deref(),
                 );
 
-                match model {
-                    Some(model) => render_normal_layout(
-                        frame,
-                        layout,
-                        model,
-                        &overlay,
-                        NormalRenderState {
-                            public_override,
-                            personal_override,
-                            interactive_override,
-                            journal_entries: &journal_entries,
-                            active_player,
-                        },
-                    ),
-                    None => render_waiting_layout(frame, layout.field),
+                if let Some(summary) = &final_summary {
+                    let layout = end_layout_areas(frame.area(), field_size(), command_lines);
+                    render_end_layout(frame, layout, model, &overlay, summary);
+                } else {
+                    match model {
+                        Some(model) => render_normal_layout(
+                            frame,
+                            layout,
+                            model,
+                            &overlay,
+                            NormalRenderState {
+                                public_override,
+                                personal_override,
+                                interactive_override,
+                                journal_entries: &journal_entries,
+                                active_player,
+                            },
+                        ),
+                        None => render_waiting_layout(frame, layout.field),
+                    }
                 }
 
                 render_command(
@@ -1635,9 +1665,12 @@ fn styled_event_text(text: &str) -> Line<'static> {
                             .push_to(&mut spans);
                     }
                     EventMiniCardMarker::Unknown => {
+                        let style = Style::default()
+                            .fg(Color::Magenta)
+                            .add_modifier(ratatui::style::Modifier::BOLD);
                         MiniCardGlyph::new("?")
-                            .face_style(subtle_panel_style())
-                            .bracket_style(subtle_panel_style())
+                            .face_style(style)
+                            .bracket_style(style)
                             .push_to(&mut spans);
                     }
                 }
@@ -1876,6 +1909,48 @@ fn render_normal_layout(
     .wrap(Wrap { trim: false })
     .block(panel_block("Private"));
     frame.render_widget(personal, layout.personal);
+}
+
+fn render_end_layout(
+    frame: &mut Frame<'_>,
+    layout: EndLayoutAreas,
+    model: Option<&GameProjection>,
+    overlay: &FieldOverlay,
+    summary: &FinalGameSummaryView,
+) {
+    if let Some(model) = model {
+        let field = Paragraph::new(center_field_lines(
+            field_lines(model, overlay),
+            layout.field,
+        ))
+        .block(panel_block("Final Field").border_style(active_panel_style()));
+        frame.render_widget(field, layout.field);
+    } else {
+        render_waiting_layout(frame, layout.field);
+    }
+
+    let ranking = Paragraph::new(game_summary_ranking_lines(summary))
+        .wrap(Wrap { trim: false })
+        .block(panel_block("Rankings").border_style(Style::default().fg(Color::Yellow)));
+    frame.render_widget(ranking, layout.rankings);
+
+    let dice = Paragraph::new(game_summary_dice_lines(
+        summary,
+        usize::from(layout.dice.width.saturating_sub(2)),
+    ))
+    .wrap(Wrap { trim: false })
+    .block(panel_block("Dice").border_style(Style::default().fg(Color::Cyan)));
+    frame.render_widget(dice, layout.dice);
+
+    let activity = Paragraph::new(game_summary_activity_lines(summary))
+        .wrap(Wrap { trim: false })
+        .block(panel_block("Game Ledger").border_style(Style::default().fg(Color::Green)));
+    frame.render_widget(activity, layout.activity);
+
+    let title = Paragraph::new(game_summary_title_lines(summary))
+        .wrap(Wrap { trim: false })
+        .block(panel_block("Result").border_style(Style::default().fg(Color::Magenta)));
+    frame.render_widget(title, layout.result);
 }
 
 fn center_field_lines(lines: Vec<Line<'static>>, area: Rect) -> Vec<Line<'static>> {
@@ -2165,6 +2240,14 @@ mod tests {
                 .iter()
                 .any(|span| { span.content.as_ref() == "4" && span.style.fg == Some(brick_color) })
         );
+        assert!(line.spans.iter().any(|span| {
+            span.content.as_ref() == "?"
+                && span.style.fg == Some(Color::Magenta)
+                && span
+                    .style
+                    .add_modifier
+                    .contains(ratatui::style::Modifier::BOLD)
+        }));
     }
 
     #[test]

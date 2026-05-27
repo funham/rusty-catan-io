@@ -1473,6 +1473,78 @@ fn same_resource_on_both_sides_is_rejected() {
 }
 
 #[test]
+fn player_trade_with_empty_side_is_rejected() {
+    let (mut engine, _outputs) = started_engine();
+    engine.test_force_regular_action_phase(0);
+    engine.test_give_resources(0, one_brick());
+    let owner = engine.open_decision_for_test(0, DecisionKind::RegularCommand);
+    let mut empty_give_sink = Vec::new();
+
+    apply_to_sink(
+        &mut engine,
+        submit(
+            P0,
+            owner.id,
+            PlayerCommand::Trade(TradeCommand::Propose {
+                offer: PlayerTrade {
+                    give: ResourceSet::EMPTY,
+                    take: one_wood(),
+                },
+            }),
+        ),
+        &mut empty_give_sink,
+    );
+
+    assert!(empty_give_sink.iter().any(|output| {
+        matches!(
+            output,
+            GameOutput::CommandRejected {
+                token,
+                reason: CommandRejectionReason::IllegalCommand(_),
+                ..
+            } if token.player_id == P0 && token.id == owner.id
+        )
+    }));
+    assert!(
+        !empty_give_sink
+            .iter()
+            .any(|output| matches!(output_event(output), Some(GameEvent::TradeOpened { .. })))
+    );
+
+    let mut empty_take_sink = Vec::new();
+    apply_to_sink(
+        &mut engine,
+        submit(
+            P0,
+            owner.id,
+            PlayerCommand::Trade(TradeCommand::Propose {
+                offer: PlayerTrade {
+                    give: one_brick(),
+                    take: ResourceSet::EMPTY,
+                },
+            }),
+        ),
+        &mut empty_take_sink,
+    );
+
+    assert!(empty_take_sink.iter().any(|output| {
+        matches!(
+            output,
+            GameOutput::CommandRejected {
+                token,
+                reason: CommandRejectionReason::IllegalCommand(_),
+                ..
+            } if token.player_id == P0 && token.id == owner.id
+        )
+    }));
+    assert!(
+        !empty_take_sink
+            .iter()
+            .any(|output| matches!(output_event(output), Some(GameEvent::TradeOpened { .. })))
+    );
+}
+
+#[test]
 fn active_player_cannot_open_trade_without_give_resources() {
     let (mut engine, _outputs) = started_engine();
     engine.test_force_regular_action_phase(0);
@@ -1861,6 +1933,7 @@ fn active_player_can_commit_accepted_offer() {
                 proposer_id: P0,
                 peer_id: P1,
                 offer_id: completed,
+                ..
             }) if *session_id == session && *completed == offer
         )
     }));

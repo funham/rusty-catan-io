@@ -6,6 +6,7 @@ const NORMAL_RIGHT_MIN_WIDTH: u16 = 26;
 const NORMAL_RIGHT_MAX_WIDTH: u16 = 64;
 const SNAPSHOT_RIGHT_MIN_WIDTH: u16 = 32;
 const SNAPSHOT_RIGHT_MAX_WIDTH: u16 = 42;
+const END_STATS_MIN_WIDTH: u16 = 48;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NormalLayoutAreas {
@@ -73,6 +74,96 @@ pub fn snapshot_layout_areas(
         field,
         command,
         state,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EndLayoutAreas {
+    pub status: Rect,
+    pub field: Rect,
+    pub result: Rect,
+    pub rankings: Rect,
+    pub dice: Rect,
+    pub activity: Rect,
+    pub command: Rect,
+}
+
+pub fn end_layout_areas(
+    area: Rect,
+    field_size: (u16, u16),
+    command_line_count: usize,
+) -> EndLayoutAreas {
+    let (status, body, command) = split_terminal(area, command_line_count);
+    if body.width == 0 || body.height == 0 {
+        let empty = Rect::new(body.x, body.y, 0, 0);
+        return EndLayoutAreas {
+            status,
+            field: empty,
+            result: empty,
+            rankings: empty,
+            dice: empty,
+            activity: empty,
+            command,
+        };
+    }
+
+    let desired_field_width = field_size.0.saturating_add(4);
+    let max_field_width = body.width.saturating_sub(END_STATS_MIN_WIDTH).max(1);
+    let field_col_width = desired_field_width.min(max_field_width).max(1);
+    let stats_width = body.width.saturating_sub(field_col_width);
+    let field_col = Rect::new(body.x, body.y, field_col_width, body.height);
+    let stats_col = Rect::new(
+        body.x.saturating_add(field_col_width),
+        body.y,
+        stats_width,
+        body.height,
+    );
+
+    let field_width = field_col.width.min(field_size.0.saturating_add(2)).max(1);
+    let field_height = field_col.height.min(field_size.1.saturating_add(2)).max(1);
+    let field = Rect::new(
+        field_col
+            .x
+            .saturating_add(field_col.width.saturating_sub(field_width) / 2),
+        field_col
+            .y
+            .saturating_add(field_col.height.saturating_sub(field_height) / 2),
+        field_width,
+        field_height,
+    );
+
+    let result_height = stats_col.height.clamp(1, 5);
+    let activity_height = if stats_col.height >= 22 { 8 } else { 6 }.min(stats_col.height);
+    let remaining = stats_col
+        .height
+        .saturating_sub(result_height)
+        .saturating_sub(activity_height);
+    let rankings_height = (remaining.saturating_mul(55) / 100).max(1).min(remaining);
+    let dice_height = remaining.saturating_sub(rankings_height);
+
+    let result = Rect::new(stats_col.x, stats_col.y, stats_col.width, result_height);
+    let rankings = Rect::new(
+        stats_col.x,
+        result.bottom(),
+        stats_col.width,
+        rankings_height,
+    );
+    let dice = Rect::new(stats_col.x, rankings.bottom(), stats_col.width, dice_height);
+    let activity = Rect::new(
+        stats_col.x,
+        dice.bottom(),
+        stats_col.width,
+        stats_col.bottom().saturating_sub(dice.bottom()),
+    );
+
+    EndLayoutAreas {
+        status,
+        field,
+        result,
+        rankings,
+        dice,
+        activity,
+        command,
     }
 }
 
@@ -224,7 +315,7 @@ fn split_info_column(right: Rect) -> (Rect, Rect, Rect, Rect) {
 mod tests {
     use ratatui::layout::Rect;
 
-    use super::{normal_layout_areas, snapshot_layout_areas};
+    use super::{end_layout_areas, normal_layout_areas, snapshot_layout_areas};
 
     #[test]
     fn normal_layout_uses_available_area_without_overflowing() {
@@ -328,5 +419,30 @@ mod tests {
 
         assert!(layout.field.width > 0);
         assert!(layout.state.width > 0);
+    }
+
+    #[test]
+    fn end_layout_keeps_only_final_screen_panels_without_overflowing() {
+        let area = Rect::new(0, 0, 120, 36);
+        let layout = end_layout_areas(area, (48, 24), 2);
+
+        for pane in [
+            layout.status,
+            layout.field,
+            layout.result,
+            layout.rankings,
+            layout.dice,
+            layout.activity,
+            layout.command,
+        ] {
+            assert!(pane.x >= area.x);
+            assert!(pane.y >= area.y);
+            assert!(pane.right() <= area.right());
+            assert!(pane.bottom() <= area.bottom());
+        }
+
+        assert!(layout.field.width <= 50);
+        assert!(layout.rankings.x >= layout.field.right());
+        assert_eq!(layout.command.bottom(), area.bottom());
     }
 }

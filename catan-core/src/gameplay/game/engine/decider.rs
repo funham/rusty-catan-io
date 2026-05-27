@@ -428,7 +428,7 @@ fn decide_open_trade(
         reject_illegal(events, &decision, "only the active player can offer trades");
         return;
     }
-    if crate::gameplay::game::trade::trade_has_overlapping_resources(&trade)
+    if !crate::gameplay::game::trade::trade_is_structurally_valid(&trade)
         || !active
             .game
             .players
@@ -537,7 +537,7 @@ fn decide_trade_response(
             });
         }
         TradeCommand::Respond(TradeResponseCommand::Counter { offer }) => {
-            if crate::gameplay::game::trade::trade_has_overlapping_resources(&offer)
+            if !crate::gameplay::game::trade::trade_is_structurally_valid(&offer)
                 || !active
                     .game
                     .players
@@ -629,7 +629,7 @@ fn decide_add_prime_trade_offer(
     offer: PlayerTrade,
     events: &mut EventBatch,
 ) {
-    if crate::gameplay::game::trade::trade_has_overlapping_resources(&offer)
+    if !crate::gameplay::game::trade::trade_is_structurally_valid(&offer)
         || !active
             .game
             .players
@@ -745,6 +745,8 @@ fn decide_commit_trade(
         proposer_id: session.proposer,
         peer_id,
         offer_id,
+        offer_proposer_id: offer.proposer,
+        trade: offer.trade,
     });
     reopen_regular(active, session.proposer, events);
 }

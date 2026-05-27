@@ -116,10 +116,48 @@ pub fn trade_has_overlapping_resources(trade: &PlayerTrade) -> bool {
     Resource::iter().any(|resource| trade.give[resource] > 0 && trade.take[resource] > 0)
 }
 
+pub fn trade_has_empty_side(trade: &PlayerTrade) -> bool {
+    trade.give.is_empty() || trade.take.is_empty()
+}
+
+pub fn trade_is_structurally_valid(trade: &PlayerTrade) -> bool {
+    !trade_has_empty_side(trade) && !trade_has_overlapping_resources(trade)
+}
+
 pub fn trade_is_funded(
     proposer_resources: &ResourceSet,
     peer_resources: &ResourceSet,
     trade: &PlayerTrade,
 ) -> bool {
     proposer_resources.has_enough(&trade.give) && peer_resources.has_enough(&trade.take)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::gameplay::primitives::{
+        resource::{Resource, ResourceSet},
+        trade::PlayerTrade,
+    };
+
+    use super::trade_is_structurally_valid;
+
+    #[test]
+    fn player_trade_structure_requires_non_empty_disjoint_sides() {
+        assert!(!trade_is_structurally_valid(&PlayerTrade {
+            give: ResourceSet::EMPTY,
+            take: ResourceSet::from(Resource::Wood),
+        }));
+        assert!(!trade_is_structurally_valid(&PlayerTrade {
+            give: ResourceSet::from(Resource::Brick),
+            take: ResourceSet::EMPTY,
+        }));
+        assert!(!trade_is_structurally_valid(&PlayerTrade {
+            give: ResourceSet::from(Resource::Brick),
+            take: ResourceSet::from(Resource::Brick),
+        }));
+        assert!(trade_is_structurally_valid(&PlayerTrade {
+            give: ResourceSet::from(Resource::Brick),
+            take: ResourceSet::from(Resource::Wood),
+        }));
+    }
 }

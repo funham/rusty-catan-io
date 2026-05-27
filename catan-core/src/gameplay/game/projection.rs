@@ -417,7 +417,8 @@ mod tests {
         game::{
             index::GameIndex,
             projection::{
-                BoardProjection, GameProjection, LegalDecisionOptions, PublicBankResourcesProjection,
+                BoardProjection, GameProjection, LegalDecisionOptions,
+                PublicBankResourcesProjection,
             },
             state::SetupGameState,
             trade::TradeSession,
@@ -477,8 +478,17 @@ mod tests {
 
         assert_eq!(projection.public.trade_sessions.len(), 1);
         assert_eq!(projection.public.trade_sessions[0].id.0, 7);
-        assert_eq!(projection.public.trade_sessions[0].offers[0].trade.give.brick, 1);
-        assert_eq!(projection.public.trade_sessions[0].offers[0].trade.take.ore, 1);
+        assert_eq!(
+            projection.public.trade_sessions[0].offers[0]
+                .trade
+                .give
+                .brick,
+            1
+        );
+        assert_eq!(
+            projection.public.trade_sessions[0].offers[0].trade.take.ore,
+            1
+        );
     }
 
     #[test]
@@ -516,7 +526,12 @@ mod tests {
         let legal = LegalDecisionOptions::from_context(&context, None);
 
         assert!(!legal.initial_placements.is_empty());
-        assert!(legal.bank_trades.iter().any(|trade| trade.give == Resource::Brick));
+        assert!(
+            legal
+                .bank_trades
+                .iter()
+                .any(|trade| trade.give == Resource::Brick)
+        );
         assert!(
             legal
                 .dev_card_usages

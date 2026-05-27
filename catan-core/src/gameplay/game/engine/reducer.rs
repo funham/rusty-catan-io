@@ -164,7 +164,17 @@ fn apply_playing(active: &mut PlayingEngine, event: &GameEvent) -> Result<(), En
             proposer_id,
             peer_id,
             offer_id,
-        } => trade_completed(active, *session_id, *proposer_id, *peer_id, *offer_id)?,
+            offer_proposer_id,
+            trade,
+        } => trade_completed(
+            active,
+            *session_id,
+            *proposer_id,
+            *peer_id,
+            *offer_id,
+            *offer_proposer_id,
+            *trade,
+        )?,
         GameEvent::TradeCancelled { session_id, .. } => trade_cancelled(active, *session_id)?,
         GameEvent::PlayerDiscarded {
             player_id,
@@ -520,6 +530,8 @@ fn trade_completed(
     proposer_id: PlayerId,
     peer_id: PlayerId,
     offer_id: TradeOfferId,
+    offer_proposer_id: PlayerId,
+    trade: PlayerTrade,
 ) -> Result<(), EngineApplyError> {
     let (proposer_resources, peer_resources) = {
         let session = active
@@ -529,10 +541,13 @@ fn trade_completed(
         let offer = session
             .offer(offer_id)
             .ok_or(EngineApplyError::InvalidTradeSession)?;
-        let resources = if offer.proposer == proposer_id {
-            (offer.trade.give, offer.trade.take)
+        if offer.proposer != offer_proposer_id || offer.trade != trade {
+            return Err(EngineApplyError::InvalidTradeSession);
+        }
+        let resources = if offer_proposer_id == proposer_id {
+            (trade.give, trade.take)
         } else {
-            (offer.trade.take, offer.trade.give)
+            (trade.take, trade.give)
         };
         session.open = false;
         resources

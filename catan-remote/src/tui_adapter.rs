@@ -22,7 +22,7 @@ use catan_tui::{
         read_post_dice_action, read_regular_action, read_robbed_player, read_trade_owner_action,
         read_trade_response_action,
     },
-    tui::{CliUi, CliViewMode, ControlInput, FinalGameSummaryView},
+    tui::{CliUi, CliViewMode, ControlInput, FinalGameSummaryView, FinalPlayerSummaryView},
 };
 
 use crate::{
@@ -483,6 +483,11 @@ fn final_summary_view(summary: &catan_runtime::run_stats::GameSummary) -> FinalG
             .map(|result| format!("{result:?}"))
             .unwrap_or_else(|| "unknown".to_owned()),
         turns_started: summary.run.turns_started,
+        player_rankings: summary
+            .final_view
+            .as_ref()
+            .map(final_player_rankings)
+            .unwrap_or_default(),
         dice_counts: catan_core::math::dice::DiceRoll::iter()
             .map(|roll| (roll.get(), summary.dice.count(roll)))
             .collect(),
@@ -497,6 +502,101 @@ fn final_summary_view(summary: &catan_runtime::run_stats::GameSummary) -> FinalG
         road_build_used: summary.dev_cards_used.road_build,
         monopoly_used: summary.dev_cards_used.monopoly,
     }
+}
+
+fn final_player_rankings(view: &GameProjection) -> Vec<FinalPlayerSummaryView> {
+    let mut rows = view
+        .public
+        .players
+        .iter()
+        .map(|player| {
+            let builds = view
+                .public
+                .builds
+                .iter()
+                .find(|builds| builds.player_id == player.player_id);
+            let build_vp = builds
+                .map(|builds| {
+                    builds
+                        .establishments
+                        .iter()
+                        .map(|establishment| match establishment.stage {
+                            catan_core::gameplay::primitives::build::EstablishmentType::Settlement => {
+                                catan_core::constants::vp::SETTLEMENT_VP
+                            }
+                            catan_core::gameplay::primitives::build::EstablishmentType::City => {
+                                catan_core::constants::vp::CITY_VP
+                            }
+                        })
+                        .sum::<u16>()
+                })
+                .unwrap_or(0);
+            let dev_card_vp = view
+                .omniscient
+                .as_ref()
+                .and_then(|omniscient| {
+                    omniscient
+                        .players
+                        .iter()
+                        .find(|private| private.player_id == player.player_id)
+                })
+                .map(|private| private.dev_cards.victory_pts)
+                .or(player.victory_points)
+                .unwrap_or(0);
+            let longest_road_vp =
+                (view.public.longest_road_owner == Some(player.player_id)) as u16
+                    * catan_core::constants::vp::LONGEST_ROAD_VP;
+            let largest_army_vp =
+                (view.public.largest_army_owner == Some(player.player_id)) as u16
+                    * catan_core::constants::vp::LARGEST_ARMY_VP;
+            let resources = view
+                .omniscient
+                .as_ref()
+                .and_then(|omniscient| {
+                    omniscient
+                        .players
+                        .iter()
+                        .find(|private| private.player_id == player.player_id)
+                })
+                .map(|private| private.resources.total())
+                .unwrap_or_else(|| match player.resources {
+                    catan_core::gameplay::game::projection::PublicPlayerResourcesProjection::Exact(resources) => {
+                        resources.total()
+                    }
+                    catan_core::gameplay::game::projection::PublicPlayerResourcesProjection::Total(total) => {
+                        total
+                    }
+                });
+            let roads = builds.map(|builds| builds.roads.len() as u16).unwrap_or(0);
+            let army = player.played_dev_cards.knight;
+
+            FinalPlayerSummaryView {
+                rank: 0,
+                player_id: player.player_id,
+                total_vp: build_vp + dev_card_vp + longest_road_vp + largest_army_vp,
+                build_vp,
+                dev_card_vp,
+                longest_road_vp,
+                largest_army_vp,
+                resources,
+                roads,
+                army,
+                longest_road_len: player.longest_road_length,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    rows.sort_by(|a, b| {
+        b.total_vp
+            .cmp(&a.total_vp)
+            .then_with(|| b.build_vp.cmp(&a.build_vp))
+            .then_with(|| b.longest_road_len.cmp(&a.longest_road_len))
+            .then_with(|| a.player_id.cmp(&b.player_id))
+    });
+    for (idx, row) in rows.iter_mut().enumerate() {
+        row.rank = idx + 1;
+    }
+    rows
 }
 
 fn handle_control_input(
