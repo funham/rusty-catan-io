@@ -53,7 +53,6 @@ impl Default for DiceRollHistogram {
     }
 }
 
-
 impl DiceRollHistogram {
     pub fn record(&mut self, roll: DiceRoll) {
         self.counts[(roll.get() - DiceRoll::MIN_VALUE) as usize] += 1;
