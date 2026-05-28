@@ -55,9 +55,7 @@ fn run_host(args: &[String]) -> Result<(), String> {
         arg_value(args, "--listen").ok_or_else(|| "missing --listen unix://<path>".to_owned())?;
     let socket_path = unix_path(&listen)?;
     let config = config::load_config(&config_path)?;
-    if let Err(err) = catan_runtime::logging::init_host_logger(&config.logging) {
-        return Err(err);
-    }
+    catan_runtime::logging::init_host_logger(&config.logging)?;
     run_unix_host(config, &socket_path)
 }
 

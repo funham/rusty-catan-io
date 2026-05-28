@@ -15,6 +15,8 @@ use catan_core::gameplay::{
 };
 use catan_core::math::dice::DiceRoll;
 use serde::{Deserialize, Serialize};
+use statrs::distribution::{ChiSquared, ContinuousCDF};
+use std::sync::LazyLock;
 
 use crate::sync_host::{ObserverFrame, OutputObserver};
 
@@ -58,6 +60,33 @@ impl DiceRollHistogram {
 
     pub fn count(&self, roll: DiceRoll) -> u64 {
         self.counts[(roll.get() - DiceRoll::MIN_VALUE) as usize]
+    }
+
+    /// Calculates the p-value of the recorded sample using a Chi-Squared Goodness-of-Fit Test.
+    /// Returns `None` if and only if the sample is completely empty.
+    pub fn calculate_p_value(&self) -> Option<f64> {
+        let total_rolls: u64 = self.counts.iter().sum();
+        if total_rolls == 0 {
+            return None;
+        }
+        let n = total_rolls as f64;
+
+        let chi_squared_stat: f64 = self
+            .counts
+            .iter()
+            .zip(&DiceRoll::ALL)
+            .map(|(&observed_count, roll)| {
+                let observed = observed_count as f64;
+                let expected = n * (roll.prob_pts() as f64 / 36.0);
+
+                (observed - expected).powi(2) / expected
+            })
+            .sum();
+
+        static CHI_DIST: LazyLock<ChiSquared> =
+            LazyLock::new(|| ChiSquared::new((DiceRoll::COUNT - 1) as f64).unwrap());
+
+        Some(1.0 - CHI_DIST.cdf(chi_squared_stat))
     }
 }
 
